@@ -18,6 +18,7 @@ extern const char HAComponentScene[];
 extern const char HAComponentFan[];
 extern const char HAComponentLight[];
 extern const char HAComponentClimate[];
+extern const char HAComponentNotify[];
 
 // decorators
 extern const char HASerializerSlash[];

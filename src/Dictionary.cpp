@@ -56,6 +56,10 @@ const char HAbtncID[] PROGMEM = {"%s_btnc"};
 const char HAbtncIcon[] PROGMEM = {"mdi:arrow-left-bold"};
 const char HAbtncName[] PROGMEM = {"Previous app"};
 
+const char HAnotifyID[] PROGMEM = {"%s_notify"};
+const char HAnotifyIcon[] PROGMEM = {"mdi:message-alert"};
+const char HAnotifyName[] PROGMEM = {"Notification"};
+
 const char HAappID[] PROGMEM = {"%s_app"};
 const char HAappIcon[] PROGMEM = {"mdi:apps"};
 const char HAappName[] PROGMEM = {"Current app"};

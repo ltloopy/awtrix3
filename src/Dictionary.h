@@ -52,6 +52,10 @@ extern const char HAbtncID[];
 extern const char HAbtncIcon[];
 extern const char HAbtncName[];
 
+extern const char HAnotifyID[];
+extern const char HAnotifyIcon[];
+extern const char HAnotifyName[];
+
 extern const char HAappID[];
 extern const char HAappIcon[];
 extern const char HAappName[];
