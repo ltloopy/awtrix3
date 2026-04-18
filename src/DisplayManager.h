@@ -82,6 +82,7 @@ public:
     CRGB getPixelColor(int16_t x, int16_t y);
     CRGB *getLeds();
     void forceNextApp();
+    void refreshCurrentApp();
     String getEffectNames();
     String getTransitionNames();
     void drawRect(int16_t x, int16_t y, int16_t w, int16_t h, uint32_t color);

@@ -1381,6 +1381,11 @@ void DisplayManager_::forceNextApp()
   MQTTManager.setCurrentApp(getAppNameAtIndex(ui->getUiState()->currentApp));
 }
 
+void DisplayManager_::refreshCurrentApp()
+{
+  MQTTManager.setCurrentApp(getAppNameAtIndex(ui->getUiState()->currentApp));
+}
+
 void DisplayManager_::previousApp()
 {
   if (!MenuManager.inMenu)
@@ -1405,7 +1410,8 @@ void DisplayManager_::selectButtonLong()
 
 void DisplayManager_::dismissNotify()
 {
-  bool wakeup;
+  bool wakeup = false;
+  bool removed = false;
   if (!notifications.empty())
   {
     if (notifications.size() >= 2)
@@ -1416,6 +1422,7 @@ void DisplayManager_::dismissNotify()
     notifications[0].icon.close();
     notifications.erase(notifications.begin());
     PeripheryManager.stopSound();
+    removed = true;
   }
   if (notifications.empty())
   {
@@ -1423,6 +1430,8 @@ void DisplayManager_::dismissNotify()
     {
       DisplayManager.setBrightness(0);
     }
+    if (removed)
+      refreshCurrentApp();
   }
 }
 
@@ -1491,6 +1500,10 @@ void DisplayManager_::dismissNotify(uint8_t source, const char *json)
   if (notifications.empty() && wakeup && MATRIX_OFF)
   {
     DisplayManager.setBrightness(0);
+  }
+  if (removedFront && notifications.empty())
+  {
+    refreshCurrentApp();
   }
 }
 
