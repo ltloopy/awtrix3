@@ -21,6 +21,7 @@
 #include "device-types/HASwitch.h"
 //#include "device-types/HATagScanner.h"
 #include "device-types/HANotify.h"
+#include "device-types/HAText.h"
 #include "utils/HAUtils.h"
 #include "utils/HANumeric.h"
 

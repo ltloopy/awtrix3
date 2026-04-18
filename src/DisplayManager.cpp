@@ -16,6 +16,7 @@
 #include "Overlays.h"
 #include "Dictionary.h"
 #include <set>
+#include <algorithm>
 #include "GifPlayer.h"
 #include <ArtnetWifi.h>
 #include <AwtrixFont.h>
@@ -1006,6 +1007,11 @@ bool DisplayManager_::generateNotification(uint8_t source, const char *json)
   CURRENT_APP = "Notification";
   MQTTManager.setCurrentApp(CURRENT_APP);
 
+  String chan = doc.containsKey("channel") ? doc["channel"].as<String>() : String("");
+  chan.trim();
+  chan.toLowerCase();
+  newNotification.channel = chan.isEmpty() ? DEFAULT_CHANNEL : chan;
+
   bool stack = doc.containsKey("stack") ? doc["stack"] : true;
 
   if (stack)
@@ -1417,6 +1423,74 @@ void DisplayManager_::dismissNotify()
     {
       DisplayManager.setBrightness(0);
     }
+  }
+}
+
+void DisplayManager_::dismissNotify(uint8_t source, const char *json)
+{
+  String targetChannel = DEFAULT_CHANNEL;
+
+  if (json && json[0] != '\0')
+  {
+    DynamicJsonDocument doc(1024);
+    if (deserializeJson(doc, json) == DeserializationError::Ok)
+    {
+      if (doc.containsKey("channel"))
+      {
+        String c = doc["channel"].as<String>();
+        c.trim();
+        c.toLowerCase();
+        if (!c.isEmpty()) targetChannel = c;
+      }
+
+      if (doc.containsKey("clients"))
+      {
+        JsonArray clients = doc["clients"];
+        doc.remove("clients");
+        String forwardJson;
+        serializeJson(doc, forwardJson);
+        for (JsonVariant c : clients)
+        {
+          String client = c.as<String>();
+          if (source == 0)
+          {
+            MQTTManager.rawPublish(client.c_str(), "notify/dismiss", forwardJson.c_str());
+          }
+          else
+          {
+            HTTPClient http;
+            http.begin("http://" + client + "/api/notify/dismiss");
+            http.POST(forwardJson);
+            http.end();
+          }
+        }
+      }
+    }
+  }
+
+  bool removedFront = false;
+  bool wakeup = false;
+  if (!notifications.empty() && notifications.front().channel == targetChannel)
+  {
+    wakeup = notifications.front().wakeup;
+    notifications.front().icon.close();
+    PeripheryManager.stopSound();
+    notifications.erase(notifications.begin());
+    removedFront = true;
+  }
+
+  notifications.erase(
+      std::remove_if(notifications.begin(), notifications.end(),
+                     [&](const Notification &n) { return n.channel == targetChannel; }),
+      notifications.end());
+
+  if (removedFront && !notifications.empty())
+  {
+    notifications.front().startime = millis();
+  }
+  if (notifications.empty() && wakeup && MATRIX_OFF)
+  {
+    DisplayManager.setBrightness(0);
   }
 }
 

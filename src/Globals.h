@@ -41,6 +41,7 @@ extern uint16_t MQTT_PORT;
 extern String MQTT_USER;
 extern String MQTT_PASS;
 extern String MQTT_PREFIX;
+extern String DEFAULT_CHANNEL;
 extern bool IO_BROKER;
 extern bool NET_STATIC;
 extern bool SHOW_TIME;

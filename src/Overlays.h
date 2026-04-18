@@ -49,6 +49,7 @@ struct Notification
     String sound;
     bool loopSound;
     String rtttl;
+    String channel;
     OverlayEffect overlay;
     int gradient[2] = {0};
     uint8_t jpegDataBuffer[1000];

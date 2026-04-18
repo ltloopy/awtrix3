@@ -26,6 +26,7 @@ public:
     void applyAllSettings();
     void rightButton();
     void dismissNotify();
+    void dismissNotify(uint8_t source, const char *json);
     void HSVtext(int16_t, int16_t, const char *, bool, byte textCase);
     void loadCustomApps();
     void loadNativeApps();

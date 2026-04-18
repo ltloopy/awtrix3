@@ -208,6 +208,7 @@ Below are the properties you can utilize in the JSON object. **All keys are opti
 | `effectSettings` | json map | Changes color and speed of the [effect](https://blueforcer.github.io/awtrix3/#/effects). |  | X | X |
 | `save` | boolean | Saves your custom app into flash and reloads it after boot. Avoid this for custom apps with high update frequencies because the ESP's flash memory has limited write cycles. |  | X |  |
 | `overlay`| string  | Sets an effect overlay (cannot be used with global overlays). |  | X | X |
+| `channel` | string | Tag used to group and selectively dismiss notifications. Trimmed and lowercased on receipt; matching is case-insensitive. If empty or omitted, the notification falls into the configured `Default Channel` setting (factory default `"default"`). | `Default Channel` |  | X |
 
 **Color**: Accepts a hex string or an R,G,B array: `"#FFFFFF"` or `[255,255,0]`.
 
@@ -325,11 +326,37 @@ To remove a custom app, dispatch an empty payload/body to the associated topic o
 
 ### Dismiss Notification
 
-Easily dismiss a notification that was configured with `"hold": true`.
+Dismiss queued notifications. Pass an optional `channel` to target a specific channel; otherwise the configured `Default Channel` is used.
 
-| MQTT Topic                   | HTTP URL                           | Payload/Body       | HTTP Method |
-| ---------------------------- | ---------------------------------- | ------------------ | ----------- |
-| `[PREFIX]/notify/dismiss`    | `http://[IP]/api/notify/dismiss`   | Empty payload/body | POST        |
+| MQTT Topic                   | HTTP URL                           | Payload/Body                          | HTTP Method |
+| ---------------------------- | ---------------------------------- | ------------------------------------- | ----------- |
+| `[PREFIX]/notify/dismiss`    | `http://[IP]/api/notify/dismiss`   | Empty body, or JSON with `channel`    | POST        |
+
+> ⚠️ **Breaking change** — `notify/dismiss` used to dismiss only the currently-displayed notification when called with no body. It now dismisses **all** notifications whose channel equals the configured `Default Channel` (factory default `"default"`). Provide a `channel` in the body to target a specific channel. The physical device buttons and the Home Assistant `Dismiss notification` button still dismiss only the current notification.
+
+**Examples**
+
+1. Empty body — clear all notifications on the default channel:
+
+   ```
+   POST /api/notify/dismiss
+   ```
+
+2. Clear a specific channel (case-insensitive):
+
+   ```
+   POST /api/notify/dismiss
+   {"channel":"alarms"}
+   ```
+
+3. Clear a channel across multiple devices via the `clients` fan-out:
+
+   ```
+   POST /api/notify/dismiss
+   {"channel":"alarms","clients":["awtrix-kitchen","awtrix-bedroom"]}
+   ```
+
+A `Dismiss Channel` text input is also exposed to Home Assistant when discovery is enabled — typing a channel name and submitting clears that channel; submitting empty clears the default channel.
 
 ### Switch Apps
 

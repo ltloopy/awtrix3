@@ -60,6 +60,10 @@ const char HAnotifyID[] PROGMEM = {"%s_notify"};
 const char HAnotifyIcon[] PROGMEM = {"mdi:message-alert"};
 const char HAnotifyName[] PROGMEM = {"Notification"};
 
+const char HAdismissTextID[] PROGMEM = {"%s_dismiss_channel"};
+const char HAdismissTextIcon[] PROGMEM = {"mdi:bell-cancel"};
+const char HAdismissTextName[] PROGMEM = {"Dismiss Channel"};
+
 const char HAappID[] PROGMEM = {"%s_app"};
 const char HAappIcon[] PROGMEM = {"mdi:apps"};
 const char HAappName[] PROGMEM = {"Current app"};

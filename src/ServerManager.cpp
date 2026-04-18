@@ -134,7 +134,7 @@ void addHandler()
     mws.addHandler("/api/previousapp", HTTP_POST, []()
                    { DisplayManager.previousApp(); mws.webserver->send(200,F("text/plain"),F("OK")); });
     mws.addHandler("/api/notify/dismiss", HTTP_ANY, []()
-                   { DisplayManager.dismissNotify(); mws.webserver->send(200,F("text/plain"),F("OK")); });
+                   { DisplayManager.dismissNotify(1, mws.webserver->arg("plain").c_str()); mws.webserver->send(200,F("text/plain"),F("OK")); });
     mws.addHandler("/api/apps", HTTP_POST, []()
                    { DisplayManager.updateAppVector(mws.webserver->arg("plain").c_str()); mws.webserver->send(200,F("text/plain"),F("OK")); });
     mws.addHandler(
@@ -235,6 +235,7 @@ void ServerManager_::setup()
         mws.addOption("Username", MQTT_USER);
         mws.addOption("Password", MQTT_PASS);
         mws.addOption("Prefix", MQTT_PREFIX);
+        mws.addOption("Default Channel", DEFAULT_CHANNEL);
         mws.addOption("Homeassistant Discovery", HA_DISCOVERY);
         mws.addOptionBox("Time");
         mws.addOption("NTP Server", NTP_SERVER);
@@ -366,6 +367,10 @@ void ServerManager_::loadSettings()
         MQTT_PASS = doc["Password"].as<String>();
         MQTT_PREFIX = doc["Prefix"].as<String>();
         MQTT_PREFIX.trim();
+        DEFAULT_CHANNEL = doc["Default Channel"].as<String>();
+        DEFAULT_CHANNEL.trim();
+        DEFAULT_CHANNEL.toLowerCase();
+        if (DEFAULT_CHANNEL.isEmpty()) DEFAULT_CHANNEL = "default";
         NET_STATIC = doc["Static IP"];
         HA_DISCOVERY = doc["Homeassistant Discovery"];
         NET_IP = doc["Local IP"].as<String>();

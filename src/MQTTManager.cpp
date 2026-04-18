@@ -14,20 +14,21 @@ const uint16_t PORT = 1883;
 
 WiFiClient espClient;
 HADevice device;
-HAMqtt mqtt(espClient, device, 27);
+HAMqtt mqtt(espClient, device, 28);
 
 HALight *Matrix, *Indikator1, *Indikator2, *Indikator3 = nullptr;
 HASelect *BriMode, *transEffect = nullptr;
 HAButton *dismiss, *nextApp, *prevApp, *doUpdate = nullptr;
 HASwitch *transition = nullptr;
 HANotify *haNotify = nullptr;
+HAText *haDismissText = nullptr;
 #ifndef awtrix2_upgrade
 HASensor *battery = nullptr;
 #endif
 HASensor *temperature, *humidity, *illuminance, *uptime, *strength, *version, *ram, *curApp, *myOwnID, *ipAddr = nullptr;
 HABinarySensor *btnleft, *btnmid, *btnright = nullptr;
 bool connected;
-char matID[40], ind1ID[40], ind2ID[40], ind3ID[40], briID[40], btnAID[40], btnBID[40], btnCID[40], appID[40], tempID[40], humID[40], luxID[40], verID[40], ramID[40], upID[40], sigID[40], btnLID[40], btnMID[40], btnRID[40], transID[40], doUpdateID[40], batID[40], myID[40], sSpeed[40], effectID[40], ipAddrID[40], notifyID[40];
+char matID[40], ind1ID[40], ind2ID[40], ind3ID[40], briID[40], btnAID[40], btnBID[40], btnCID[40], appID[40], tempID[40], humID[40], luxID[40], verID[40], ramID[40], upID[40], sigID[40], btnLID[40], btnMID[40], btnRID[40], transID[40], doUpdateID[40], batID[40], myID[40], sSpeed[40], effectID[40], ipAddrID[40], notifyID[40], dismissTextID[40];
 long previousMillis_Stats;
 std::map<String, String> mqttValues;
 std::vector<String> topicsToSubscribe;
@@ -62,7 +63,7 @@ void processMqttMessage(const String &strTopic, const String &payloadCopy)
 
     if (strTopic.equals(MQTT_PREFIX + "/notify/dismiss"))
     {
-        DisplayManager.dismissNotify();
+        DisplayManager.dismissNotify(0, payloadCopy.c_str());
         return;
     }
 
@@ -269,6 +270,23 @@ void onNotifyMessage(const char* message, uint16_t length, HANotify* sender)
         jsonPayload += "\"}";
         DisplayManager.generateNotification(0, jsonPayload.c_str());
     }
+}
+
+void onDismissTextMessage(const char *message, uint16_t length, HAText *sender)
+{
+    String json = "{\"channel\":\"";
+    for (uint16_t i = 0; i < length; i++)
+    {
+        if (message[i] == '"')
+            json += "\\\"";
+        else if (message[i] == '\\')
+            json += "\\\\";
+        else
+            json += message[i];
+    }
+    json += "\"}";
+    DisplayManager.dismissNotify(0, json.c_str());
+    sender->setState("", true);
 }
 
 void onSwitchCommand(bool state, HASwitch *sender)
@@ -761,6 +779,12 @@ void MQTTManager_::setup()
         haNotify->setIcon(HAnotifyIcon);
         haNotify->setName(HAnotifyName);
         haNotify->onMessage(onNotifyMessage);
+
+        sprintf(dismissTextID, HAdismissTextID, macStr);
+        haDismissText = new HAText(dismissTextID);
+        haDismissText->setIcon(HAdismissTextIcon);
+        haDismissText->setName(HAdismissTextName);
+        haDismissText->onMessage(onDismissTextMessage);
     }
     else
     {
