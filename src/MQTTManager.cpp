@@ -274,17 +274,31 @@ void onNotifyMessage(const char* message, uint16_t length, HANotify* sender)
 
 void onDismissTextMessage(const char *message, uint16_t length, HAText *sender)
 {
-    String json = "{\"channel\":\"";
-    for (uint16_t i = 0; i < length; i++)
+    String input;
+    input.reserve(length);
+    for (uint16_t i = 0; i < length; i++) input += message[i];
+    input.trim();
+
+    String json;
+    if (input == "*" || input.equalsIgnoreCase("all"))
     {
-        if (message[i] == '"')
-            json += "\\\"";
-        else if (message[i] == '\\')
-            json += "\\\\";
-        else
-            json += message[i];
+        json = "{\"all\":true}";
     }
-    json += "\"}";
+    else
+    {
+        json = "{\"channel\":\"";
+        for (uint16_t i = 0; i < input.length(); i++)
+        {
+            char ch = input[i];
+            if (ch == '"')
+                json += "\\\"";
+            else if (ch == '\\')
+                json += "\\\\";
+            else
+                json += ch;
+        }
+        json += "\"}";
+    }
     DisplayManager.dismissNotify(0, json.c_str());
     sender->setState("", true);
 }

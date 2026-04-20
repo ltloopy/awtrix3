@@ -1438,18 +1438,31 @@ void DisplayManager_::dismissNotify()
 void DisplayManager_::dismissNotify(uint8_t source, const char *json)
 {
   String targetChannel = DEFAULT_CHANNEL;
+  bool dismissAll = false;
 
   if (json && json[0] != '\0')
   {
     DynamicJsonDocument doc(1024);
     if (deserializeJson(doc, json) == DeserializationError::Ok)
     {
+      if (doc.containsKey("all") && doc["all"].as<bool>())
+      {
+        dismissAll = true;
+      }
+
       if (doc.containsKey("channel"))
       {
         String c = doc["channel"].as<String>();
         c.trim();
-        c.toLowerCase();
-        if (!c.isEmpty()) targetChannel = c;
+        if (c == "*")
+        {
+          dismissAll = true;
+        }
+        else
+        {
+          c.toLowerCase();
+          if (!c.isEmpty()) targetChannel = c;
+        }
       }
 
       if (doc.containsKey("clients"))
@@ -1479,7 +1492,7 @@ void DisplayManager_::dismissNotify(uint8_t source, const char *json)
 
   bool removedFront = false;
   bool wakeup = false;
-  if (!notifications.empty() && notifications.front().channel == targetChannel)
+  if (!notifications.empty() && (dismissAll || notifications.front().channel == targetChannel))
   {
     wakeup = notifications.front().wakeup;
     notifications.front().icon.close();
@@ -1488,10 +1501,17 @@ void DisplayManager_::dismissNotify(uint8_t source, const char *json)
     removedFront = true;
   }
 
-  notifications.erase(
-      std::remove_if(notifications.begin(), notifications.end(),
-                     [&](const Notification &n) { return n.channel == targetChannel; }),
-      notifications.end());
+  if (dismissAll)
+  {
+    notifications.clear();
+  }
+  else
+  {
+    notifications.erase(
+        std::remove_if(notifications.begin(), notifications.end(),
+                       [&](const Notification &n) { return n.channel == targetChannel; }),
+        notifications.end());
+  }
 
   if (removedFront && !notifications.empty())
   {

@@ -326,13 +326,13 @@ To remove a custom app, dispatch an empty payload/body to the associated topic o
 
 ### Dismiss Notification
 
-Dismiss queued notifications. Pass an optional `channel` to target a specific channel; otherwise the configured `Default Channel` is used.
+Dismiss queued notifications. Pass an optional `channel` to target a specific channel; otherwise the configured `Default Channel` is used. Pass `{"all":true}` (or `{"channel":"*"}`) to clear every queued notification across all channels.
 
-| MQTT Topic                   | HTTP URL                           | Payload/Body                          | HTTP Method |
-| ---------------------------- | ---------------------------------- | ------------------------------------- | ----------- |
-| `[PREFIX]/notify/dismiss`    | `http://[IP]/api/notify/dismiss`   | Empty body, or JSON with `channel`    | POST        |
+| MQTT Topic                   | HTTP URL                           | Payload/Body                                  | HTTP Method |
+| ---------------------------- | ---------------------------------- | --------------------------------------------- | ----------- |
+| `[PREFIX]/notify/dismiss`    | `http://[IP]/api/notify/dismiss`   | Empty body, or JSON with `channel` / `all`    | POST        |
 
-> ⚠️ **Breaking change** — `notify/dismiss` used to dismiss only the currently-displayed notification when called with no body. It now dismisses **all** notifications whose channel equals the configured `Default Channel` (factory default `"default"`). Provide a `channel` in the body to target a specific channel. The physical device buttons and the Home Assistant `Dismiss notification` button still dismiss only the current notification.
+> ⚠️ **Breaking change** — `notify/dismiss` used to dismiss only the currently-displayed notification when called with no body. It now dismisses **all** notifications whose channel equals the configured `Default Channel` (factory default `"default"`). Provide a `channel` in the body to target a specific channel, or `{"all":true}` to clear everything. The physical device buttons and the Home Assistant `Dismiss notification` button still dismiss only the current notification.
 
 **Examples**
 
@@ -356,7 +356,16 @@ Dismiss queued notifications. Pass an optional `channel` to target a specific ch
    {"channel":"alarms","clients":["awtrix-kitchen","awtrix-bedroom"]}
    ```
 
-A `Dismiss Channel` text input is also exposed to Home Assistant when discovery is enabled — typing a channel name and submitting clears that channel; submitting empty clears the default channel.
+4. Clear **every** queued notification on this device:
+
+   ```
+   POST /api/notify/dismiss
+   {"all":true}
+   ```
+
+   The `clients` fan-out works here too: `{"all":true,"clients":["awtrix-kitchen","awtrix-bedroom"]}`.
+
+A `Dismiss Channel` text input is also exposed to Home Assistant when discovery is enabled — typing a channel name and submitting clears that channel; submitting empty clears the default channel; submitting `*` (or `all`) clears every queued notification.
 
 ### Switch Apps
 
