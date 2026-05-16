@@ -6,6 +6,7 @@
 #include "Overlays.h"
 #include <Preferences.h>
 #include <LittleFS.h>
+#include <ArduinoJson.h>
 
 static Preferences timerPrefs;
 
@@ -291,6 +292,52 @@ void TimerManager_::tick()
             publishState();
             publishRemaining();
         }
+    }
+}
+
+void TimerManager_::parseCommand(const char *json)
+{
+    if (json == nullptr || json[0] == '\0') return;
+
+    DynamicJsonDocument doc(256);
+    if (deserializeJson(doc, json) != DeserializationError::Ok) return;
+
+    if (doc.containsKey("duration"))
+    {
+        setDuration(doc["duration"].as<uint32_t>());
+    }
+    if (doc.containsKey("buzzer"))
+    {
+        String b = doc["buzzer"].as<String>();
+        b.toLowerCase();
+        if      (b == "off")       setBuzzerMode(BuzzerMode::Off);
+        else if (b == "end")       setBuzzerMode(BuzzerMode::End);
+        else if (b == "countdown") setBuzzerMode(BuzzerMode::Countdown);
+    }
+    if (doc.containsKey("finished"))
+    {
+        String f = doc["finished"].as<String>();
+        f.toLowerCase();
+        if      (f == "auto-clear" || f == "autoclear") setFinishedMode(FinishedMode::AutoClear);
+        else if (f == "hold")                            setFinishedMode(FinishedMode::Hold);
+        else if (f == "re-alert"   || f == "realert")    setFinishedMode(FinishedMode::ReAlert);
+    }
+    if (doc.containsKey("action"))
+    {
+        String a = doc["action"].as<String>();
+        a.toLowerCase();
+        if (a == "start")
+        {
+            bool fromIdle = (state == TimerState::Idle);
+            start();
+            if (fromIdle && !GAME_ACTIVE && !BLOCK_NAVIGATION)
+            {
+                String j = "{\"name\":\"Timer\"}";
+                DisplayManager.switchToApp(j.c_str());
+            }
+        }
+        else if (a == "pause") pause();
+        else if (a == "reset") reset();
     }
 }
 

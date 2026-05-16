@@ -14,6 +14,7 @@
 #include <WiFiUdp.h>
 #include <HTTPClient.h>
 #include "Games/GameManager.h"
+#include "TimerManager.h"
 #include <EEPROM.h>
 
 WiFiUDP udp;
@@ -115,6 +116,11 @@ void addHandler()
                        }else{
                         mws.webserver->send(500, F("text/plain"), F("ErrorParsingJson"));
                        } });
+    mws.addHandler("/api/timer", HTTP_POST, []()
+                   {
+                       TimerManager.parseCommand(mws.webserver->arg("plain").c_str());
+                       mws.webserver->send(200, F("text/plain"), F("OK"));
+                   });
     mws.addHandler("/api/nextapp", HTTP_ANY, []()
                    { DisplayManager.nextApp(); mws.webserver->send(200,F("text/plain"),F("OK")); });
     mws.addHandler("/fullscreen", HTTP_GET, []()

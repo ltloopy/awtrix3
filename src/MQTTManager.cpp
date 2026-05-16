@@ -95,6 +95,12 @@ void processMqttMessage(const String &strTopic, const String &payloadCopy)
         return;
     }
 
+    if (strTopic.equals(MQTT_PREFIX + "/timer"))
+    {
+        TimerManager.parseCommand(payloadCopy.c_str());
+        return;
+    }
+
     if (strTopic.equals(MQTT_PREFIX + "/sendscreen"))
     {
         MQTTManager.getInstance().publish("screen", DisplayManager.ledsAsJson().c_str());
@@ -514,7 +520,8 @@ void onMqttConnected()
         "/sound",
         "/rtttl",
         "/sendscreen",
-        "/r2d2"};
+        "/r2d2",
+        "/timer"};
     for (const char *topic : topics)
     {
         if (DEBUG_MODE)

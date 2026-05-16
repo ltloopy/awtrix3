@@ -20,6 +20,7 @@
     + [Dismiss Notification](#dismiss-notification)
     + [Switch Apps](#switch-apps)
     + [Switch to Specific App](#switch-to-specific-app)
+  * [Timer Control](#timer-control)
   * [Change Settings](#change-settings)
     + [JSON Properties](#json-properties-1)
   * [Update](#update)
@@ -390,8 +391,52 @@ Directly transition to a desired app using its name.
 - `Temperature`
 - `Humidity`
 - `Battery`
+- `Timer`
 
 For custom apps, employ the name you designated in the topic or HTTP parameter. In MQTT, if `[PREFIX]/custom/test` is your topic, then `test` would be the app's name.
+
+
+## Timer Control
+
+Control the built-in Timer app. See the [Timer app overview](https://blueforcer.github.io/awtrix3/#/apps?id=timer) for behaviour details.
+
+| MQTT Topic       | HTTP URL                  | Payload/Body | HTTP Method |
+| ---------------- | ------------------------- | ------------ | ----------- |
+| `[PREFIX]/timer` | `http://[IP]/api/timer`   | JSON (see below) | POST    |
+
+All JSON properties are optional. When multiple are sent together, property setters apply first and then `action` runs — so `{"duration":600,"action":"start"}` starts a fresh 10-minute timer in one request.
+
+#### JSON Properties
+
+| Key | Type | Values | Description |
+| --- | --- | --- | --- |
+| `action` | string | `start` / `pause` / `reset` | Performs the action. `start` from `idle` also force-switches the display to the Timer app (gated on no active game). `start` is a no-op while already running. `start` from `finished` restarts the countdown. |
+| `duration` | integer | 1 .. `timer_max_duration` | Sets the configured duration in seconds. Persists across reboots. Mid-run writes buffer until next `start`/`reset` (the current countdown is not interrupted). |
+| `buzzer` | string | `off` / `end` / `countdown` | Sets buzzer mode. Persists. |
+| `finished` | string | `auto-clear` / `hold` / `re-alert` | Sets what happens at `00:00`. Persists. |
+
+String values are case-insensitive; `auto-clear`/`autoclear` and `re-alert`/`realert` are both accepted.
+
+#### Examples
+
+Start a 5-minute timer immediately:
+```json
+{"duration": 300, "action": "start"}
+```
+
+Change buzzer mode mid-run (takes effect immediately for the countdown ticks):
+```json
+{"buzzer": "countdown"}
+```
+
+Reset to idle (also dismisses the end notification if visible):
+```json
+{"action": "reset"}
+```
+
+#### State observation
+
+There is currently no native read endpoint for the timer's `state`/`remaining` values. When `HA_DISCOVERY` is enabled, Home Assistant receives live updates of all timer properties via MQTT discovery sensors — that is the supported path for observing the timer remotely.
 
 
 ## Change Settings

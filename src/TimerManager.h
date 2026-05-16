@@ -50,6 +50,8 @@ public:
     void setBuzzerMode(BuzzerMode m);
     void setFinishedMode(FinishedMode m);
 
+    void parseCommand(const char *json);
+
     TimerState   getState()        const { return state; }
     uint32_t     getRemaining()    const { return remainingSec; }
     uint32_t     getDuration()     const { return durationSec; }
