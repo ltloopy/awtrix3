@@ -149,6 +149,44 @@ const char HAipAddrRID[] PROGMEM = {"%s_ip_address"};
 const char HAipAddrName[] PROGMEM = {"IP Address"};
 const char HAipAddrIcon[] PROGMEM = {"mdi:wifi"};
 
+const char HAtimerDurID[] PROGMEM = {"%s_timer_dur"};
+const char HAtimerDurIcon[] PROGMEM = {"mdi:timer-cog-outline"};
+const char HAtimerDurName[] PROGMEM = {"Timer duration"};
+const char HAtimerDurUnit[] PROGMEM = {"s"};
+const char HAtimerDurClass[] PROGMEM = {"duration"};
+
+const char HAtimerRemID[] PROGMEM = {"%s_timer_rem"};
+const char HAtimerRemIcon[] PROGMEM = {"mdi:timer-sand"};
+const char HAtimerRemName[] PROGMEM = {"Timer remaining"};
+const char HAtimerRemUnit[] PROGMEM = {"s"};
+const char HAtimerRemClass[] PROGMEM = {"duration"};
+
+const char HAtimerStateID[] PROGMEM = {"%s_timer_state"};
+const char HAtimerStateIcon[] PROGMEM = {"mdi:state-machine"};
+const char HAtimerStateName[] PROGMEM = {"Timer state"};
+
+const char HAtimerBuzID[] PROGMEM = {"%s_timer_buz"};
+const char HAtimerBuzIcon[] PROGMEM = {"mdi:volume-high"};
+const char HAtimerBuzName[] PROGMEM = {"Timer buzzer"};
+const char HAtimerBuzOptions[] PROGMEM = {"Off;End;Countdown"};
+
+const char HAtimerFinID[] PROGMEM = {"%s_timer_fin"};
+const char HAtimerFinIcon[] PROGMEM = {"mdi:bell-ring-outline"};
+const char HAtimerFinName[] PROGMEM = {"Timer finished mode"};
+const char HAtimerFinOptions[] PROGMEM = {"Auto-clear;Hold;Re-alert"};
+
+const char HAtimerStartID[] PROGMEM = {"%s_timer_start"};
+const char HAtimerStartIcon[] PROGMEM = {"mdi:play"};
+const char HAtimerStartName[] PROGMEM = {"Timer start"};
+
+const char HAtimerPauseID[] PROGMEM = {"%s_timer_pause"};
+const char HAtimerPauseIcon[] PROGMEM = {"mdi:pause"};
+const char HAtimerPauseName[] PROGMEM = {"Timer pause"};
+
+const char HAtimerResetID[] PROGMEM = {"%s_timer_reset"};
+const char HAtimerResetIcon[] PROGMEM = {"mdi:restore"};
+const char HAtimerResetName[] PROGMEM = {"Timer reset"};
+
 
 
 #ifndef awtrix2_upgrade

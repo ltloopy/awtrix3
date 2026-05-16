@@ -11,6 +11,9 @@
 #include "MQTTManager.h"
 #include "Overlays.h"
 #include "timer.h"
+#include "TimerManager.h"
+#include "Globals.h"
+#include "DisplayManager.h"
 
 const uint8_t bigdigits_mask[12][7] = {
     {132, 48, 48, 48, 48, 48, 132},      // 0
@@ -412,6 +415,84 @@ void BatApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x, i
     DisplayManager.matrixPrint("%");
 }
 #endif
+
+static void drawTimerIcon(FastLED_NeoMatrix *matrix, int16_t x, int16_t y, uint32_t color)
+{
+    static bool checkedFile = false;
+    static bool hasFileIcon = false;
+    if (!checkedFile)
+    {
+        hasFileIcon = LittleFS.exists("/ICONS/timer.jpg");
+        checkedFile = true;
+    }
+    if (hasFileIcon)
+    {
+        File f = LittleFS.open("/ICONS/timer.jpg", "r");
+        if (f)
+        {
+            DisplayManager.drawJPG(x, y, f);
+            f.close();
+            return;
+        }
+    }
+    matrix->drawFastHLine(x + 0, y + 0, 8, color);
+    matrix->drawFastHLine(x + 1, y + 1, 6, color);
+    matrix->drawFastHLine(x + 2, y + 2, 4, color);
+    matrix->drawFastHLine(x + 3, y + 3, 2, color);
+    matrix->drawFastHLine(x + 3, y + 4, 2, color);
+    matrix->drawFastHLine(x + 2, y + 5, 4, color);
+    matrix->drawFastHLine(x + 1, y + 6, 6, color);
+    matrix->drawFastHLine(x + 0, y + 7, 8, color);
+}
+
+void TimerApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x, int16_t y, GifPlayer *gifPlayer)
+{
+    if (notifyFlag)
+        return;
+
+    if (TimerManager.isHidden())
+    {
+        DisplayManager.nextApp();
+        return;
+    }
+
+    CURRENT_APP = "Timer";
+    currentCustomApp = "";
+
+    DisplayManager.getInstance().resetTextColor();
+
+    drawTimerIcon(matrix, x, y, TEXTCOLOR_888);
+
+    uint32_t remaining = TimerManager.getRemaining();
+    uint32_t duration  = TimerManager.getDuration();
+
+    char buf[10];
+    if (remaining < 3600)
+    {
+        snprintf(buf, sizeof(buf), "%u:%02u", (unsigned)(remaining / 60), (unsigned)(remaining % 60));
+    }
+    else if (remaining < 36000)
+    {
+        snprintf(buf, sizeof(buf), "%u:%02u", (unsigned)(remaining / 3600), (unsigned)((remaining % 3600) / 60));
+    }
+    else
+    {
+        snprintf(buf, sizeof(buf), "%02u:%02u", (unsigned)(remaining / 3600), (unsigned)((remaining % 3600) / 60));
+    }
+
+    DisplayManager.setTextColor(TEXTCOLOR_888);
+    DisplayManager.printText(11 + x, 6 + y, buf, false, 0);
+
+    if (duration > 0)
+    {
+        int barLen = (int)((23UL * remaining) / duration);
+        if (barLen > 0)
+        {
+            if (barLen > 23) barLen = 23;
+            matrix->drawFastHLine(9 + x, 7 + y, barLen, TEXTCOLOR_888);
+        }
+    }
+}
 
 String replacePlaceholders(String text)
 {

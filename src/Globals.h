@@ -151,4 +151,12 @@ extern OverlayEffect GLOBAL_OVERLAY;
 extern String HOSTNAME;
 extern int WEB_PORT;
 extern bool BUZ_VOL;
+extern bool SHOW_TIMER;
+extern bool TIMER_HIDE_WHEN_IDLE;
+extern uint32_t TIMER_MAX_DURATION;
+extern uint32_t TIMER_STEP;
+extern uint16_t TIMER_PUBLISH_INTERVAL;
+extern uint16_t TIMER_FINISHED_HOLD;
+extern uint16_t TIMER_REALERT_INTERVAL;
+extern uint16_t TIMER_COUNTDOWN_SECONDS;
 #endif // Globals_H

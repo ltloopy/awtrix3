@@ -206,6 +206,49 @@ void loadDevSettings()
             BUTTON_CALLBACK = doc["button_callback"].as<String>();
         }
 
+        if (doc.containsKey("show_timer"))
+        {
+            SHOW_TIMER = doc["show_timer"].as<bool>();
+        }
+
+        if (doc.containsKey("timer_hide_when_idle"))
+        {
+            TIMER_HIDE_WHEN_IDLE = doc["timer_hide_when_idle"].as<bool>();
+        }
+
+        if (doc.containsKey("timer_max_duration"))
+        {
+            TIMER_MAX_DURATION = doc["timer_max_duration"].as<uint32_t>();
+        }
+
+        if (doc.containsKey("timer_step"))
+        {
+            TIMER_STEP = doc["timer_step"].as<uint32_t>();
+        }
+
+        if (doc.containsKey("timer_publish_interval"))
+        {
+            TIMER_PUBLISH_INTERVAL = doc["timer_publish_interval"].as<uint16_t>();
+        }
+
+        if (doc.containsKey("timer_finished_hold"))
+        {
+            uint16_t v = doc["timer_finished_hold"].as<uint16_t>();
+            if (v >= 1 && v <= 300) TIMER_FINISHED_HOLD = v;
+        }
+
+        if (doc.containsKey("timer_realert_interval"))
+        {
+            uint16_t v = doc["timer_realert_interval"].as<uint16_t>();
+            if (v >= 5 && v <= 300) TIMER_REALERT_INTERVAL = v;
+        }
+
+        if (doc.containsKey("timer_countdown_seconds"))
+        {
+            uint16_t v = doc["timer_countdown_seconds"].as<uint16_t>();
+            if (v <= 30) TIMER_COUNTDOWN_SECONDS = v;
+        }
+
         if (doc.containsKey("color_correction"))
         {
             auto correction = doc["color_correction"];
@@ -447,6 +490,14 @@ bool MOODLIGHT_MODE;
 long STATS_INTERVAL = 10000;
 bool DEBUG_MODE = true;
 uint8_t MIN_BRIGHTNESS = 2;
+bool SHOW_TIMER = true;
+bool TIMER_HIDE_WHEN_IDLE = true;
+uint32_t TIMER_MAX_DURATION = 3600;
+uint32_t TIMER_STEP = 1;
+uint16_t TIMER_PUBLISH_INTERVAL = 1;
+uint16_t TIMER_FINISHED_HOLD = 10;
+uint16_t TIMER_REALERT_INTERVAL = 15;
+uint16_t TIMER_COUNTDOWN_SECONDS = 3;
 uint8_t MAX_BRIGHTNESS = 160;
 double movementFactor = 0.5;
 int8_t TRANS_EFFECT = 1;

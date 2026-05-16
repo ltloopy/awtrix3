@@ -27,6 +27,11 @@ public:
     bool isConnected();
     String getValueForTopic(const String &topic);
 
+    void publishTimerDuration(uint32_t seconds);
+    void publishTimerRemaining(uint32_t seconds);
+    void publishTimerState(const char *stateStr);
+    void publishTimerBuzzer(uint8_t index);
+    void publishTimerFinished(uint8_t index);
 };
 extern MQTTManager_ &MQTTManager;
 

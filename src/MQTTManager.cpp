@@ -9,12 +9,13 @@
 #include "PeripheryManager.h"
 #include "UpdateManager.h"
 #include "PowerManager.h"
+#include "TimerManager.h"
 
 const uint16_t PORT = 1883;
 
 WiFiClient espClient;
 HADevice device;
-HAMqtt mqtt(espClient, device, 28);
+HAMqtt mqtt(espClient, device, 36);
 
 HALight *Matrix, *Indikator1, *Indikator2, *Indikator3 = nullptr;
 HASelect *BriMode, *transEffect = nullptr;
@@ -27,8 +28,14 @@ HASensor *battery = nullptr;
 #endif
 HASensor *temperature, *humidity, *illuminance, *uptime, *strength, *version, *ram, *curApp, *myOwnID, *ipAddr = nullptr;
 HABinarySensor *btnleft, *btnmid, *btnright = nullptr;
+HANumber *timerDuration = nullptr;
+HASensorNumber *timerRemaining = nullptr;
+HASensor *timerStateSensor = nullptr;
+HASelect *timerBuzzer = nullptr, *timerFinishedSel = nullptr;
+HAButton *timerStartBtn = nullptr, *timerPauseBtn = nullptr, *timerResetBtn = nullptr;
 bool connected;
 char matID[40], ind1ID[40], ind2ID[40], ind3ID[40], briID[40], btnAID[40], btnBID[40], btnCID[40], appID[40], tempID[40], humID[40], luxID[40], verID[40], ramID[40], upID[40], sigID[40], btnLID[40], btnMID[40], btnRID[40], transID[40], doUpdateID[40], batID[40], myID[40], sSpeed[40], effectID[40], ipAddrID[40], notifyID[40], dismissTextID[40];
+char tDurID[40], tRemID[40], tStateID[40], tBuzID[40], tFinID[40], tStartID[40], tPauseID[40], tResetID[40];
 long previousMillis_Stats;
 std::map<String, String> mqttValues;
 std::vector<String> topicsToSubscribe;
@@ -245,6 +252,24 @@ void onButtonCommand(HAButton *sender)
             UpdateManager.updateFirmware();
         }
     }
+    else if (sender == timerStartBtn)
+    {
+        bool fromIdle = (TimerManager.getState() == TimerState::Idle);
+        TimerManager.start();
+        if (fromIdle && !GAME_ACTIVE && !BLOCK_NAVIGATION)
+        {
+            String json = "{\"name\":\"Timer\"}";
+            DisplayManager.switchToApp(json.c_str());
+        }
+    }
+    else if (sender == timerPauseBtn)
+    {
+        TimerManager.pause();
+    }
+    else if (sender == timerResetBtn)
+    {
+        TimerManager.reset();
+    }
 }
 
 void onNotifyMessage(const char* message, uint16_t length, HANotify* sender)
@@ -330,6 +355,24 @@ void onSelectCommand(int8_t index, HASelect *sender)
     {
         TRANS_EFFECT = index;
     }
+    else if (sender == timerBuzzer)
+    {
+        if (index >= 0 && index <= 2)
+        {
+            TimerManager.setBuzzerMode((BuzzerMode)index);
+        }
+        sender->setState(index);
+        return;
+    }
+    else if (sender == timerFinishedSel)
+    {
+        if (index >= 0 && index <= 2)
+        {
+            TimerManager.setFinishedMode((FinishedMode)index);
+        }
+        sender->setState(index);
+        return;
+    }
     saveSettings();
     sender->setState(index);
 }
@@ -390,6 +433,16 @@ void onBrightnessCommand(uint8_t brightness, HALight *sender)
 
 void onNumberCommand(HANumeric number, HANumber *sender)
 {
+    if (sender == timerDuration)
+    {
+        if (number.isSet())
+        {
+            TimerManager.setDuration(number.toUInt32());
+        }
+        sender->setState(number);
+        return;
+    }
+
     if (!number.isSet())
     {
         // the reset command was send by Home Assistant
@@ -799,6 +852,66 @@ void MQTTManager_::setup()
         haDismissText->setIcon(HAdismissTextIcon);
         haDismissText->setName(HAdismissTextName);
         haDismissText->onMessage(onDismissTextMessage);
+
+        sprintf(tDurID, HAtimerDurID, macStr);
+        timerDuration = new HANumber(tDurID, HANumber::PrecisionP0);
+        timerDuration->setIcon(HAtimerDurIcon);
+        timerDuration->setName(HAtimerDurName);
+        timerDuration->setUnitOfMeasurement(HAtimerDurUnit);
+        timerDuration->setDeviceClass(HAtimerDurClass);
+        timerDuration->setMin(1);
+        timerDuration->setMax((float)(TIMER_MAX_DURATION > 0 ? TIMER_MAX_DURATION : 3600));
+        timerDuration->setStep((float)(TIMER_STEP > 0 ? TIMER_STEP : 1));
+        timerDuration->setMode(HANumber::ModeBox);
+        timerDuration->onCommand(onNumberCommand);
+        timerDuration->setCurrentState((uint32_t)TimerManager.getDuration());
+
+        sprintf(tRemID, HAtimerRemID, macStr);
+        timerRemaining = new HASensorNumber(tRemID, HASensorNumber::PrecisionP0);
+        timerRemaining->setIcon(HAtimerRemIcon);
+        timerRemaining->setName(HAtimerRemName);
+        timerRemaining->setUnitOfMeasurement(HAtimerRemUnit);
+        timerRemaining->setDeviceClass(HAtimerRemClass);
+        timerRemaining->setCurrentValue((uint32_t)TimerManager.getRemaining());
+
+        sprintf(tStateID, HAtimerStateID, macStr);
+        timerStateSensor = new HASensor(tStateID);
+        timerStateSensor->setIcon(HAtimerStateIcon);
+        timerStateSensor->setName(HAtimerStateName);
+
+        sprintf(tBuzID, HAtimerBuzID, macStr);
+        timerBuzzer = new HASelect(tBuzID);
+        timerBuzzer->setOptions(HAtimerBuzOptions);
+        timerBuzzer->onCommand(onSelectCommand);
+        timerBuzzer->setIcon(HAtimerBuzIcon);
+        timerBuzzer->setName(HAtimerBuzName);
+        timerBuzzer->setState((uint8_t)TimerManager.getBuzzerMode(), true);
+
+        sprintf(tFinID, HAtimerFinID, macStr);
+        timerFinishedSel = new HASelect(tFinID);
+        timerFinishedSel->setOptions(HAtimerFinOptions);
+        timerFinishedSel->onCommand(onSelectCommand);
+        timerFinishedSel->setIcon(HAtimerFinIcon);
+        timerFinishedSel->setName(HAtimerFinName);
+        timerFinishedSel->setState((uint8_t)TimerManager.getFinishedMode(), true);
+
+        sprintf(tStartID, HAtimerStartID, macStr);
+        timerStartBtn = new HAButton(tStartID);
+        timerStartBtn->setIcon(HAtimerStartIcon);
+        timerStartBtn->setName(HAtimerStartName);
+        timerStartBtn->onCommand(onButtonCommand);
+
+        sprintf(tPauseID, HAtimerPauseID, macStr);
+        timerPauseBtn = new HAButton(tPauseID);
+        timerPauseBtn->setIcon(HAtimerPauseIcon);
+        timerPauseBtn->setName(HAtimerPauseName);
+        timerPauseBtn->onCommand(onButtonCommand);
+
+        sprintf(tResetID, HAtimerResetID, macStr);
+        timerResetBtn = new HAButton(tResetID);
+        timerResetBtn->setIcon(HAtimerResetIcon);
+        timerResetBtn->setName(HAtimerResetName);
+        timerResetBtn->onCommand(onButtonCommand);
     }
     else
     {
@@ -821,6 +934,31 @@ void MQTTManager_::tick()
         previousMillis_Stats = currentMillis_Stats;
         sendStats();
     }
+}
+
+void MQTTManager_::publishTimerDuration(uint32_t seconds)
+{
+    if (timerDuration) timerDuration->setState((uint32_t)seconds);
+}
+
+void MQTTManager_::publishTimerRemaining(uint32_t seconds)
+{
+    if (timerRemaining) timerRemaining->setValue((uint32_t)seconds);
+}
+
+void MQTTManager_::publishTimerState(const char *stateStr)
+{
+    if (timerStateSensor) timerStateSensor->setValue(stateStr);
+}
+
+void MQTTManager_::publishTimerBuzzer(uint8_t index)
+{
+    if (timerBuzzer) timerBuzzer->setState(index);
+}
+
+void MQTTManager_::publishTimerFinished(uint8_t index)
+{
+    if (timerFinishedSel) timerFinishedSel->setState(index);
 }
 
 void MQTTManager_::publish(const char *topic, const char *payload)

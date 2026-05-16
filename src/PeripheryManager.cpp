@@ -18,6 +18,7 @@
 #include <MedianFilterLib.h>
 #include <MeanFilterLib.h>
 #include <Games/GameManager.h>
+#include "TimerManager.h"
 const int buzzerPin = 2;       // Buzzer an GPIO2
 const int baudRate = 50;       // Nachrichtenübertragungsrate
 const char *message = "HELLO"; // Die Nachricht, die gesendet werden soll
@@ -174,6 +175,22 @@ void select_button_pressed()
         if (DFPLAYER_ACTIVE)
             PeripheryManager.playFromFile(DFMINI_MP3_CLICK);
 
+        if (!MenuManager.inMenu)
+        {
+            TimerState ts = TimerManager.getState();
+            if (ts == TimerState::Finished)
+            {
+                TimerManager.start();
+                return;
+            }
+            if (CURRENT_APP == "Timer")
+            {
+                if (ts == TimerState::Running) TimerManager.pause();
+                else                            TimerManager.start();
+                return;
+            }
+        }
+
         DisplayManager.selectButton();
         MenuManager.selectButton();
         if (DEBUG_MODE)
@@ -206,6 +223,15 @@ void select_button_pressed_long()
     }
     else if (!BLOCK_NAVIGATION)
     {
+        if (!MenuManager.inMenu)
+        {
+            TimerState ts = TimerManager.getState();
+            if (ts == TimerState::Finished || CURRENT_APP == "Timer")
+            {
+                TimerManager.reset();
+                return;
+            }
+        }
         MenuManager.selectButtonLong();
         DisplayManager.selectButtonLong();
         if (DEBUG_MODE)

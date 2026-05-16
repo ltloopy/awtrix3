@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs grep -l \"SOUND_ACTIVE\\\\|SOUND_VOLUME\\\\|mute\")",
+      "Bash(dir \"C:\\\\Users\\\\troch\\\\Documents\\\\git\\\\awtrix3-1\\\\src\\\\MelodyPlayer\")",
+      "Bash(git -C \"c:\\\\Users\\\\troch\\\\Documents\\\\git\\\\awtrix3-1\" log --oneline feat-hass-notification)",
+      "Bash(pio --version)",
+      "Bash(pio run *)"
+    ]
+  }
+}

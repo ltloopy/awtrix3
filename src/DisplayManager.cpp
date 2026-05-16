@@ -1117,6 +1117,7 @@ void DisplayManager_::loadNativeApps()
 #ifdef ULANZI
   updateApp("Battery", BatApp, SHOW_BAT, 4);
 #endif
+  updateApp("Timer", TimerApp, SHOW_TIMER, Apps.size());
 
   ui->setApps(Apps);
   setAutoTransition(true);
