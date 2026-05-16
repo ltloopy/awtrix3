@@ -459,6 +459,25 @@ void TimerApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x,
     CURRENT_APP = "Timer";
     currentCustomApp = "";
 
+    if (TimerManager.isInConfig())
+    {
+        state->ticksSinceLastStateSwitch = 0;
+
+        DisplayManager.getInstance().resetTextColor();
+        DisplayManager.setTextColor(TEXTCOLOR_888);
+
+        char buf[10];
+        snprintf(buf, sizeof(buf), "%02u:%02u:%02u",
+            (unsigned)TimerManager.getConfigHH(),
+            (unsigned)TimerManager.getConfigMM(),
+            (unsigned)TimerManager.getConfigSS());
+        DisplayManager.printText(2 + x, 6 + y, buf, false, 0);
+
+        int underlineX = 2 + (TimerManager.getConfigField() * 10);
+        matrix->drawFastHLine(underlineX + x, 7 + y, 8, TEXTCOLOR_888);
+        return;
+    }
+
     DisplayManager.getInstance().resetTextColor();
 
     drawTimerIcon(matrix, x, y, TEXTCOLOR_888);

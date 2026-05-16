@@ -157,6 +157,27 @@ The end tone is loaded from `/MELODIES/timer_end.txt` if present, otherwise a bu
 | `Hold` | Overlay stays with a blinking `00:00` until dismissed (HA `dismiss_channel = "timer"`, SELECT button, or Start/Reset) |
 | `Re-alert` | Like `Hold`, but additionally re-plays the buzzer end tone every `timer_realert_interval` seconds (dev.json, default 15) |
 
+#### Setting the duration on the device
+
+While the Timer app is the current app and the timer is `idle`, **long-press SELECT** to enter a local configuration mode. The display switches to `HH:MM:SS` with a 1-pixel underline beneath the field you are currently editing.
+
+| Gesture | Effect |
+| --- | --- |
+| SELECT short | Cycles the active field: HH → MM → SS → HH |
+| LEFT short | Decreases the active field by 1 (wraps within the field) |
+| RIGHT short | Increases the active field by 1 (wraps within the field) |
+| LEFT / RIGHT hold | After ~500 ms triggers auto-repeat at ~4 ticks per second until released |
+| SELECT long | Exits config mode and saves |
+| 30 s of no input | Sliding timeout — measured from the last button press, not from entry. Exits and saves |
+
+The dialed value is silently clamped to `[1, timer_max_duration]` on save. Each field has independent bounds (HH 0–99, MM 0–59, SS 0–59) — incrementing seconds past 59 does **not** carry over into minutes. Use SELECT short to switch to the minutes field instead.
+
+Notifications that arrive while config mode is active are deferred (up to 10) and displayed when you exit, so a passing notification can't disturb the editing session. Remote commands from HA or the native API exit config first (saving the in-progress edit), then execute.
+
+> **Important:** the timer auto-hides from the rotation when idle by default, which means you can't reach this gesture without first disabling `timer_hide_when_idle` in [dev.json](https://blueforcer.github.io/awtrix3/#/dev). With auto-hide enabled, the only way to dial in a duration is via Home Assistant or the [native API](https://blueforcer.github.io/awtrix3/#/api?id=timer-control).
+
+The timeout can be tuned via the `timer_config_timeout` key in dev.json.
+
 #### Customisation
 
 - Sounds: drop `timer_tick.txt` and `timer_end.txt` (RTTTL strings) into `/MELODIES/` via the web file manager.

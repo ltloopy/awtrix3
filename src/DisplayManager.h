@@ -102,6 +102,7 @@ public:
     void setTextColor(uint32_t color);
     void matrixPrint(double number, uint8_t digits);
     void setCustomAppColors(uint32_t color);
+    void drainDeferredNotifications();
 };
 
 extern DisplayManager_ &DisplayManager;

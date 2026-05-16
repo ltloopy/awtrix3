@@ -159,4 +159,5 @@ extern uint16_t TIMER_PUBLISH_INTERVAL;
 extern uint16_t TIMER_FINISHED_HOLD;
 extern uint16_t TIMER_REALERT_INTERVAL;
 extern uint16_t TIMER_COUNTDOWN_SECONDS;
+extern uint16_t TIMER_CONFIG_TIMEOUT;
 #endif // Globals_H

@@ -137,6 +137,12 @@ void left_button_pressed()
         if (DFPLAYER_ACTIVE)
             PeripheryManager.playFromFile(DFMINI_MP3_CLICK);
 
+        if (TimerManager.isInConfig())
+        {
+            TimerManager.configAdjust(-1);
+            return;
+        }
+
         DisplayManager.leftButton();
         MenuManager.leftButton();
         if (DEBUG_MODE)
@@ -156,6 +162,12 @@ void right_button_pressed()
         if (DFPLAYER_ACTIVE)
             PeripheryManager.playFromFile(DFMINI_MP3_CLICK);
 
+        if (TimerManager.isInConfig())
+        {
+            TimerManager.configAdjust(+1);
+            return;
+        }
+
         DisplayManager.rightButton();
         MenuManager.rightButton();
         if (DEBUG_MODE)
@@ -174,6 +186,12 @@ void select_button_pressed()
     {
         if (DFPLAYER_ACTIVE)
             PeripheryManager.playFromFile(DFMINI_MP3_CLICK);
+
+        if (TimerManager.isInConfig())
+        {
+            TimerManager.configCycleField();
+            return;
+        }
 
         if (!MenuManager.inMenu)
         {
@@ -223,9 +241,20 @@ void select_button_pressed_long()
     }
     else if (!BLOCK_NAVIGATION)
     {
+        if (TimerManager.isInConfig())
+        {
+            TimerManager.exitConfigMode();
+            return;
+        }
+
         if (!MenuManager.inMenu)
         {
             TimerState ts = TimerManager.getState();
+            if (CURRENT_APP == "Timer" && ts == TimerState::Idle)
+            {
+                TimerManager.enterConfigMode();
+                return;
+            }
             if (ts == TimerState::Finished || CURRENT_APP == "Timer")
             {
                 TimerManager.reset();

@@ -42,12 +42,13 @@ The JSON object has the following properties:
 | `ldr_on_ground` | boolean | Sets the LDR configuration to LDR-on-ground. | false |
 | `show_timer` | boolean | Enables the [Timer app](https://blueforcer.github.io/awtrix3/#/apps?id=timer). | `true` |
 | `timer_hide_when_idle` | boolean | Auto-skips the Timer app in the rotation while it is in `idle` state. | `true` |
-| `timer_max_duration` | integer | Maximum duration (seconds) the Home Assistant Number entity allows. | `3600` |
+| `timer_max_duration` | integer | Maximum duration (seconds) the Home Assistant Number entity allows. | `86400` |
 | `timer_step` | integer | Step size (seconds) for the Home Assistant Number entity. | `1` |
 | `timer_publish_interval` | integer | Seconds between `remaining` publishes while the timer is running. `0` = state-change only. | `1` |
 | `timer_finished_hold` | integer | Seconds the `00:00` overlay stays visible in Auto-clear finished mode (range 1–300). | `10` |
 | `timer_realert_interval` | integer | Seconds between buzzer re-fires in Re-alert finished mode (range 5–300). | `15` |
 | `timer_countdown_seconds` | integer | Tick window (seconds before zero) in Countdown buzzer mode (range 0–30). | `3` |
+| `timer_config_timeout` | integer | Seconds of no button input before [local config mode](https://blueforcer.github.io/awtrix3/#/apps?id=setting-the-duration-on-the-device) auto-exits and saves (range 5–300). | `30` |
 
 
 #### Example:

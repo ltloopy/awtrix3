@@ -249,6 +249,12 @@ void loadDevSettings()
             if (v <= 30) TIMER_COUNTDOWN_SECONDS = v;
         }
 
+        if (doc.containsKey("timer_config_timeout"))
+        {
+            uint16_t v = doc["timer_config_timeout"].as<uint16_t>();
+            if (v >= 5 && v <= 300) TIMER_CONFIG_TIMEOUT = v;
+        }
+
         if (doc.containsKey("color_correction"))
         {
             auto correction = doc["color_correction"];
@@ -492,12 +498,13 @@ bool DEBUG_MODE = true;
 uint8_t MIN_BRIGHTNESS = 2;
 bool SHOW_TIMER = true;
 bool TIMER_HIDE_WHEN_IDLE = true;
-uint32_t TIMER_MAX_DURATION = 3600;
+uint32_t TIMER_MAX_DURATION = 86400;
 uint32_t TIMER_STEP = 1;
 uint16_t TIMER_PUBLISH_INTERVAL = 1;
 uint16_t TIMER_FINISHED_HOLD = 10;
 uint16_t TIMER_REALERT_INTERVAL = 15;
 uint16_t TIMER_COUNTDOWN_SECONDS = 3;
+uint16_t TIMER_CONFIG_TIMEOUT = 30;
 uint8_t MAX_BRIGHTNESS = 160;
 double movementFactor = 0.5;
 int8_t TRANS_EFFECT = 1;

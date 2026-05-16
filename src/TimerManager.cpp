@@ -85,7 +85,53 @@ const char *TimerManager_::getStateString() const
 
 bool TimerManager_::isHidden() const
 {
-    return state == TimerState::Idle && TIMER_HIDE_WHEN_IDLE;
+    return state == TimerState::Idle && TIMER_HIDE_WHEN_IDLE && !inConfig;
+}
+
+void TimerManager_::enterConfigMode()
+{
+    if (state != TimerState::Idle) return;
+    uint32_t d = durationSec;
+    uint32_t h = d / 3600;
+    if (h > 99) h = 99;
+    configHH = (uint8_t)h;
+    configMM = (uint8_t)((d % 3600) / 60);
+    configSS = (uint8_t)(d % 60);
+    configField = 0;
+    configLastInputMs = millis();
+    configRepeatLeftMs = 0;
+    configRepeatRightMs = 0;
+    inConfig = true;
+}
+
+void TimerManager_::exitConfigMode()
+{
+    if (!inConfig) return;
+    uint32_t total = (uint32_t)configHH * 3600UL + (uint32_t)configMM * 60UL + (uint32_t)configSS;
+    inConfig = false;
+    setDuration(total);
+    DisplayManager.drainDeferredNotifications();
+}
+
+void TimerManager_::configCycleField()
+{
+    if (!inConfig) return;
+    configField = (configField + 1) % 3;
+    configLastInputMs = millis();
+}
+
+void TimerManager_::configAdjust(int delta)
+{
+    if (!inConfig) return;
+    uint8_t maxVal = (configField == 0) ? 99 : 59;
+    uint8_t cur = (configField == 0) ? configHH : (configField == 1 ? configMM : configSS);
+    int next = (int)cur + delta;
+    if (next < 0) next = maxVal;
+    else if (next > maxVal) next = 0;
+    if      (configField == 0) configHH = (uint8_t)next;
+    else if (configField == 1) configMM = (uint8_t)next;
+    else                       configSS = (uint8_t)next;
+    configLastInputMs = millis();
 }
 
 void TimerManager_::enterRunning()
@@ -227,6 +273,43 @@ void TimerManager_::tick()
 {
     unsigned long now = millis();
 
+    if (inConfig)
+    {
+        if (now - configLastInputMs >= (unsigned long)TIMER_CONFIG_TIMEOUT * 1000UL)
+        {
+            exitConfigMode();
+            return;
+        }
+
+        EasyButton *bL = PeripheryManager.buttonL;
+        EasyButton *bR = PeripheryManager.buttonR;
+        if (bL && bL->isPressed() && bL->pressedFor(500))
+        {
+            if (configRepeatLeftMs == 0 || (now - configRepeatLeftMs) >= 250)
+            {
+                configAdjust(-1);
+                configRepeatLeftMs = now;
+            }
+        }
+        else
+        {
+            configRepeatLeftMs = 0;
+        }
+        if (bR && bR->isPressed() && bR->pressedFor(500))
+        {
+            if (configRepeatRightMs == 0 || (now - configRepeatRightMs) >= 250)
+            {
+                configAdjust(+1);
+                configRepeatRightMs = now;
+            }
+        }
+        else
+        {
+            configRepeatRightMs = 0;
+        }
+        return;
+    }
+
     if (state == TimerState::Running)
     {
         uint32_t newRemaining = computeCurrentRemaining();
@@ -298,6 +381,8 @@ void TimerManager_::tick()
 void TimerManager_::parseCommand(const char *json)
 {
     if (json == nullptr || json[0] == '\0') return;
+
+    if (inConfig) exitConfigMode();
 
     DynamicJsonDocument doc(256);
     if (deserializeJson(doc, json) != DeserializationError::Ok) return;

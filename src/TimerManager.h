@@ -25,6 +25,13 @@ private:
     unsigned long lastPublishMs = 0;
     int32_t lastTickedSecond = -1;
 
+    bool          inConfig            = false;
+    uint8_t       configField         = 0;
+    uint8_t       configHH = 0, configMM = 0, configSS = 0;
+    unsigned long configLastInputMs   = 0;
+    unsigned long configRepeatLeftMs  = 0;
+    unsigned long configRepeatRightMs = 0;
+
     uint32_t computeCurrentRemaining() const;
     void enterRunning();
     void enterFinished();
@@ -51,6 +58,16 @@ public:
     void setFinishedMode(FinishedMode m);
 
     void parseCommand(const char *json);
+
+    void enterConfigMode();
+    void exitConfigMode();
+    void configCycleField();
+    void configAdjust(int delta);
+    bool    isInConfig()      const { return inConfig; }
+    uint8_t getConfigField()  const { return configField; }
+    uint8_t getConfigHH()     const { return configHH; }
+    uint8_t getConfigMM()     const { return configMM; }
+    uint8_t getConfigSS()     const { return configSS; }
 
     TimerState   getState()        const { return state; }
     uint32_t     getRemaining()    const { return remainingSec; }

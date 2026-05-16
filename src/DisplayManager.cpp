@@ -23,6 +23,9 @@
 #include <HTTPClient.h>
 #include "base64.hpp"
 #include "Games/GameManager.h"
+#include "TimerManager.h"
+
+static std::vector<Notification> deferredNotifications;
 
 unsigned long lastArtnetStatusTime = 0;
 const int numberOfChannels = 256 * 3;
@@ -1014,7 +1017,16 @@ bool DisplayManager_::generateNotification(uint8_t source, const char *json)
 
   bool stack = doc.containsKey("stack") ? doc["stack"] : true;
 
-  if (stack)
+  if (TimerManager.isInConfig())
+  {
+    static const size_t MAX_DEFERRED = 10;
+    if (deferredNotifications.size() >= MAX_DEFERRED)
+    {
+      deferredNotifications.erase(deferredNotifications.begin());
+    }
+    deferredNotifications.push_back(newNotification);
+  }
+  else if (stack)
   {
     notifications.push_back(newNotification);
   }
@@ -1407,6 +1419,16 @@ void DisplayManager_::selectButton()
 
 void DisplayManager_::selectButtonLong()
 {
+}
+
+void DisplayManager_::drainDeferredNotifications()
+{
+  for (auto &n : deferredNotifications)
+  {
+    n.startime = millis();
+    notifications.push_back(n);
+  }
+  deferredNotifications.clear();
 }
 
 void DisplayManager_::dismissNotify()
