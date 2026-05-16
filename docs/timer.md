@@ -1,0 +1,225 @@
+# Timer
+
+The Timer app is a kitchen-style countdown timer built into the firmware. Set
+a duration, start it, and the device counts down on its display. When the
+timer expires it pushes a notification (channel `"timer"`), plays a melody,
+and behaves according to a configurable "finished mode" (auto-clear, hold,
+or re-alert).
+
+The timer is controlled via MQTT, Home Assistant entities, or the three
+physical buttons on the Ulanzi TC001.
+
+---
+
+## MQTT command topic
+
+```
+{MQTT_PREFIX}/timer
+```
+
+Accepts a JSON payload. **All keys are optional**; only the supplied ones
+take effect. Keys are processed in this order: `duration` → `buzzer` →
+`finished` → `action`, so you can configure and start a timer in one
+publish.
+
+| Key | Type | Values | Effect |
+| --- | --- | --- | --- |
+| `duration` | int | 1 to `TIMER_MAX_DURATION` (default 86400 = 24 h); clamped on out-of-range | Sets the timer duration in seconds. Persists to NVS. |
+| `buzzer`   | string | `"off"`, `"end"`, `"countdown"` (case-insensitive) | Sets the buzzer mode. Persists to NVS. |
+| `finished` | string | `"auto-clear"` (or `"autoclear"`), `"hold"`, `"re-alert"` (or `"realert"`) | Sets the finished-mode. Persists to NVS. |
+| `action`   | string | `"start"`, `"pause"`, `"reset"` (case-insensitive) | Drives the state machine. |
+
+### Examples
+
+Start a 5-minute timer:
+```json
+{"duration": 300, "action": "start"}
+```
+
+Change buzzer mode without affecting the timer:
+```json
+{"buzzer": "countdown"}
+```
+
+Configure a 1-hour Hold-mode timer with no audio and start it:
+```json
+{"duration": 3600, "buzzer": "off", "finished": "hold", "action": "start"}
+```
+
+Pause / resume:
+```json
+{"action": "pause"}
+```
+(Pausing while paused resumes; pausing while idle is a no-op.)
+
+Reset to idle (also clears any active timer notification):
+```json
+{"action": "reset"}
+```
+
+### State machine
+
+```
+                ┌─ start ─┐
+                │         ▼
+   Idle ──── start ──► Running ── tick crosses 0 ──► Finished
+    ▲           ▲          │                            │
+    │           │          │                            │
+    │           └── pause ─┴── pause ───► Paused ───────┘
+    │                       (toggle)            │
+    │                                           │
+    └── reset / AutoClear timeout / dismiss ────┘
+```
+
+`start` from `Finished` dismisses the timer notification and re-arms with the
+configured duration. `reset` is always a hard return to `Idle`.
+
+---
+
+## Finished modes
+
+When the timer hits zero it always: (1) sets state to `Finished`, (2) pushes
+a notification on the `"timer"` channel, (3) plays
+`/MELODIES/timer_end.txt` (or a built-in fallback) if `SOUND_ACTIVE` is true
+and buzzer mode isn't `Off`. After that, behavior depends on
+`finishedMode`:
+
+| Mode | Behavior |
+| --- | --- |
+| `auto-clear` (default) | Notification auto-dismisses after `TIMER_FINISHED_HOLD` seconds (default 10); state returns to `Idle`. |
+| `hold` | Notification persists indefinitely with a 500 ms blink. Dismiss via `{prefix}/notify/dismiss`, the HA `dismiss` button, or physical middle long-press. |
+| `re-alert` | Notification persists; every `TIMER_REALERT_INTERVAL` seconds (default 15) the end-melody re-plays until dismissed. |
+
+---
+
+## Buzzer modes
+
+| Mode | Behavior |
+| --- | --- |
+| `off` | Silent. No countdown beeps, no end melody. |
+| `end` (default) | End melody plays once on expiry. |
+| `countdown` | Short beep each of the final `TIMER_COUNTDOWN_SECONDS` seconds (default 3), plus the end melody on expiry. |
+
+Beeps and end melody use RTTTL strings loaded from LittleFS
+(`/MELODIES/timer_tick.txt` for countdown beeps, `/MELODIES/timer_end.txt`
+for end melody). If the file is missing, a small built-in fallback RTTTL is
+used instead.
+
+---
+
+## Home Assistant entities
+
+With `HA_DISCOVERY=true`, the firmware advertises eight entities:
+
+| Entity | Type | Purpose |
+| --- | --- | --- |
+| `{id}_timer_dur`   | `number`      | Timer duration in seconds (writable). |
+| `{id}_timer_rem`   | `sensor`      | Seconds remaining (read-only, updates every `TIMER_PUBLISH_INTERVAL` s while running). |
+| `{id}_timer_state` | `sensor`      | One of `idle` / `running` / `paused` / `finished`. |
+| `{id}_timer_buz`   | `select`      | Buzzer mode. |
+| `{id}_timer_fin`   | `select`      | Finished mode. |
+| `{id}_timer_start` | `button`      | Equivalent to `{"action":"start"}`. |
+| `{id}_timer_pause` | `button`      | Equivalent to `{"action":"pause"}`. |
+| `{id}_timer_reset` | `button`      | Equivalent to `{"action":"reset"}`. |
+
+When the timer is started from `Idle` (and no game is active, no
+blocking-nav app is on screen), the display auto-switches to the Timer app.
+
+---
+
+## Physical buttons (Timer app)
+
+| Input | Effect |
+| --- | --- |
+| Middle long-press (from Idle) | Enter config mode. `HH` field highlighted. |
+| Middle short-press (in config) | Cycle field `HH → MM → SS → HH`. |
+| Left / Right (in config) | Decrement / increment current field by `TIMER_STEP`. Hold ≥500 ms to auto-repeat every 250 ms. |
+| 30 s of no input (in config) | Auto-applies HH:MM:SS to duration, exits config. |
+| Middle short-press (Running) | Pause. |
+| Middle short-press (Paused) | Resume. |
+| Middle long-press (Finished) | Reset to Idle. |
+
+Field bounds: `HH` wraps `99 ↔ 0`; `MM`/`SS` wrap `59 ↔ 0`.
+
+---
+
+## Display
+
+The Timer app renders the timer icon, the remaining time (`HH:MM:SS` or
+`MM:SS` for durations under one hour), and a progress bar that empties as
+time elapses.
+
+When state is `Idle` and `TIMER_HIDE_WHEN_IDLE=true` (default), the Timer
+app is skipped in the rotation. Setting `TIMER_HIDE_WHEN_IDLE=false` keeps
+the timer visible at all times.
+
+---
+
+## Persistence
+
+| Field | Persisted? |
+| --- | --- |
+| `duration`, `buzzer mode`, `finished mode` | Yes (NVS namespace `"timer"`, keys `DUR`/`BUZ`/`FIN`). Survives reboot. |
+| Runtime state (Running / Paused / Finished, remaining seconds, elapsed time) | **No.** A reboot mid-run returns the device to `Idle` with the saved duration. This is intentional — the device has no RTC backup and resuming a timer with a wrong elapsed-time estimate would be worse than restarting. |
+
+---
+
+## Settings (globals, defaults)
+
+These tune timer behavior. They are **not currently exposed via the
+`/settings` MQTT topic** — they're compile-time defaults defined in
+`src/Globals.cpp`.
+
+| Global | Default | Effect |
+| --- | --- | --- |
+| `SHOW_TIMER` | `true` | Include the Timer app in the rotation at all. |
+| `TIMER_HIDE_WHEN_IDLE` | `true` | Skip Timer app when state is Idle. |
+| `TIMER_MAX_DURATION` | `86400` (24 h) | Upper clamp for `setDuration`. |
+| `TIMER_STEP` | `1` | Increment step for left/right adjusts in config mode. |
+| `TIMER_PUBLISH_INTERVAL` | `1` (s) | How often `timer_rem` re-publishes while running. |
+| `TIMER_FINISHED_HOLD` | `10` (s) | AutoClear notification hold time. |
+| `TIMER_REALERT_INTERVAL` | `15` (s) | Re-alert cadence in re-alert mode. |
+| `TIMER_COUNTDOWN_SECONDS` | `3` | Number of pre-expiry beep seconds in countdown buzzer mode. |
+| `TIMER_CONFIG_TIMEOUT` | `30` (s) | Idle timeout before config mode auto-exits. |
+
+---
+
+## Dismiss + reset
+
+Two ways to clear an active timer notification:
+
+```
+{MQTT_PREFIX}/notify/dismiss          # also dismisses any other notification
+```
+
+…or HA's `{id}_dismiss` button, or the physical middle long-press while
+state is Finished. Dismissing the notification while in `Hold` mode (or
+between `re-alert` cycles) returns the timer to `Idle`.
+
+To hard-reset state without dismissing other notifications, publish:
+
+```
+{MQTT_PREFIX}/timer  →  {"action": "reset"}
+```
+
+To restart the whole device:
+
+```
+GET http://<device-ip>/api/reboot
+```
+
+---
+
+## Testing
+
+Automated tests for the timer state machine live in:
+
+- `test/test_timer/` — native unit tests, run via `pio test -e native`.
+  Run on every PR via [.github/workflows/test.yml](../.github/workflows/test.yml).
+  **Branch protection should require the `test` job to pass.**
+- `tests/e2e/` — end-to-end MQTT harness for maintainer-only pre-merge
+  validation. See [tests/e2e/README.md](../tests/e2e/README.md).
+
+The manual smoke checklist lives in
+[docs/test-plans/timer.md](test-plans/timer.md) — run it against real
+hardware for any timer-touching PR.

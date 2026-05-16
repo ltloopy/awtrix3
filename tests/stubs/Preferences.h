@@ -1,0 +1,28 @@
+#pragma once
+
+#include <Arduino.h>
+#include <map>
+
+class Preferences {
+public:
+    bool begin(const char *name, bool readOnly = false) { (void)name; (void)readOnly; return true; }
+    void end() {}
+
+    uint32_t getUInt(const char *key, uint32_t def = 0) {
+        auto it = u32_.find(String(key));
+        return it == u32_.end() ? def : it->second;
+    }
+    void putUInt(const char *key, uint32_t value) { u32_[String(key)] = value; }
+
+    uint8_t getUChar(const char *key, uint8_t def = 0) {
+        auto it = u8_.find(String(key));
+        return it == u8_.end() ? def : it->second;
+    }
+    void putUChar(const char *key, uint8_t value) { u8_[String(key)] = value; }
+
+    static void __test_reset() { u32_.clear(); u8_.clear(); }
+
+private:
+    static std::map<String, uint32_t> u32_;
+    static std::map<String, uint8_t>  u8_;
+};
