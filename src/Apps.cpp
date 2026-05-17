@@ -465,9 +465,10 @@ void TimerApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x,
             (unsigned)TimerManager.getConfigHH(),
             (unsigned)TimerManager.getConfigMM(),
             (unsigned)TimerManager.getConfigSS());
-        DisplayManager.printText(2 + x, 6 + y, buf, false, 0);
+        int16_t textX = 8 + ((24 - (int)getTextWidth(buf, 0)) / 2);
+        DisplayManager.printText(textX + x, 6 + y, buf, false, 0);
 
-        int underlineX = 2 + (TimerManager.getConfigField() * 10);
+        int underlineX = textX + (TimerManager.getConfigField() * 10);
         matrix->drawFastHLine(underlineX + x, 7 + y, 8, TEXTCOLOR_888);
         return;
     }
@@ -484,7 +485,8 @@ void TimerApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x,
         if ((millis() / 500) % 2 == 0)
         {
             DisplayManager.setTextColor(TEXTCOLOR_888);
-            DisplayManager.printText(11 + x, 6 + y, "0:00", false, 0);
+            int16_t textX = 8 + ((24 - (int)getTextWidth("0:00", 0)) / 2);
+            DisplayManager.printText(textX + x, 6 + y, "0:00", false, 0);
         }
         return;
     }
@@ -507,7 +509,8 @@ void TimerApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x,
     }
 
     DisplayManager.setTextColor(TEXTCOLOR_888);
-    DisplayManager.printText(11 + x, 6 + y, buf, false, 0);
+    int16_t textX = 8 + ((24 - (int)getTextWidth(buf, 0)) / 2);
+    DisplayManager.printText(textX + x, 6 + y, buf, false, 0);
 
     if (ts != TimerState::Idle && duration > 0)
     {
