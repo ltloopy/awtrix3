@@ -24,6 +24,10 @@ extern uint16_t TIMER_FINISHED_HOLD;
 extern uint16_t TIMER_REALERT_INTERVAL;
 extern uint16_t TIMER_COUNTDOWN_SECONDS;
 extern uint16_t TIMER_CONFIG_TIMEOUT;
+extern String   TIMER_ICON_IDLE;
+extern String   TIMER_ICON_RUNNING;
+extern String   TIMER_ICON_PAUSED;
+extern String   TIMER_ICON_FINISHED;
 
 extern uint32_t TEXTCOLOR_888;
 

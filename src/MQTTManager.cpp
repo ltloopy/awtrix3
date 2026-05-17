@@ -579,6 +579,7 @@ void onMqttConnected()
             MQTTManager.publishTimerState(TimerManager.getStateString());
             MQTTManager.publishTimerBuzzer((uint8_t)TimerManager.getBuzzerMode());
             MQTTManager.publishTimerFinished((uint8_t)TimerManager.getFinishedMode());
+            TimerManager.publishIcons();
         }
     }
 
@@ -1018,6 +1019,21 @@ void MQTTManager_::publishTimerBuzzer(uint8_t index)
 void MQTTManager_::publishTimerFinished(uint8_t index)
 {
     if (timerFinishedSel) timerFinishedSel->setState(index);
+}
+
+void MQTTManager_::publishTimerIcons(const String &idle, const String &running, const String &paused, const String &finished)
+{
+    if (!mqtt.isConnected())
+        return;
+    DynamicJsonDocument doc(256);
+    doc["idle"]     = idle;
+    doc["running"]  = running;
+    doc["paused"]   = paused;
+    doc["finished"] = finished;
+    String payload;
+    serializeJson(doc, payload);
+    String topic = MQTT_PREFIX + "/timer/icons";
+    mqtt.publish(topic.c_str(), payload.c_str(), true);
 }
 
 void MQTTManager_::publish(const char *topic, const char *payload)

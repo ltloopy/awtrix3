@@ -1,7 +1,7 @@
 ---
 checklist_version: 2
 feature: timer
-last_updated: 2026-05-16
+last_updated: 2026-05-17
 ---
 
 # Manual test checklist — Timer
@@ -142,6 +142,66 @@ re-flashing or factory-resetting NVS so `SHOW_TIMER_HA_PREV` starts `true`.
       (Time / Date / Temp / Humidity / Timer — no ghost slot, no Battery)
 - [ ] Timer toggle is reachable at index 4 and behaves identically to the
       Ulanzi build
+
+---
+
+## B10. Icon configuration (per-state)
+
+Verify the per-state icon system across all three input surfaces, the
+retained output topic, and the GIF playback lifecycle.
+
+### B10.1 dev.json boot defaults
+- [ ] On a clean unit (NVS wiped), put `"timer_icon_idle": "64936"` in
+      `dev.json` and reboot. Timer shows `64936.jpg` in all four states
+      (Idle, Running, Paused, Finished `0:00` blink). (Icon file must
+      be uploaded via web UI first.)
+- [ ] Add `"timer_icon_running": "74706"` to `dev.json` and reboot.
+      Running animates `74706.gif`; Idle/Paused/Finished still show
+      `64936.jpg`.
+- [ ] Remove all four `timer_icon_*` keys from `dev.json`, wipe NVS,
+      reboot. Pixel-art icon shows in every state (assuming no JPG/GIF
+      override on the filesystem).
+
+### B10.2 MQTT round-trip
+- [ ] Subscribe to `<PREFIX>/timer/icons`. After MQTT connect on boot,
+      a retained JSON message appears with current values.
+- [ ] Publish `{"icon_running": "74706"}` to `<PREFIX>/timer`. Retained
+      `/timer/icons` updates; other fields unchanged.
+- [ ] Publish `{"icon_running": ""}` to `<PREFIX>/timer`. Running slot
+      clears; render falls back to the Idle icon. Retained
+      `/timer/icons` reflects the empty string.
+- [ ] Reboot the device. NVS-set values persist (unless overridden by
+      `dev.json`).
+
+### B10.3 HTTP API
+- [ ] `curl -X POST http://<ip>/api/timer -d '{"icon_idle":"64936","icon_paused":"smile"}'`
+      — same effect as the equivalent MQTT publish; retained
+      `/timer/icons` updates.
+
+### B10.4 GIF hygiene
+- [ ] Set `icon_running` to a GIF name. Start a timer. The GIF animates
+      while Running.
+- [ ] Pause the timer. Icon switches to the Idle icon (or pixel-art if
+      Idle is empty). Resume — GIF restarts from frame 0 (verify the
+      first frame appears).
+- [ ] Change `icon_running` via MQTT while the timer is running. Old
+      file handle closes, new GIF starts from frame 0.
+- [ ] Reset to Idle. No LittleFS warnings / leaked file handles in the
+      serial log.
+
+### B10.5 Missing files & length cap
+- [ ] Set `icon_running = "doesnotexist"`. Start timer. Render falls
+      back to the Idle icon (or pixel-art if Idle is also empty/missing).
+- [ ] Send `{"icon_idle": "a-string-over-thirty-two-characters-long-xxxxx"}`.
+      Value is stored truncated to 32 chars — read back via the retained
+      `<PREFIX>/timer/icons` topic.
+
+### B10.6 dev.json overrides NVS on reboot
+- [ ] Put `"timer_icon_idle": "A"` in `dev.json`. Boot. Via MQTT set
+      `icon_idle = "B"`. Reboot. `icon_idle` is back to `"A"` (dev.json
+      wins).
+- [ ] Remove `timer_icon_idle` from `dev.json`. Reboot. `icon_idle` is
+      now `"B"` (NVS retained, dev.json no longer overrides).
 
 ---
 

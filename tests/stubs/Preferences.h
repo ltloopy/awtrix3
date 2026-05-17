@@ -20,9 +20,19 @@ public:
     }
     void putUChar(const char *key, uint8_t value) { u8_[String(key)] = value; }
 
-    static void __test_reset() { u32_.clear(); u8_.clear(); }
+    String getString(const char *key, const String &def = String()) {
+        auto it = str_.find(String(key));
+        return it == str_.end() ? def : it->second;
+    }
+    size_t putString(const char *key, const String &value) {
+        str_[String(key)] = value;
+        return value.length();
+    }
+
+    static void __test_reset() { u32_.clear(); u8_.clear(); str_.clear(); }
 
 private:
     static std::map<String, uint32_t> u32_;
     static std::map<String, uint8_t>  u8_;
+    static std::map<String, String>   str_;
 };

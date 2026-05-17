@@ -250,6 +250,11 @@ void loadDevSettings()
             if (v >= 5 && v <= 300) TIMER_CONFIG_TIMEOUT = v;
         }
 
+        if (doc.containsKey("timer_icon_idle"))     TIMER_ICON_IDLE     = doc["timer_icon_idle"].as<String>();
+        if (doc.containsKey("timer_icon_running"))  TIMER_ICON_RUNNING  = doc["timer_icon_running"].as<String>();
+        if (doc.containsKey("timer_icon_paused"))   TIMER_ICON_PAUSED   = doc["timer_icon_paused"].as<String>();
+        if (doc.containsKey("timer_icon_finished")) TIMER_ICON_FINISHED = doc["timer_icon_finished"].as<String>();
+
         if (doc.containsKey("color_correction"))
         {
             auto correction = doc["color_correction"];
@@ -504,6 +509,10 @@ uint16_t TIMER_FINISHED_HOLD = 10;
 uint16_t TIMER_REALERT_INTERVAL = 15;
 uint16_t TIMER_COUNTDOWN_SECONDS = 3;
 uint16_t TIMER_CONFIG_TIMEOUT = 30;
+String TIMER_ICON_IDLE = "";
+String TIMER_ICON_RUNNING = "";
+String TIMER_ICON_PAUSED = "";
+String TIMER_ICON_FINISHED = "";
 uint8_t MAX_BRIGHTNESS = 160;
 double movementFactor = 0.5;
 int8_t TRANS_EFFECT = 1;

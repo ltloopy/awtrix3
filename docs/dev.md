@@ -48,6 +48,10 @@ The JSON object has the following properties:
 | `timer_realert_interval` | integer | Seconds between buzzer re-fires in Re-alert finished mode (range 5–300). | `15` |
 | `timer_countdown_seconds` | integer | Tick window (seconds before zero) in Countdown buzzer mode (range 0–30). | `3` |
 | `timer_config_timeout` | integer | Seconds of no button input before [local config mode](https://blueforcer.github.io/awtrix3/#/apps?id=setting-the-duration-on-the-device) auto-exits and saves (range 5–300). | `30` |
+| `timer_icon_idle` | string | Bare icon name (resolved against `/ICONS/<name>.{jpg,gif}`) for the Timer app's **Idle** state. Also used as fallback for any other state with an empty slot. Empty/absent = no override of the NVS-stored value. Capped at 32 chars. **Overrides NVS on every boot.** | `""` |
+| `timer_icon_running` | string | Same, for the Running state. Empty falls back to `timer_icon_idle`. | `""` |
+| `timer_icon_paused` | string | Same, for the Paused state. Empty falls back to `timer_icon_idle`. | `""` |
+| `timer_icon_finished` | string | Same, for the Finished (blinking `0:00`) state. Empty falls back to `timer_icon_idle`. | `""` |
 
 
 #### Example:

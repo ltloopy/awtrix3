@@ -414,8 +414,12 @@ All JSON properties are optional. When multiple are sent together, property sett
 | `duration` | integer | 1 .. `timer_max_duration` | Sets the configured duration in seconds. Persists across reboots. Mid-run writes buffer until next `start`/`reset` (the current countdown is not interrupted). |
 | `buzzer` | string | `off` / `end` / `countdown` | Sets buzzer mode. Persists. |
 | `finished` | string | `auto-clear` / `hold` / `re-alert` | Sets what happens at `00:00`. Persists. |
+| `icon_idle` | string | Bare icon name resolved against `/ICONS/<name>.{jpg,gif}`; empty clears the slot; capped at 32 chars | Icon shown in the **Idle** state and used as fallback for any other state whose slot is empty. Persists. |
+| `icon_running` | string | Same. Empty clears (then falls back to `icon_idle`). | Icon shown while counting down. Persists. |
+| `icon_paused` | string | Same. Empty clears (then falls back to `icon_idle`). | Icon shown while paused. Persists. |
+| `icon_finished` | string | Same. Empty clears (then falls back to `icon_idle`). | Icon shown beneath the blinking `0:00`. Persists. |
 
-String values are case-insensitive; `auto-clear`/`autoclear` and `re-alert`/`realert` are both accepted.
+`action` / `buzzer` / `finished` values are case-insensitive; `auto-clear`/`autoclear` and `re-alert`/`realert` are both accepted. Icon values are **case-sensitive** (they map to filenames on LittleFS) and **capped at 32 characters**. The loader checks `/ICONS/<name>.jpg` then `/ICONS/<name>.gif`, so a single bare name supports either format.
 
 #### Examples
 
@@ -434,9 +438,21 @@ Reset to idle (also dismisses the end notification if visible):
 {"action": "reset"}
 ```
 
+Set per-state icons (idle stays as fallback; Running uses an animated GIF):
+```json
+{"icon_idle": "64936", "icon_running": "74706"}
+```
+
+Clear an override so the slot falls back to the Idle icon:
+```json
+{"icon_paused": ""}
+```
+
 #### State observation
 
 There is currently no native read endpoint for the timer's `state`/`remaining` values. When `HA_DISCOVERY` is enabled, Home Assistant receives live updates of all timer properties via MQTT discovery sensors — that is the supported path for observing the timer remotely.
+
+The current icon configuration is also published as a retained JSON message to `[PREFIX]/timer/icons` whenever it changes (and on MQTT connect). Subscribe to that topic to read back current icon slots without HA. Payload shape: `{"idle": "...", "running": "...", "paused": "...", "finished": "..."}`.
 
 
 ## Change Settings

@@ -416,25 +416,61 @@ void BatApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x, i
 }
 #endif
 
-static void drawTimerIcon(FastLED_NeoMatrix *matrix, int16_t x, int16_t y, uint32_t color)
+static void drawTimerIcon(FastLED_NeoMatrix *matrix, int16_t x, int16_t y, uint32_t color, TimerState state, GifPlayer *gifPlayer)
 {
-    static bool checkedFile = false;
-    static bool hasFileIcon = false;
-    if (!checkedFile)
+    static String     cachedName    = "\x01";
+    static File       icon;
+    static bool       isGif         = false;
+    static uint8_t    currentFrame  = 0;
+    static GifPlayer *lastPlayer    = nullptr;
+
+    const String &name = TimerManager.getIconForState(state);
+
+    if (name != cachedName)
     {
-        hasFileIcon = LittleFS.exists("/ICONS/timer.jpg");
-        checkedFile = true;
-    }
-    if (hasFileIcon)
-    {
-        File f = LittleFS.open("/ICONS/timer.jpg", "r");
-        if (f)
+        cachedName = name;
+        if (icon) icon.close();
+        isGif = false;
+        currentFrame = 0;
+        lastPlayer = nullptr;
+
+        if (name.length() > 0)
         {
-            DisplayManager.drawJPG(x, y, f);
-            f.close();
+            const char *extensions[] = {".jpg", ".gif"};
+            for (int i = 0; i < 2; i++)
+            {
+                String filePath = "/ICONS/" + name + extensions[i];
+                if (LittleFS.exists(filePath))
+                {
+                    isGif = (i == 1);
+                    icon  = LittleFS.open(filePath);
+                    break;
+                }
+            }
+        }
+    }
+
+    if (icon)
+    {
+        if (isGif && gifPlayer != nullptr)
+        {
+            if (gifPlayer != lastPlayer)
+            {
+                icon.seek(0);
+                currentFrame = 0;
+                lastPlayer = gifPlayer;
+            }
+            gifPlayer->playGif(x, y, &icon, currentFrame);
+            currentFrame = gifPlayer->getFrame();
+            return;
+        }
+        if (!isGif)
+        {
+            DisplayManager.drawJPG(x, y, icon);
             return;
         }
     }
+
     matrix->drawFastHLine(x + 0, y + 0, 8, color);
     matrix->drawFastHLine(x + 1, y + 1, 6, color);
     matrix->drawFastHLine(x + 2, y + 2, 4, color);
@@ -475,9 +511,8 @@ void TimerApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x,
 
     DisplayManager.getInstance().resetTextColor();
 
-    drawTimerIcon(matrix, x, y, TEXTCOLOR_888);
-
     TimerState ts = TimerManager.getState();
+    drawTimerIcon(matrix, x, y, TEXTCOLOR_888, ts, gifPlayer);
 
     if (ts == TimerState::Finished)
     {

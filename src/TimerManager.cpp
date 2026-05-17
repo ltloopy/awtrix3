@@ -43,7 +43,16 @@ void TimerManager_::setup()
     durationSec    = timerPrefs.getUInt("DUR", 300);
     buzzerMode     = (BuzzerMode)timerPrefs.getUChar("BUZ", (uint8_t)BuzzerMode::End);
     finishedMode   = (FinishedMode)timerPrefs.getUChar("FIN", (uint8_t)FinishedMode::AutoClear);
+    iconIdle       = timerPrefs.getString("ICON_IDLE",  "");
+    iconRunning    = timerPrefs.getString("ICON_RUN",   "");
+    iconPaused     = timerPrefs.getString("ICON_PAUSE", "");
+    iconFinished   = timerPrefs.getString("ICON_FIN",   "");
     timerPrefs.end();
+
+    if (TIMER_ICON_IDLE.length()     > 0) iconIdle     = TIMER_ICON_IDLE;
+    if (TIMER_ICON_RUNNING.length()  > 0) iconRunning  = TIMER_ICON_RUNNING;
+    if (TIMER_ICON_PAUSED.length()   > 0) iconPaused   = TIMER_ICON_PAUSED;
+    if (TIMER_ICON_FINISHED.length() > 0) iconFinished = TIMER_ICON_FINISHED;
 
     if (durationSec < 1) durationSec = 1;
     if (TIMER_MAX_DURATION > 0 && durationSec > TIMER_MAX_DURATION) durationSec = TIMER_MAX_DURATION;
@@ -58,7 +67,78 @@ void TimerManager_::persist()
     timerPrefs.putUInt("DUR", durationSec);
     timerPrefs.putUChar("BUZ", (uint8_t)buzzerMode);
     timerPrefs.putUChar("FIN", (uint8_t)finishedMode);
+    timerPrefs.putString("ICON_IDLE",  iconIdle);
+    timerPrefs.putString("ICON_RUN",   iconRunning);
+    timerPrefs.putString("ICON_PAUSE", iconPaused);
+    timerPrefs.putString("ICON_FIN",   iconFinished);
     timerPrefs.end();
+}
+
+String TimerManager_::capIconName(const String &name)
+{
+    if (name.length() > 32) return name.substring(0, 32);
+    return name;
+}
+
+const String &TimerManager_::getIconForState(TimerState s) const
+{
+    switch (s)
+    {
+        case TimerState::Running:
+            if (iconRunning.length()  > 0) return iconRunning;
+            break;
+        case TimerState::Paused:
+            if (iconPaused.length()   > 0) return iconPaused;
+            break;
+        case TimerState::Finished:
+            if (iconFinished.length() > 0) return iconFinished;
+            break;
+        case TimerState::Idle:
+        default:
+            break;
+    }
+    return iconIdle;
+}
+
+void TimerManager_::setIconIdle(const String &name, bool publish)
+{
+    String n = capIconName(name);
+    if (iconIdle == n) return;
+    iconIdle = n;
+    persist();
+    if (publish) publishIcons();
+}
+
+void TimerManager_::setIconRunning(const String &name, bool publish)
+{
+    String n = capIconName(name);
+    if (iconRunning == n) return;
+    iconRunning = n;
+    persist();
+    if (publish) publishIcons();
+}
+
+void TimerManager_::setIconPaused(const String &name, bool publish)
+{
+    String n = capIconName(name);
+    if (iconPaused == n) return;
+    iconPaused = n;
+    persist();
+    if (publish) publishIcons();
+}
+
+void TimerManager_::setIconFinished(const String &name, bool publish)
+{
+    String n = capIconName(name);
+    if (iconFinished == n) return;
+    iconFinished = n;
+    persist();
+    if (publish) publishIcons();
+}
+
+void TimerManager_::publishIcons()
+{
+    MQTTManager.publishTimerIcons(iconIdle, iconRunning, iconPaused, iconFinished);
 }
 
 uint32_t TimerManager_::computeCurrentRemaining() const
@@ -345,13 +425,17 @@ void TimerManager_::parseCommand(const char *json)
 
     if (inConfig) exitConfigMode();
 
-    DynamicJsonDocument doc(256);
+    DynamicJsonDocument doc(512);
     if (deserializeJson(doc, json) != DeserializationError::Ok) return;
 
     if (doc.containsKey("duration"))
     {
         setDuration(doc["duration"].as<uint32_t>());
     }
+    if (doc.containsKey("icon_idle"))     setIconIdle    (doc["icon_idle"].as<String>());
+    if (doc.containsKey("icon_running"))  setIconRunning (doc["icon_running"].as<String>());
+    if (doc.containsKey("icon_paused"))   setIconPaused  (doc["icon_paused"].as<String>());
+    if (doc.containsKey("icon_finished")) setIconFinished(doc["icon_finished"].as<String>());
     if (doc.containsKey("buzzer"))
     {
         String b = doc["buzzer"].as<String>();

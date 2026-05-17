@@ -19,14 +19,18 @@ physical buttons on the Ulanzi TC001.
 
 Accepts a JSON payload. **All keys are optional**; only the supplied ones
 take effect. Keys are processed in this order: `duration` → `buzzer` →
-`finished` → `action`, so you can configure and start a timer in one
-publish.
+`finished` → `icon_*` → `action`, so you can configure icons and start a
+timer in one publish.
 
 | Key | Type | Values | Effect |
 | --- | --- | --- | --- |
 | `duration` | int | 1 to `TIMER_MAX_DURATION` (default 86400 = 24 h); clamped on out-of-range | Sets the timer duration in seconds. Persists to NVS. |
 | `buzzer`   | string | `"off"`, `"end"`, `"countdown"` (case-insensitive) | Sets the buzzer mode. Persists to NVS. |
 | `finished` | string | `"auto-clear"` (or `"autoclear"`), `"hold"`, `"re-alert"` (or `"realert"`) | Sets the finished-mode. Persists to NVS. |
+| `icon_idle`     | string | Bare icon name resolved against `/ICONS/<name>.{jpg,gif}`; empty string clears the slot; capped at 32 chars | Icon shown in the **Idle** state and used as fallback for any other state whose slot is empty. Persists to NVS. |
+| `icon_running`  | string | Same. Empty clears (then falls back to `icon_idle`). | Icon shown while counting down. Persists. |
+| `icon_paused`   | string | Same. Empty clears (then falls back to `icon_idle`). | Icon shown while paused. Persists. |
+| `icon_finished` | string | Same. Empty clears (then falls back to `icon_idle`). | Icon shown beneath the blinking `0:00`. Persists. |
 | `action`   | string | `"start"`, `"pause"`, `"reset"` (case-insensitive) | Drives the state machine. |
 
 ### Examples
@@ -56,6 +60,32 @@ Reset to idle (also clears any active timer notification):
 ```json
 {"action": "reset"}
 ```
+
+Set per-state icons in one publish (Idle stays as fallback; Running uses
+an animated GIF; clear the Paused slot):
+```json
+{"icon_idle": "64936", "icon_running": "74706", "icon_paused": ""}
+```
+
+### Published icon state
+
+The current icon configuration is mirrored to a retained JSON topic so
+subscribers (including the device itself on reconnect) see the latest
+values without reading NVS:
+
+```
+{MQTT_PREFIX}/timer/icons    (retained)
+```
+
+Payload shape:
+
+```json
+{"idle": "64936", "running": "74706", "paused": "", "finished": ""}
+```
+
+Published on MQTT connect and on every change made through the
+`{MQTT_PREFIX}/timer` command topic, `POST /api/timer`, or a boot-time
+`dev.json` reload.
 
 ### State machine
 
@@ -158,13 +188,27 @@ is anchored at column 31; the left edge sweeps rightward as time elapses.
 
 The Timer app is always present in the rotation regardless of state.
 
+### Icon resolution
+
+Per state, the renderer looks up the configured slot (`icon_idle` /
+`icon_running` / `icon_paused` / `icon_finished`). If that slot is empty
+it falls back to `icon_idle`. If `icon_idle` is also empty (or the
+configured file isn't on the filesystem), the original 8 × 8 icon is drawn.
+
+The configured value is a **bare name** (no extension). The loader
+checks `/ICONS/<name>.jpg` first, then `/ICONS/<name>.gif`, and uses
+whichever exists. Animated GIFs Just Work: whenever the resolved icon
+changes (state transition or setter mid-run) the GIF restarts at frame 0
+and the previous file handle is released. Icon files are uploaded via
+the existing web UI — nothing about icons is bundled in firmware.
+
 ---
 
 ## Persistence
 
 | Field | Persisted? |
 | --- | --- |
-| `duration`, `buzzer mode`, `finished mode` | Yes (NVS namespace `"timer"`, keys `DUR`/`BUZ`/`FIN`). Survives reboot. |
+| `duration`, `buzzer mode`, `finished mode`, per-state icons | Yes (NVS namespace `"timer"`, keys `DUR` / `BUZ` / `FIN` / `ICON_IDLE` / `ICON_RUN` / `ICON_PAUSE` / `ICON_FIN`). Survives reboot, **but** any matching key in `dev.json` overrides NVS on every boot — see [`dev.md`](dev.md). |
 | Runtime state (Running / Paused / Finished, remaining seconds, elapsed time) | **No.** A reboot mid-run returns the device to `Idle` with the saved duration. This is intentional — the device has no RTC backup and resuming a timer with a wrong elapsed-time estimate would be worse than restarting. |
 
 ---

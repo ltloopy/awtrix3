@@ -16,6 +16,7 @@
 
 std::map<String, uint32_t> Preferences::u32_;
 std::map<String, uint8_t>  Preferences::u8_;
+std::map<String, String>   Preferences::str_;
 
 LittleFS_Stub LittleFS;
 
@@ -41,5 +42,9 @@ uint16_t TIMER_FINISHED_HOLD    = 10;
 uint16_t TIMER_REALERT_INTERVAL = 15;
 uint16_t TIMER_COUNTDOWN_SECONDS = 3;
 uint16_t TIMER_CONFIG_TIMEOUT   = 30;
+String   TIMER_ICON_IDLE        = "";
+String   TIMER_ICON_RUNNING     = "";
+String   TIMER_ICON_PAUSED      = "";
+String   TIMER_ICON_FINISHED    = "";
 
 uint32_t TEXTCOLOR_888 = 0xFFFFFF;

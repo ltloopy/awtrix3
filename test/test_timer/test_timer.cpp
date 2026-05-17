@@ -228,6 +228,48 @@ void test_U8_realert_replays_at_interval(void) {
     TEST_ASSERT_EQUAL_size_t(3, PeripheryManager.play_calls.size());
 }
 
+// ============================================================================
+// U9 — getIconForState: all slots empty returns empty
+// ============================================================================
+void test_U9_getIconForState_all_empty(void) {
+    TimerManager.setIconIdle("",     false);
+    TimerManager.setIconRunning("",  false);
+    TimerManager.setIconPaused("",   false);
+    TimerManager.setIconFinished("", false);
+    TEST_ASSERT_EQUAL_STRING("", TimerManager.getIconForState(TimerState::Idle).c_str());
+    TEST_ASSERT_EQUAL_STRING("", TimerManager.getIconForState(TimerState::Running).c_str());
+    TEST_ASSERT_EQUAL_STRING("", TimerManager.getIconForState(TimerState::Paused).c_str());
+    TEST_ASSERT_EQUAL_STRING("", TimerManager.getIconForState(TimerState::Finished).c_str());
+}
+
+// ============================================================================
+// U10 — getIconForState: only Idle set inherits for all states
+// ============================================================================
+void test_U10_getIconForState_only_idle_inherits(void) {
+    TimerManager.setIconIdle("64936", false);
+    TimerManager.setIconRunning("",   false);
+    TimerManager.setIconPaused("",    false);
+    TimerManager.setIconFinished("",  false);
+    TEST_ASSERT_EQUAL_STRING("64936", TimerManager.getIconForState(TimerState::Idle).c_str());
+    TEST_ASSERT_EQUAL_STRING("64936", TimerManager.getIconForState(TimerState::Running).c_str());
+    TEST_ASSERT_EQUAL_STRING("64936", TimerManager.getIconForState(TimerState::Paused).c_str());
+    TEST_ASSERT_EQUAL_STRING("64936", TimerManager.getIconForState(TimerState::Finished).c_str());
+}
+
+// ============================================================================
+// U11 — getIconForState: per-state set returns own value; empty falls to Idle
+// ============================================================================
+void test_U11_getIconForState_per_state_with_idle_fallback(void) {
+    TimerManager.setIconIdle("64936",    false);
+    TimerManager.setIconRunning("74706", false);
+    TimerManager.setIconPaused("",       false);
+    TimerManager.setIconFinished("9999", false);
+    TEST_ASSERT_EQUAL_STRING("64936", TimerManager.getIconForState(TimerState::Idle).c_str());
+    TEST_ASSERT_EQUAL_STRING("74706", TimerManager.getIconForState(TimerState::Running).c_str());
+    TEST_ASSERT_EQUAL_STRING("64936", TimerManager.getIconForState(TimerState::Paused).c_str());
+    TEST_ASSERT_EQUAL_STRING("9999",  TimerManager.getIconForState(TimerState::Finished).c_str());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
@@ -238,5 +280,8 @@ int main(int, char **) {
     RUN_TEST(test_U6_parseCommand_noop_when_disabled);
     RUN_TEST(test_U7_onShowTimerChange_resets_running_timer);
     RUN_TEST(test_U8_realert_replays_at_interval);
+    RUN_TEST(test_U9_getIconForState_all_empty);
+    RUN_TEST(test_U10_getIconForState_only_idle_inherits);
+    RUN_TEST(test_U11_getIconForState_per_state_with_idle_fallback);
     return UNITY_END();
 }

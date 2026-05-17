@@ -32,6 +32,7 @@ public:
     void publishTimerState(const char *stateStr);
     void publishTimerBuzzer(uint8_t index);
     void publishTimerFinished(uint8_t index);
+    void publishTimerIcons(const String &idle, const String &running, const String &paused, const String &finished);
 };
 extern MQTTManager_ &MQTTManager;
 

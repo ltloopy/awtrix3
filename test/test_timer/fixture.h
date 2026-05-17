@@ -54,6 +54,10 @@ inline void reset_all() {
     TIMER_REALERT_INTERVAL  = 15;
     TIMER_COUNTDOWN_SECONDS = 3;
     TIMER_CONFIG_TIMEOUT    = 30;
+    TIMER_ICON_IDLE         = "";
+    TIMER_ICON_RUNNING      = "";
+    TIMER_ICON_PAUSED       = "";
+    TIMER_ICON_FINISHED     = "";
 }
 
 inline int count_publish(PublishCall::Kind k) {

@@ -18,6 +18,11 @@ private:
     uint32_t durationSec = 300;
     uint32_t remainingSec = 300;
 
+    String iconIdle;
+    String iconRunning;
+    String iconPaused;
+    String iconFinished;
+
     unsigned long runStartMs = 0;
     uint32_t runStartRemainingSec = 0;
     unsigned long enteredFinishedMs = 0;
@@ -42,6 +47,8 @@ private:
     void publishFinishedMode();
     void persist();
 
+    static String capIconName(const String &name);
+
 public:
     static TimerManager_ &getInstance();
     void setup();
@@ -54,6 +61,13 @@ public:
     void setDuration(uint32_t seconds);
     void setBuzzerMode(BuzzerMode m);
     void setFinishedMode(FinishedMode m);
+
+    void setIconIdle    (const String &name, bool publish = true);
+    void setIconRunning (const String &name, bool publish = true);
+    void setIconPaused  (const String &name, bool publish = true);
+    void setIconFinished(const String &name, bool publish = true);
+
+    void publishIcons();
 
     void parseCommand(const char *json);
 
@@ -74,6 +88,12 @@ public:
     uint32_t     getDuration()     const { return durationSec; }
     BuzzerMode   getBuzzerMode()   const { return buzzerMode; }
     FinishedMode getFinishedMode() const { return finishedMode; }
+
+    const String &getIconIdle()     const { return iconIdle; }
+    const String &getIconRunning()  const { return iconRunning; }
+    const String &getIconPaused()   const { return iconPaused; }
+    const String &getIconFinished() const { return iconFinished; }
+    const String &getIconForState(TimerState s) const;
 
     const char *getStateString() const;
 };
