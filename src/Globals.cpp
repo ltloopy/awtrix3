@@ -211,11 +211,6 @@ void loadDevSettings()
             SHOW_TIMER = doc["show_timer"].as<bool>();
         }
 
-        if (doc.containsKey("timer_hide_when_idle"))
-        {
-            TIMER_HIDE_WHEN_IDLE = doc["timer_hide_when_idle"].as<bool>();
-        }
-
         if (doc.containsKey("timer_max_duration"))
         {
             TIMER_MAX_DURATION = doc["timer_max_duration"].as<uint32_t>();
@@ -502,7 +497,6 @@ bool DEBUG_MODE = true;
 uint8_t MIN_BRIGHTNESS = 2;
 bool SHOW_TIMER = true;
 bool SHOW_TIMER_HA_PREV = true;
-bool TIMER_HIDE_WHEN_IDLE = true;
 uint32_t TIMER_MAX_DURATION = 86400;
 uint32_t TIMER_STEP = 1;
 uint16_t TIMER_PUBLISH_INTERVAL = 1;

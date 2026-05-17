@@ -3,7 +3,6 @@
 #include "PeripheryManager.h"
 #include "DisplayManager.h"
 #include "MQTTManager.h"
-#include "Overlays.h"
 #include <Preferences.h>
 #include <LittleFS.h>
 #include <ArduinoJson.h>
@@ -83,11 +82,6 @@ const char *TimerManager_::getStateString() const
     return "idle";
 }
 
-bool TimerManager_::isHidden() const
-{
-    return state == TimerState::Idle && TIMER_HIDE_WHEN_IDLE && !inConfig;
-}
-
 void TimerManager_::enterConfigMode()
 {
     if (state != TimerState::Idle) return;
@@ -153,40 +147,21 @@ void TimerManager_::enterFinished()
     lastRealertMs = enteredFinishedMs;
     publishState();
     publishRemaining();
-    pushTimerNotification();
-}
 
-void TimerManager_::pushTimerNotification()
-{
-    Notification n;
-    n.text       = "00:00";
-    n.color      = TEXTCOLOR_888;
-    n.channel    = "timer";
-    n.wakeup     = true;
-    n.center     = true;
-    n.noScrolling = true;
-    n.hold       = (finishedMode != FinishedMode::AutoClear);
-    n.duration   = (finishedMode == FinishedMode::AutoClear) ? (long)TIMER_FINISHED_HOLD * 1000L : 0;
-    n.blink      = (finishedMode != FinishedMode::AutoClear) ? 500 : 0;
-    n.startime   = millis();
+    if (!GAME_ACTIVE && !BLOCK_NAVIGATION)
+    {
+        String j = "{\"name\":\"Timer\"}";
+        DisplayManager.switchToApp(j.c_str());
+    }
+    if (MATRIX_OFF)
+    {
+        DisplayManager.setBrightness(BRIGHTNESS);
+    }
     if (SOUND_ACTIVE && buzzerMode != BuzzerMode::Off)
     {
-        n.rtttl = loadRtttlFromFile("/MELODIES/timer_end.txt", FALLBACK_END_RTTTL);
+        String t = loadRtttlFromFile("/MELODIES/timer_end.txt", FALLBACK_END_RTTTL);
+        if (t.length() > 0) PeripheryManager.playRTTTLString(t);
     }
-    notifications.push_back(n);
-}
-
-void TimerManager_::dismissTimerOverlay()
-{
-    bool hadTimerFront = !notifications.empty() && notifications.front().channel == "timer";
-    if (hadTimerFront)
-    {
-        PeripheryManager.stopSound();
-    }
-    notifications.erase(
-        std::remove_if(notifications.begin(), notifications.end(),
-                       [](const Notification &n) { return n.channel == "timer"; }),
-        notifications.end());
 }
 
 void TimerManager_::start()
@@ -194,7 +169,7 @@ void TimerManager_::start()
     if (state == TimerState::Running) return;
     if (state == TimerState::Finished)
     {
-        dismissTimerOverlay();
+        PeripheryManager.stopSound();
         remainingSec = durationSec;
     }
     else if (state == TimerState::Idle)
@@ -221,20 +196,15 @@ void TimerManager_::pause()
 
 void TimerManager_::reset()
 {
-    bool wasCurrentTimerApp = (CURRENT_APP == "Timer");
-    if (state == TimerState::Finished)
-    {
-        dismissTimerOverlay();
-    }
     PeripheryManager.stopSound();
     state = TimerState::Idle;
     remainingSec = durationSec;
     lastTickedSecond = -1;
     publishState();
     publishRemaining();
-    if (wasCurrentTimerApp && TIMER_HIDE_WHEN_IDLE)
+    if (MATRIX_OFF)
     {
-        DisplayManager.nextApp();
+        DisplayManager.setBrightness(0);
     }
 }
 
@@ -342,11 +312,15 @@ void TimerManager_::tick()
         if (finishedMode == FinishedMode::AutoClear
             && (now - enteredFinishedMs >= (unsigned long)TIMER_FINISHED_HOLD * 1000UL))
         {
-            dismissTimerOverlay();
+            PeripheryManager.stopSound();
             state = TimerState::Idle;
             remainingSec = durationSec;
             publishState();
             publishRemaining();
+            if (MATRIX_OFF)
+            {
+                DisplayManager.setBrightness(0);
+            }
             return;
         }
 
@@ -360,20 +334,6 @@ void TimerManager_::tick()
                 if (t.length() > 0) PeripheryManager.playRTTTLString(t);
             }
             lastRealertMs = now;
-        }
-
-        bool hasTimerNotification = false;
-        for (const auto &n : notifications)
-        {
-            if (n.channel == "timer") { hasTimerNotification = true; break; }
-        }
-        if (!hasTimerNotification)
-        {
-            PeripheryManager.stopSound();
-            state = TimerState::Idle;
-            remainingSec = durationSec;
-            publishState();
-            publishRemaining();
         }
     }
 }

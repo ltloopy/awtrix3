@@ -40,16 +40,15 @@ attach the filled-out copy to the PR.
       reboot
 
 ## B2. Display & rendering
-- [ ] When state==Idle and `TIMER_HIDE_WHEN_IDLE=true`, Timer app is
-      skipped in the rotation
-- [ ] Set `TIMER_HIDE_WHEN_IDLE=false`, restart — Timer app appears in
-      rotation showing the duration in MM:SS / HH:MM:SS
-- [ ] Running: time advances once per second; progress bar fills
-      proportionally
-- [ ] Paused: time display freezes; visual indicator distinguishes from
-      running (icon / blink / dim — note actual behavior in PR)
-- [ ] Finished: shows `00:00`; AutoClear stops displaying after ~10 s;
-      Hold blinks at 500 ms indefinitely
+- [ ] Timer app is always present in the rotation regardless of state
+- [ ] Idle: icon + configured duration text, no progress bar
+- [ ] Running: time advances once per second; progress bar drains from
+      the left (right edge anchored at column 31)
+- [ ] Paused: time display freezes; bar holds at its current width
+- [ ] Finished: Timer app pulls to foreground, display wakes if asleep,
+      icon + `0:00` blinking at 500 ms, no progress bar
+- [ ] AutoClear: after ~10 s returns to Idle and rotation resumes
+- [ ] Hold: blinking `0:00` persists until reset
 
 ## B3. Physical buttons (Timer app focused)
 - [ ] Long-press middle from Idle → enters config mode, `HH` field

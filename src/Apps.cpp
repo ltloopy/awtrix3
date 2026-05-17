@@ -450,12 +450,6 @@ void TimerApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x,
     if (notifyFlag)
         return;
 
-    if (TimerManager.isHidden())
-    {
-        DisplayManager.nextApp();
-        return;
-    }
-
     CURRENT_APP = "Timer";
     currentCustomApp = "";
 
@@ -482,8 +476,21 @@ void TimerApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x,
 
     drawTimerIcon(matrix, x, y, TEXTCOLOR_888);
 
-    uint32_t remaining = TimerManager.getRemaining();
+    TimerState ts = TimerManager.getState();
+
+    if (ts == TimerState::Finished)
+    {
+        state->ticksSinceLastStateSwitch = 0;
+        if ((millis() / 500) % 2 == 0)
+        {
+            DisplayManager.setTextColor(TEXTCOLOR_888);
+            DisplayManager.printText(11 + x, 6 + y, "0:00", false, 0);
+        }
+        return;
+    }
+
     uint32_t duration  = TimerManager.getDuration();
+    uint32_t remaining = (ts == TimerState::Idle) ? duration : TimerManager.getRemaining();
 
     char buf[10];
     if (remaining < 3600)
@@ -502,13 +509,14 @@ void TimerApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x,
     DisplayManager.setTextColor(TEXTCOLOR_888);
     DisplayManager.printText(11 + x, 6 + y, buf, false, 0);
 
-    if (duration > 0)
+    if (ts != TimerState::Idle && duration > 0)
     {
         int barLen = (int)((23UL * remaining) / duration);
         if (barLen > 0)
         {
             if (barLen > 23) barLen = 23;
-            matrix->drawFastHLine(9 + x, 7 + y, barLen, TEXTCOLOR_888);
+            int startX = 9 + (23 - barLen);
+            matrix->drawFastHLine(startX + x, 7 + y, barLen, TEXTCOLOR_888);
         }
     }
 }

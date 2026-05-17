@@ -43,9 +43,10 @@ inline void reset_all() {
     SOUND_ACTIVE      = true;
     BLOCK_NAVIGATION  = false;
     GAME_ACTIVE       = false;
+    MATRIX_OFF        = false;
+    BRIGHTNESS        = 100;
 
     SHOW_TIMER              = true;
-    TIMER_HIDE_WHEN_IDLE    = true;
     TIMER_MAX_DURATION      = 86400;
     TIMER_STEP              = 1;
     TIMER_PUBLISH_INTERVAL  = 1;

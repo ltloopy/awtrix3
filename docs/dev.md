@@ -41,7 +41,6 @@ The JSON object has the following properties:
 | `swap_buttons` | boolean | Swaps the left and right hardware button. | false |
 | `ldr_on_ground` | boolean | Sets the LDR configuration to LDR-on-ground. | false |
 | `show_timer` | boolean | Master enable for the [Timer app](https://blueforcer.github.io/awtrix3/#/apps?id=timer). When `false`: app removed from rotation, 8 HA entities not published, `POST /api/timer` and the `{prefix}/timer` MQTT topic ignored, any running timer reset. On the `true → false` transition the firmware publishes empty retained discovery payloads so HA prunes the stale entities. Also exposed via `/api/settings` (`TIMER` key) and the on-device **APPS** menu. | `true` |
-| `timer_hide_when_idle` | boolean | Auto-skips the Timer app in the rotation while it is in `idle` state. | `true` |
 | `timer_max_duration` | integer | Maximum duration (seconds) the Home Assistant Number entity allows. | `86400` |
 | `timer_step` | integer | Step size (seconds) for the Home Assistant Number entity. | `1` |
 | `timer_publish_interval` | integer | Seconds between `remaining` publishes while the timer is running. `0` = state-change only. | `1` |

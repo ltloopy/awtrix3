@@ -126,10 +126,10 @@ The Timer app counts down a configurable duration with on-device and remote cont
 
 | State | Visible behaviour |
 | --- | --- |
-| `idle` | App is skipped in rotation (unless `timer_hide_when_idle` is `false` in dev.json, in which case it shows the configured duration with a full bar) |
-| `running` | Time counts down, bar depletes |
+| `idle` | App shows the configured duration with no progress bar |
+| `running` | Time counts down; progress bar drains from the left (right edge anchored at column 31) |
 | `paused` | Time and bar frozen at the current value |
-| `finished` | A `00:00` notification overlays on top of the current app; depending on the finished mode it auto-clears, holds, or re-alerts |
+| `finished` | Timer app pulls itself to the foreground, wakes the display if it was asleep, and blinks `0:00` at 500 ms with no progress bar. Depending on finished mode it auto-clears, holds, or re-alerts |
 
 #### Physical controls
 
@@ -174,7 +174,7 @@ The dialed value is silently clamped to `[1, timer_max_duration]` on save. Each 
 
 Notifications that arrive while config mode is active are deferred (up to 10) and displayed when you exit, so a passing notification can't disturb the editing session. Remote commands from HA or the native API exit config first (saving the in-progress edit), then execute.
 
-> **Important:** the timer auto-hides from the rotation when idle by default, which means you can't reach this gesture without first disabling `timer_hide_when_idle` in [dev.json](https://blueforcer.github.io/awtrix3/#/dev). With auto-hide enabled, the only way to dial in a duration is via Home Assistant or the [native API](https://blueforcer.github.io/awtrix3/#/api?id=timer-control).
+The Timer app is always visible in the rotation, so you can reach this gesture whenever the Timer app is on screen and `idle`. You can also set the duration via Home Assistant or the [native API](https://blueforcer.github.io/awtrix3/#/api?id=timer-control).
 
 The timeout can be tuned via the `timer_config_timeout` key in dev.json.
 

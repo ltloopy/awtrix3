@@ -29,10 +29,11 @@ String   CURRENT_APP       = "Time";
 bool     SOUND_ACTIVE      = true;
 bool     BLOCK_NAVIGATION  = false;
 bool     GAME_ACTIVE       = false;
+bool     MATRIX_OFF        = false;
+uint8_t  BRIGHTNESS        = 100;
 
 bool     SHOW_TIMER             = true;
 bool     SHOW_TIMER_HA_PREV     = true;
-bool     TIMER_HIDE_WHEN_IDLE   = true;
 uint32_t TIMER_MAX_DURATION     = 86400;
 uint32_t TIMER_STEP             = 1;
 uint16_t TIMER_PUBLISH_INTERVAL = 1;

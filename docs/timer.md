@@ -145,13 +145,18 @@ Field bounds: `HH` wraps `99 ↔ 0`; `MM`/`SS` wrap `59 ↔ 0`.
 
 ## Display
 
-The Timer app renders the timer icon, the remaining time (`HH:MM:SS` or
-`MM:SS` for durations under one hour), and a progress bar that empties as
-time elapses.
+The Timer app renders the timer icon, the time text, and (while
+Running/Paused) a progress bar that drains from the left — the right edge
+is anchored at column 31; the left edge sweeps rightward as time elapses.
 
-When state is `Idle` and `TIMER_HIDE_WHEN_IDLE=true` (default), the Timer
-app is skipped in the rotation. Setting `TIMER_HIDE_WHEN_IDLE=false` keeps
-the timer visible at all times.
+- **Idle:** icon + configured duration text (`MM:SS` / `HH:MM`), no bar.
+- **Running / Paused:** icon + remaining time text + draining bar.
+- **Finished:** icon + blinking `0:00` (500 ms cadence), no bar. The
+  Timer app pulls itself to the foreground and wakes the display when
+  the timer reaches zero. AutoClear returns to Idle after
+  `TIMER_FINISHED_HOLD` seconds; Hold / ReAlert stay until reset.
+
+The Timer app is always present in the rotation regardless of state.
 
 ---
 
@@ -173,7 +178,6 @@ compile-time defaults overridable via [`dev.json`](dev.md).
 | Global | Default | Effect |
 | --- | --- | --- |
 | `SHOW_TIMER` | `true` | Master enable. When `false`, the Timer app is hidden from rotation, the 8 Home Assistant entities are not published, `POST /api/timer` and the MQTT `{prefix}/timer` topic are ignored, and any running timer is reset. On the `true → false` transition the firmware publishes empty retained discovery payloads so HA prunes the stale entities on next reconnect. Toggle from `/api/settings` (`TIMER` key), `dev.json` (`show_timer`), or the on-device **APPS** menu (last entry). |
-| `TIMER_HIDE_WHEN_IDLE` | `true` | Skip Timer app when state is Idle. |
 | `TIMER_MAX_DURATION` | `86400` (24 h) | Upper clamp for `setDuration`. |
 | `TIMER_STEP` | `1` | Increment step for left/right adjusts in config mode. |
 | `TIMER_PUBLISH_INTERVAL` | `1` (s) | How often `timer_rem` re-publishes while running. |

@@ -14,15 +14,18 @@ public:
     void switchToApp(const char *json) {
         switch_to_calls.push_back(String(json ? json : ""));
     }
+    void setBrightness(uint8_t b) { brightness_calls.push_back(b); }
 
     int drain_calls = 0;
     int next_app_calls = 0;
     std::vector<String> switch_to_calls;
+    std::vector<uint8_t> brightness_calls;
 
     void __test_reset() {
         drain_calls = 0;
         next_app_calls = 0;
         switch_to_calls.clear();
+        brightness_calls.clear();
     }
 };
 

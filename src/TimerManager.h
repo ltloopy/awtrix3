@@ -40,8 +40,6 @@ private:
     void publishDuration();
     void publishBuzzerMode();
     void publishFinishedMode();
-    void pushTimerNotification();
-    void dismissTimerOverlay();
     void persist();
 
 public:
@@ -78,7 +76,6 @@ public:
     FinishedMode getFinishedMode() const { return finishedMode; }
 
     const char *getStateString() const;
-    bool isHidden() const;
 };
 
 extern TimerManager_ &TimerManager;

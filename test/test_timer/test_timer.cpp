@@ -1,11 +1,7 @@
-// Starter unit tests U1–U5 for TimerManager. Proves every layer of the
+// Starter unit tests U1–U8 for TimerManager. Proves every layer of the
 // native test scaffolding: ArduinoFake millis mocking, recording-mock
 // ordering (MQTT), stateful fakes (notifications, PeripheryManager),
 // Preferences round-trip, and the AutoClear lifecycle end-to-end.
-//
-// Follow-up tests U6–U22 are enumerated in the plan file at
-// ~/.claude/plans/review-this-branch-and-enumerated-hummingbird.md and
-// should be filed as separate issues + PRs.
 
 #include <unity.h>
 #include <ArduinoFake.h>
@@ -97,10 +93,11 @@ void test_U3_start_from_idle_publishes_state_then_remaining(void) {
 }
 
 // ============================================================================
-// U4 — tick across zero produces Finished + timer notification
-// Proves: stateful notifications fake + ArduinoFake time mocking work together.
+// U4 — tick across zero enters Finished, plays end melody once, no overlay
+// Proves: enterFinished() plays sound inline and no overlay notification is
+// pushed (the rendering now lives in TimerApp itself).
 // ============================================================================
-void test_U4_tick_crosses_zero_finishes_with_notification(void) {
+void test_U4_tick_crosses_zero_enters_finished(void) {
     TimerManager.setDuration(5);
     TimerManager.start();
     TEST_ASSERT_EQUAL_UINT32(5, TimerManager.getRemaining());
@@ -112,15 +109,16 @@ void test_U4_tick_crosses_zero_finishes_with_notification(void) {
                       static_cast<int>(TimerManager.getState()));
     TEST_ASSERT_EQUAL_UINT32(0, TimerManager.getRemaining());
 
-    TEST_ASSERT_EQUAL_size_t(1, notifications.size());
-    TEST_ASSERT_EQUAL_STRING("timer", notifications[0].channel.c_str());
-    TEST_ASSERT_TRUE(notifications[0].wakeup);
-    TEST_ASSERT_TRUE(notifications[0].center);
+    // No overlay notification pushed — rendering happens inside TimerApp now.
+    TEST_ASSERT_EQUAL_size_t(0, notifications.size());
+
+    // End melody plays exactly once on entering Finished.
+    TEST_ASSERT_EQUAL_size_t(1, PeripheryManager.play_calls.size());
 }
 
 // ============================================================================
 // U5 — AutoClear path returns to Idle after TIMER_FINISHED_HOLD
-// Proves: AutoClear lifecycle end-to-end across mock + stateful boundary.
+// Proves: AutoClear lifecycle without the notification path.
 // ============================================================================
 void test_U5_autoclear_returns_to_idle_after_hold(void) {
     // Arrange: a freshly-fired finished AutoClear timer.
@@ -130,16 +128,14 @@ void test_U5_autoclear_returns_to_idle_after_hold(void) {
     TimerManager.tick();
     TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Finished),
                       static_cast<int>(TimerManager.getState()));
-    TEST_ASSERT_EQUAL_size_t(1, notifications.size());
 
     // Act: advance the AutoClear hold window and tick.
     fixture::advance(static_cast<uint32_t>(TIMER_FINISHED_HOLD) * 1000U + 100U);
     TimerManager.tick();
 
-    // Assert: state returned to Idle, notification cleared, last state publish == "idle".
+    // Assert: state returned to Idle; last state publish == "idle".
     TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle),
                       static_cast<int>(TimerManager.getState()));
-    TEST_ASSERT_EQUAL_size_t(0, notifications.size());
     const PublishCall *last = fixture::last_publish(PublishCall::State);
     TEST_ASSERT_NOT_NULL(last);
     TEST_ASSERT_EQUAL_STRING("idle", last->state_str.c_str());
@@ -199,14 +195,48 @@ void test_U7_onShowTimerChange_resets_running_timer(void) {
                       static_cast<int>(TimerManager.getState()));
 }
 
+// ============================================================================
+// U8 — ReAlert replays the end melody at TIMER_REALERT_INTERVAL
+// Proves: ReAlert keeps retriggering single-play replays until cleared.
+// ============================================================================
+void test_U8_realert_replays_at_interval(void) {
+    TimerManager.setFinishedMode(FinishedMode::ReAlert);
+    TimerManager.setDuration(2);
+    TimerManager.start();
+
+    // Cross zero → initial play.
+    fixture::advance(2000);
+    TimerManager.tick();
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Finished),
+                      static_cast<int>(TimerManager.getState()));
+    TEST_ASSERT_EQUAL_size_t(1, PeripheryManager.play_calls.size());
+
+    // The previous play left the player "playing". ReAlert skips replay
+    // while still playing, so simulate the melody having ended.
+    PeripheryManager.__test_set_playing(false);
+
+    // First re-alert after TIMER_REALERT_INTERVAL.
+    fixture::advance(static_cast<uint32_t>(TIMER_REALERT_INTERVAL) * 1000U + 100U);
+    TimerManager.tick();
+    TEST_ASSERT_EQUAL_size_t(2, PeripheryManager.play_calls.size());
+
+    PeripheryManager.__test_set_playing(false);
+
+    // Second re-alert another TIMER_REALERT_INTERVAL later.
+    fixture::advance(static_cast<uint32_t>(TIMER_REALERT_INTERVAL) * 1000U + 100U);
+    TimerManager.tick();
+    TEST_ASSERT_EQUAL_size_t(3, PeripheryManager.play_calls.size());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
     RUN_TEST(test_U2_parseCommand_null_empty_garbage_are_noops);
     RUN_TEST(test_U3_start_from_idle_publishes_state_then_remaining);
-    RUN_TEST(test_U4_tick_crosses_zero_finishes_with_notification);
+    RUN_TEST(test_U4_tick_crosses_zero_enters_finished);
     RUN_TEST(test_U5_autoclear_returns_to_idle_after_hold);
     RUN_TEST(test_U6_parseCommand_noop_when_disabled);
     RUN_TEST(test_U7_onShowTimerChange_resets_running_timer);
+    RUN_TEST(test_U8_realert_replays_at_interval);
     return UNITY_END();
 }

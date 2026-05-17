@@ -571,6 +571,15 @@ void onMqttConnected()
         }
         myOwnID->setValue(MQTT_PREFIX.c_str());
         version->setValue(VERSION);
+
+        if (SHOW_TIMER)
+        {
+            MQTTManager.publishTimerDuration(TimerManager.getDuration());
+            MQTTManager.publishTimerRemaining(TimerManager.getRemaining());
+            MQTTManager.publishTimerState(TimerManager.getStateString());
+            MQTTManager.publishTimerBuzzer((uint8_t)TimerManager.getBuzzerMode());
+            MQTTManager.publishTimerFinished((uint8_t)TimerManager.getFinishedMode());
+        }
     }
 
     MQTTManager.publish("stats/effects", DisplayManager.getEffectNames().c_str());
