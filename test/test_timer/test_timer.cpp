@@ -145,6 +145,60 @@ void test_U5_autoclear_returns_to_idle_after_hold(void) {
     TEST_ASSERT_EQUAL_STRING("idle", last->state_str.c_str());
 }
 
+// ============================================================================
+// U6 — parseCommand is a no-op when SHOW_TIMER is false
+// Proves: the disable flag short-circuits HTTP + MQTT command surfaces.
+// ============================================================================
+void test_U6_parseCommand_noop_when_disabled(void) {
+    SHOW_TIMER = false;
+
+    TimerManager.parseCommand("{\"action\":\"start\"}");
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle),
+                      static_cast<int>(TimerManager.getState()));
+
+    uint32_t baseline = TimerManager.getDuration();
+    TimerManager.parseCommand("{\"duration\":120}");
+    TEST_ASSERT_EQUAL_UINT32(baseline, TimerManager.getDuration());
+
+    // Nothing published to HA from the gated commands.
+    TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(PublishCall::State));
+    TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(PublishCall::Duration));
+
+    // Re-enabling restores command processing.
+    SHOW_TIMER = true;
+    TimerManager.parseCommand("{\"action\":\"start\"}");
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Running),
+                      static_cast<int>(TimerManager.getState()));
+}
+
+// ============================================================================
+// U7 — onShowTimerChange resets a running timer on the true→false transition
+// Proves: disabling at runtime cleanly stops in-flight timers (no surprise alerts).
+// ============================================================================
+void test_U7_onShowTimerChange_resets_running_timer(void) {
+    TimerManager.setDuration(60);
+    TimerManager.start();
+    fixture::advance(10000);
+    TimerManager.tick();
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Running),
+                      static_cast<int>(TimerManager.getState()));
+
+    TimerManager.onShowTimerChange(true, false);
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle),
+                      static_cast<int>(TimerManager.getState()));
+    TEST_ASSERT_EQUAL_UINT32(60, TimerManager.getRemaining());
+
+    // Non-disable transitions are no-ops.
+    TimerManager.setDuration(30);
+    TimerManager.start();
+    TimerManager.onShowTimerChange(false, true);  // re-enable; running timer untouched
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Running),
+                      static_cast<int>(TimerManager.getState()));
+    TimerManager.onShowTimerChange(true, true);   // no change; untouched
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Running),
+                      static_cast<int>(TimerManager.getState()));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
@@ -152,5 +206,7 @@ int main(int, char **) {
     RUN_TEST(test_U3_start_from_idle_publishes_state_then_remaining);
     RUN_TEST(test_U4_tick_crosses_zero_finishes_with_notification);
     RUN_TEST(test_U5_autoclear_returns_to_idle_after_hold);
+    RUN_TEST(test_U6_parseCommand_noop_when_disabled);
+    RUN_TEST(test_U7_onShowTimerChange_resets_running_timer);
     return UNITY_END();
 }

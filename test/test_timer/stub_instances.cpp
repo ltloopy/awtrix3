@@ -31,6 +31,7 @@ bool     BLOCK_NAVIGATION  = false;
 bool     GAME_ACTIVE       = false;
 
 bool     SHOW_TIMER             = true;
+bool     SHOW_TIMER_HA_PREV     = true;
 bool     TIMER_HIDE_WHEN_IDLE   = true;
 uint32_t TIMER_MAX_DURATION     = 86400;
 uint32_t TIMER_STEP             = 1;

@@ -166,13 +166,13 @@ the timer visible at all times.
 
 ## Settings (globals, defaults)
 
-These tune timer behavior. They are **not currently exposed via the
-`/settings` MQTT topic** — they're compile-time defaults defined in
-`src/Globals.cpp`.
+These tune timer behavior. With the exception of `SHOW_TIMER`, they are
+**not currently exposed via the `/settings` MQTT topic** — they're
+compile-time defaults overridable via [`dev.json`](dev.md).
 
 | Global | Default | Effect |
 | --- | --- | --- |
-| `SHOW_TIMER` | `true` | Include the Timer app in the rotation at all. |
+| `SHOW_TIMER` | `true` | Master enable. When `false`, the Timer app is hidden from rotation, the 8 Home Assistant entities are not published, `POST /api/timer` and the MQTT `{prefix}/timer` topic are ignored, and any running timer is reset. On the `true → false` transition the firmware publishes empty retained discovery payloads so HA prunes the stale entities on next reconnect. Toggle from `/api/settings` (`TIMER` key), `dev.json` (`show_timer`), or the on-device **APPS** menu (last entry). |
 | `TIMER_HIDE_WHEN_IDLE` | `true` | Skip Timer app when state is Idle. |
 | `TIMER_MAX_DURATION` | `86400` (24 h) | Upper clamp for `setDuration`. |
 | `TIMER_STEP` | `1` | Increment step for left/right adjusts in config mode. |

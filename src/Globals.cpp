@@ -332,6 +332,8 @@ void loadSettings()
     SHOW_DATE = Settings.getBool("DAT", false);
     SHOW_TEMP = Settings.getBool("TEMP", true);
     SHOW_HUM = Settings.getBool("HUM", true);
+    SHOW_TIMER = Settings.getBool("TIMER", true);
+    SHOW_TIMER_HA_PREV = Settings.getBool("TIMERPREV", true);
     MATRIX_LAYOUT = Settings.getUInt("MAT", 0);
     SCROLL_SPEED = Settings.getUInt("SSPEED", 100);
 #ifdef ULANZI
@@ -382,6 +384,8 @@ void saveSettings()
     Settings.putBool("DAT", SHOW_DATE);
     Settings.putBool("TEMP", SHOW_TEMP);
     Settings.putBool("HUM", SHOW_HUM);
+    Settings.putBool("TIMER", SHOW_TIMER);
+    Settings.putBool("TIMERPREV", SHOW_TIMER_HA_PREV);
     Settings.putUInt("SSPEED", SCROLL_SPEED);
 #ifdef ULANZI
     Settings.putBool("BAT", SHOW_BAT);
@@ -497,6 +501,7 @@ long STATS_INTERVAL = 10000;
 bool DEBUG_MODE = true;
 uint8_t MIN_BRIGHTNESS = 2;
 bool SHOW_TIMER = true;
+bool SHOW_TIMER_HA_PREV = true;
 bool TIMER_HIDE_WHEN_IDLE = true;
 uint32_t TIMER_MAX_DURATION = 86400;
 uint32_t TIMER_STEP = 1;

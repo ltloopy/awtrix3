@@ -380,6 +380,7 @@ void TimerManager_::tick()
 
 void TimerManager_::parseCommand(const char *json)
 {
+    if (!SHOW_TIMER) return;
     if (json == nullptr || json[0] == '\0') return;
 
     if (inConfig) exitConfigMode();
@@ -424,6 +425,11 @@ void TimerManager_::parseCommand(const char *json)
         else if (a == "pause") pause();
         else if (a == "reset") reset();
     }
+}
+
+void TimerManager_::onShowTimerChange(bool prev, bool now)
+{
+    if (prev && !now) reset();
 }
 
 void TimerManager_::publishState()        { MQTTManager.publishTimerState(getStateString()); }

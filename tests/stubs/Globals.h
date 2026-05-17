@@ -14,6 +14,7 @@ extern bool   BLOCK_NAVIGATION;
 extern bool   GAME_ACTIVE;
 
 extern bool     SHOW_TIMER;
+extern bool     SHOW_TIMER_HA_PREV;
 extern bool     TIMER_HIDE_WHEN_IDLE;
 extern uint32_t TIMER_MAX_DURATION;
 extern uint32_t TIMER_STEP;

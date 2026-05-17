@@ -59,6 +59,8 @@ public:
 
     void parseCommand(const char *json);
 
+    void onShowTimerChange(bool prev, bool now);
+
     void enterConfigMode();
     void exitConfigMode();
     void configCycleField();

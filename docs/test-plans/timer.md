@@ -1,5 +1,5 @@
 ---
-checklist_version: 1
+checklist_version: 2
 feature: timer
 last_updated: 2026-05-16
 ---
@@ -102,6 +102,47 @@ attach the filled-out copy to the PR.
       final state consistent with last command
 - [ ] Battery-powered device (if applicable): timer survives or fails
       cleanly across short sleep/wake
+
+## B9. Disable flag (SHOW_TIMER)
+Verifies the master enable across all four control surfaces. Run after
+re-flashing or factory-resetting NVS so `SHOW_TIMER_HA_PREV` starts `true`.
+
+### B9a. dev.json path
+- [ ] Put `{"show_timer": false}` in `/dev.json`, reboot
+- [ ] Timer app does NOT appear in the app rotation
+- [ ] No `timer_*` entities present in HA after discovery completes
+- [ ] `POST /api/timer {"action":"start"}` returns 200 OK but state stays Idle
+- [ ] MQTT publish to `{prefix}/timer {"action":"start"}` is a no-op
+- [ ] Remove the key from `/dev.json`, reboot — app + entities return
+
+### B9b. Web settings path (immediate effect)
+- [ ] `GET /api/settings` returns `"TIMER": true` (default)
+- [ ] `POST /api/settings {"TIMER":false}` → Timer app removed from rotation
+      WITHOUT requiring a reboot
+- [ ] A timer that was running at the moment of toggle returns to Idle
+      (no end-of-timer alert fires later)
+- [ ] HA entities show as "unavailable" until next reboot; on reboot they
+      are removed from HA's MQTT integration entirely (empty retained
+      discovery payload sent on first MQTT reconnect)
+- [ ] `TIMER` value persists across power-cycle (`GET /api/settings` after
+      reboot still returns `"TIMER": false`)
+- [ ] `POST /api/settings {"TIMER":true}` → app + 8 HA entities + command
+      surfaces all return
+
+### B9c. On-device menu path
+- [ ] Open menu → **APPS** → scroll to the new entry showing the hourglass
+      icon and `ON`/`OFF`
+- [ ] Toggle to `OFF` with middle short-press → long-press to exit
+- [ ] Power-cycle the device → toggle state persists; app + HA entities
+      remain suppressed
+- [ ] Re-enable from the menu → app + entities + command surfaces return
+      after next MQTT reconnect
+
+### B9d. awtrix2_upgrade build (Wemos D1 Mini32)
+- [ ] On `awtrix2_upgrade`, the APPS menu shows exactly 5 entries
+      (Time / Date / Temp / Humidity / Timer — no ghost slot, no Battery)
+- [ ] Timer toggle is reachable at index 4 and behaves identically to the
+      Ulanzi build
 
 ---
 
