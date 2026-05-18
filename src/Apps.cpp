@@ -501,7 +501,7 @@ void TimerApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x,
             (unsigned)TimerManager.getConfigHH(),
             (unsigned)TimerManager.getConfigMM(),
             (unsigned)TimerManager.getConfigSS());
-        int16_t textX = 8 + ((24 - (int)getTextWidth(buf, 0)) / 2);
+        int16_t textX = ((32 - (int)getTextWidth(buf, 0)) / 2);
         DisplayManager.printText(textX + x, 6 + y, buf, false, 0);
 
         int underlineX = textX + (TimerManager.getConfigField() * 10);
