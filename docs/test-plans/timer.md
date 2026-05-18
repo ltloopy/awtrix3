@@ -60,7 +60,14 @@ attach the filled-out copy to the PR.
 - [ ] 30 s of no input in config → auto-applies HH:MM:SS to duration,
       exits config
 - [ ] Middle short-press while Running pauses; while Paused resumes
-- [ ] Long-press middle while Finished resets to Idle
+- [ ] Middle short-press while Idle on Timer app → timer starts running
+      with the saved duration
+- [ ] Middle short-press while Finished → end melody stops immediately,
+      display returns to Idle (no blinking `0:00`); a second short-press
+      re-arms the timer (Running)
+- [ ] Middle long-press while Finished → end melody stops immediately,
+      timer jumps directly to Running with the saved duration (no Idle
+      pause)
 
 ## B4. Buzzer modes
 - [ ] **Off**: no sound at expiry; no countdown beeps
@@ -71,10 +78,14 @@ attach the filled-out copy to the PR.
 ## B5. Finished modes (includes ReAlert audio — only place this is verified)
 - [ ] **AutoClear**: notification dismisses on its own ≈10 s after expiry;
       state returns to Idle
-- [ ] **Hold**: notification persists; display blinks 500 ms; dismiss via
-      HA `dismiss` button OR physical middle long-press → returns to Idle
+- [ ] **Hold**: notification persists; display blinks 500 ms; dismiss
+      via HA `dismiss` button OR physical middle short-press (→ Idle)
+      OR middle long-press (→ Running, re-armed) — state changes as
+      described
 - [ ] **Re-Alert**: every ~15 s the buzzer re-plays end melody while
-      notification is up; dismissing notification stops re-alerts
+      notification is up; dismissing notification stops re-alerts.
+      Physical middle short-press at any point stops the re-alert
+      cycles and returns to Idle; long-press jumps to Running
 
 ## B6. App-switch behavior
 - [ ] Start a timer from Idle while viewing the Time app → display

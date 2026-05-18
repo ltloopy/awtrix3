@@ -161,13 +161,16 @@ blocking-nav app is on screen), the display auto-switches to the Timer app.
 
 | Input | Effect |
 | --- | --- |
-| Middle long-press (from Idle) | Enter config mode. `HH` field highlighted. |
+| Middle long-press (from Idle, Timer app) | Enter config mode. `HH` field highlighted. |
 | Middle short-press (in config) | Cycle field `HH → MM → SS → HH`. |
 | Left / Right (in config) | Decrement / increment current field by `TIMER_STEP`. Hold ≥500 ms to auto-repeat every 250 ms. |
 | 30 s of no input (in config) | Auto-applies HH:MM:SS to duration, exits config. |
+| Middle short-press (Idle, Timer app) | Start the timer with the saved duration. |
 | Middle short-press (Running) | Pause. |
 | Middle short-press (Paused) | Resume. |
-| Middle long-press (Finished) | Reset to Idle. |
+| Middle short-press (Finished) | Dismiss alert: stops the end melody and returns to Idle. A second short-press from Idle re-arms the timer with the saved duration. |
+| Middle long-press (Running / Paused, Timer app) | Reset to Idle. |
+| Middle long-press (Finished) | Stops the end melody and immediately re-arms the timer (jumps straight to Running with the saved duration). |
 
 Field bounds: `HH` wraps `99 ↔ 0`; `MM`/`SS` wrap `59 ↔ 0`.
 
@@ -240,9 +243,10 @@ Two ways to clear an active timer notification:
 {MQTT_PREFIX}/notify/dismiss          # also dismisses any other notification
 ```
 
-…or HA's `{id}_dismiss` button, or the physical middle long-press while
-state is Finished. Dismissing the notification while in `Hold` mode (or
-between `re-alert` cycles) returns the timer to `Idle`.
+…or HA's `{id}_dismiss` button, or the physical middle short-press
+(dismiss to Idle) or middle long-press (dismiss + re-arm to Running)
+while state is Finished. Dismissing the notification while in `Hold`
+mode (or between `re-alert` cycles) returns the timer to `Idle`.
 
 To hard-reset state without dismissing other notifications, publish:
 

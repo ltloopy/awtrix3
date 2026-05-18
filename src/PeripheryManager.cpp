@@ -198,7 +198,7 @@ void select_button_pressed()
             TimerState ts = TimerManager.getState();
             if (ts == TimerState::Finished)
             {
-                TimerManager.start();
+                TimerManager.reset();
                 return;
             }
             if (CURRENT_APP == "Timer")
@@ -250,12 +250,17 @@ void select_button_pressed_long()
         if (!MenuManager.inMenu)
         {
             TimerState ts = TimerManager.getState();
+            if (ts == TimerState::Finished)
+            {
+                TimerManager.start();
+                return;
+            }
             if (CURRENT_APP == "Timer" && ts == TimerState::Idle)
             {
                 TimerManager.enterConfigMode();
                 return;
             }
-            if (ts == TimerState::Finished || CURRENT_APP == "Timer")
+            if (CURRENT_APP == "Timer")
             {
                 TimerManager.reset();
                 return;

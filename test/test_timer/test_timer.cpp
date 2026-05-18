@@ -270,6 +270,64 @@ void test_U11_getIconForState_per_state_with_idle_fallback(void) {
     TEST_ASSERT_EQUAL_STRING("9999",  TimerManager.getIconForState(TimerState::Finished).c_str());
 }
 
+// ============================================================================
+// U12 — reset() from Finished stops sound and returns to Idle
+// Proves: the middle short-press dispatch from Finished cleanly dismisses
+// the alert (stopSound() exactly once, state → Idle, remaining re-armed,
+// state publish == "idle").
+// ============================================================================
+void test_U12_reset_from_finished_stops_sound_and_returns_idle(void) {
+    TimerManager.setDuration(5);
+    TimerManager.start();
+    fixture::advance(5000);
+    TimerManager.tick();
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Finished),
+                      static_cast<int>(TimerManager.getState()));
+    TEST_ASSERT_EQUAL_size_t(1, PeripheryManager.play_calls.size());
+
+    PeripheryManager.__test_set_playing(true);
+
+    TimerManager.reset();
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle),
+                      static_cast<int>(TimerManager.getState()));
+    TEST_ASSERT_EQUAL_UINT32(5, TimerManager.getRemaining());
+    TEST_ASSERT_EQUAL_INT(1, PeripheryManager.stop_calls);
+    TEST_ASSERT_FALSE(PeripheryManager.isPlaying());
+    const PublishCall *last = fixture::last_publish(PublishCall::State);
+    TEST_ASSERT_NOT_NULL(last);
+    TEST_ASSERT_EQUAL_STRING("idle", last->state_str.c_str());
+}
+
+// ============================================================================
+// U13 — start() from Finished stops sound and re-arms to Running
+// Proves: the middle long-press dispatch from Finished dismisses the alert
+// and immediately re-arms (stopSound() exactly once, state → Running,
+// remaining == durationSec, state publish == "running").
+// ============================================================================
+void test_U13_start_from_finished_stops_sound_and_rearms(void) {
+    TimerManager.setDuration(5);
+    TimerManager.start();
+    fixture::advance(5000);
+    TimerManager.tick();
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Finished),
+                      static_cast<int>(TimerManager.getState()));
+    TEST_ASSERT_EQUAL_size_t(1, PeripheryManager.play_calls.size());
+
+    PeripheryManager.__test_set_playing(true);
+
+    TimerManager.start();
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Running),
+                      static_cast<int>(TimerManager.getState()));
+    TEST_ASSERT_EQUAL_UINT32(5, TimerManager.getRemaining());
+    TEST_ASSERT_EQUAL_INT(1, PeripheryManager.stop_calls);
+    TEST_ASSERT_FALSE(PeripheryManager.isPlaying());
+    const PublishCall *last = fixture::last_publish(PublishCall::State);
+    TEST_ASSERT_NOT_NULL(last);
+    TEST_ASSERT_EQUAL_STRING("running", last->state_str.c_str());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
@@ -283,5 +341,7 @@ int main(int, char **) {
     RUN_TEST(test_U9_getIconForState_all_empty);
     RUN_TEST(test_U10_getIconForState_only_idle_inherits);
     RUN_TEST(test_U11_getIconForState_per_state_with_idle_fallback);
+    RUN_TEST(test_U12_reset_from_finished_stops_sound_and_returns_idle);
+    RUN_TEST(test_U13_start_from_finished_stops_sound_and_rearms);
     return UNITY_END();
 }
