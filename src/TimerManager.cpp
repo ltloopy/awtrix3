@@ -230,7 +230,7 @@ void TimerManager_::enterFinished()
 
     if (!GAME_ACTIVE && !BLOCK_NAVIGATION)
     {
-        String j = "{\"name\":\"Timer\"}";
+        String j = "{\"name\":\"Timer\",\"fast\":true}";
         DisplayManager.switchToApp(j.c_str());
     }
     if (MATRIX_OFF)
