@@ -197,11 +197,28 @@ void TimerManager_::configCycleField()
 void TimerManager_::configAdjust(int delta)
 {
     if (!inConfig) return;
-    uint8_t maxVal = (configField == 0) ? 99 : 59;
+
+    const uint8_t  hardMax = (configField == 0) ? 99 : 59;
+    const uint32_t perUnit = (configField == 0) ? 3600UL : (configField == 1) ? 60UL : 1UL;
+    const uint32_t otherSec = (configField == 0)
+        ? (uint32_t)configMM * 60UL + (uint32_t)configSS
+        : (configField == 1)
+            ? (uint32_t)configHH * 3600UL + (uint32_t)configSS
+            : (uint32_t)configHH * 3600UL + (uint32_t)configMM * 60UL;
+
+    uint8_t maxVal = hardMax;
+    if (TIMER_MAX_DURATION > 0)
+    {
+        uint32_t headroom = (TIMER_MAX_DURATION > otherSec) ? (TIMER_MAX_DURATION - otherSec) : 0;
+        uint32_t room     = headroom / perUnit;
+        if (room < maxVal) maxVal = (uint8_t)room;
+    }
+
     uint8_t cur = (configField == 0) ? configHH : (configField == 1 ? configMM : configSS);
+    if (cur > maxVal) cur = maxVal;
     int next = (int)cur + delta;
     if (next < 0) next = maxVal;
-    else if (next > maxVal) next = 0;
+    else if (next > (int)maxVal) next = 0;
     if      (configField == 0) configHH = (uint8_t)next;
     else if (configField == 1) configMM = (uint8_t)next;
     else                       configSS = (uint8_t)next;

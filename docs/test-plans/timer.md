@@ -1,3 +1,8 @@
+# TODO
+- add a test for each dev.json
+- add a test for each API call
+- add a test for each MQTT setting
+
 ---
 checklist_version: 2
 feature: timer
@@ -30,16 +35,20 @@ attach the filled-out copy to the PR.
 ---
 
 ## B1. HA discovery & entities
-- [ ] All 7 timer entities appear within ~30 s of boot: `timer_dur` (number),
-      `timer_rem` (sensor number), `timer_state` (sensor),
-      `timer_buz` (select), `timer_fin` (select),
-      `timer_start` / `timer_pause` / `timer_reset` (buttons)
+- [ ] All 7 timer entities appear within ~30 s of boot: 
+      `timer_dur` (number)
+      `timer_rem` (sensor number) 
+      `timer_state` (sensor)
+      `timer_buz` (select)
+      `timer_fin` (select)
+      `timer_start` (button)
+      `timer_pause` (button)
+      `timer_reset` (button)
 - [ ] `timer_buz` shows options `Off / End / Countdown`;
       `timer_fin` shows `Auto-Clear / Hold / Re-Alert`
-- [ ] Changing `timer_dur` from HA UI updates the device and survives a
-      reboot
+- [ ] Changing `timer_dur` from HA UI updates the device #TODO move to its own section about verifing HA changes things
 
-## B2. Display & rendering
+## B2. Display & rendering #TODO - this needs to be split out into testing of a timer
 - [ ] Timer app is always present in the rotation regardless of state
 - [ ] Idle: icon + configured duration text, no progress bar
 - [ ] Running: time advances once per second; progress bar drains from
@@ -50,7 +59,7 @@ attach the filled-out copy to the PR.
 - [ ] AutoClear: after ~10 s returns to Idle and rotation resumes
 - [ ] Hold: blinking `0:00` persists until reset
 
-## B3. Physical buttons (Timer app focused)
+## B3. Physical buttons (Timer app focused) #TODO - make this about testing with physical buttons
 - [ ] Long-press middle from Idle → enters config mode, `HH` field
       highlighted
 - [ ] Middle short-press cycles `HH → MM → SS → HH`
@@ -87,7 +96,7 @@ attach the filled-out copy to the PR.
       Physical middle short-press at any point stops the re-alert
       cycles and returns to Idle; long-press jumps to Running
 
-## B6. App-switch behavior
+## B6. App-switch behavior #TODO - remove game reference, test with notification, built in app, and custom app?
 - [ ] Start a timer from Idle while viewing the Time app → display
       switches to Timer app within 1 s
 - [ ] Start a timer while a game / blocking-nav app is active → display
@@ -95,14 +104,14 @@ attach the filled-out copy to the PR.
 - [ ] Start a timer while a non-timer notification is on screen → timer
       notification queues without dropping active one; surfaces after
 
-## B7. Persistence
+## B7. Persistence #TODO - see B1
 - [ ] Set `duration=600`, `buzzer=Countdown`, `finished=Hold`, reboot →
       all three survive; state is Idle, remaining = 600
 - [ ] Start a 10-min timer, reboot mid-run → state is Idle, duration
       preserved, remaining reset to duration. (Documents intentional
       non-persistence of runtime state.)
 
-## B8. Edge cases
+## B8. Edge cases 
 - [ ] `duration=0` over MQTT → clamps to 1 s; one-shot expiry fires cleanly
 - [ ] `duration=86400` (24 h) → accepted; display shows hours
 - [ ] `duration=86401` → clamped to 86400
@@ -146,7 +155,7 @@ re-flashing or factory-resetting NVS so `SHOW_TIMER_HA_PREV` starts `true`.
 - [ ] Power-cycle the device → toggle state persists; app + HA entities
       remain suppressed
 - [ ] Re-enable from the menu → app + entities + command surfaces return
-      after next MQTT reconnect
+      after next MQTT reconnect, HA entities are enabled 
 
 ### B9d. awtrix2_upgrade build (Wemos D1 Mini32)
 - [ ] On `awtrix2_upgrade`, the APPS menu shows exactly 5 entries
