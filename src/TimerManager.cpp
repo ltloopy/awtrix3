@@ -3,14 +3,23 @@
 #include "PeripheryManager.h"
 #include "DisplayManager.h"
 #include "MQTTManager.h"
+#include "MenuManager.h"
 #include <Preferences.h>
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 
-static Preferences timerPrefs;
+namespace {
+    constexpr uint16_t kTimerCmdJsonSize     = 512;
+    constexpr uint8_t  kIconNameMaxLen       = 32;
+    constexpr uint32_t kConfigHHMax          = 99UL * 3600UL;
+    constexpr unsigned long kBtnLongPressMs  = 500;
+    constexpr unsigned long kBtnRepeatMs     = 250;
 
-static const char *FALLBACK_END_RTTTL  = "timer:d=4,o=5,b=120:c,8p,c,8p,c";
-static const char *FALLBACK_TICK_RTTTL = "tick:d=16,o=6,b=200:c";
+    const char *FALLBACK_END_RTTTL  = "timer:d=4,o=5,b=120:c,8p,c,8p,c";
+    const char *FALLBACK_TICK_RTTTL = "tick:d=16,o=6,b=200:c";
+}
+
+static Preferences timerPrefs;
 
 static String loadRtttlFromFile(const char *path, const char *fallback)
 {
@@ -19,7 +28,9 @@ static String loadRtttlFromFile(const char *path, const char *fallback)
         File f = LittleFS.open(path, "r");
         if (f)
         {
+            size_t sz = f.size();
             String s;
+            s.reserve(sz);
             while (f.available()) s += (char)f.read();
             f.close();
             s.trim();
@@ -36,6 +47,12 @@ TimerManager_ &TimerManager_::getInstance()
 }
 
 TimerManager_ &TimerManager = TimerManager_::getInstance();
+
+void TimerManager_::loadMelodiesCached()
+{
+    endRtttl  = loadRtttlFromFile("/MELODIES/timer_end.txt",  FALLBACK_END_RTTTL);
+    tickRtttl = loadRtttlFromFile("/MELODIES/timer_tick.txt", FALLBACK_TICK_RTTTL);
+}
 
 void TimerManager_::setup()
 {
@@ -58,7 +75,8 @@ void TimerManager_::setup()
     if (TIMER_MAX_DURATION > 0 && durationSec > TIMER_MAX_DURATION) durationSec = TIMER_MAX_DURATION;
     remainingSec = durationSec;
     state = TimerState::Idle;
-    lastTickedSecond = -1;
+
+    loadMelodiesCached();
 }
 
 void TimerManager_::persist()
@@ -74,9 +92,34 @@ void TimerManager_::persist()
     timerPrefs.end();
 }
 
-String TimerManager_::capIconName(const String &name)
+void TimerManager_::persistIfDirty()
 {
-    if (name.length() > 32) return name.substring(0, 32);
+    if (_suspendPersist)
+    {
+        _dirty = true;
+        return;
+    }
+    persist();
+    _dirty = false;
+}
+
+String TimerManager_::validateIconName(const String &name)
+{
+    if (name.length() == 0) return name;
+    if (name.length() > kIconNameMaxLen) return String("");
+    for (size_t i = 0; i < name.length(); ++i)
+    {
+        char c = name[i];
+        bool ok = (c >= 'A' && c <= 'Z')
+               || (c >= 'a' && c <= 'z')
+               || (c >= '0' && c <= '9')
+               || c == '_' || c == '-';
+        if (!ok)
+        {
+            if (DEBUG_MODE) DEBUG_PRINTLN("timer: icon name rejected");
+            return String("");
+        }
+    }
     return name;
 }
 
@@ -102,37 +145,41 @@ const String &TimerManager_::getIconForState(TimerState s) const
 
 void TimerManager_::setIconIdle(const String &name, bool publish)
 {
-    String n = capIconName(name);
+    String n = validateIconName(name);
+    if (name.length() > 0 && n.length() == 0) return;
     if (iconIdle == n) return;
     iconIdle = n;
-    persist();
+    persistIfDirty();
     if (publish) publishIcons();
 }
 
 void TimerManager_::setIconRunning(const String &name, bool publish)
 {
-    String n = capIconName(name);
+    String n = validateIconName(name);
+    if (name.length() > 0 && n.length() == 0) return;
     if (iconRunning == n) return;
     iconRunning = n;
-    persist();
+    persistIfDirty();
     if (publish) publishIcons();
 }
 
 void TimerManager_::setIconPaused(const String &name, bool publish)
 {
-    String n = capIconName(name);
+    String n = validateIconName(name);
+    if (name.length() > 0 && n.length() == 0) return;
     if (iconPaused == n) return;
     iconPaused = n;
-    persist();
+    persistIfDirty();
     if (publish) publishIcons();
 }
 
 void TimerManager_::setIconFinished(const String &name, bool publish)
 {
-    String n = capIconName(name);
+    String n = validateIconName(name);
+    if (name.length() > 0 && n.length() == 0) return;
     if (iconFinished == n) return;
     iconFinished = n;
-    persist();
+    persistIfDirty();
     if (publish) publishIcons();
 }
 
@@ -165,6 +212,7 @@ const char *TimerManager_::getStateString() const
 void TimerManager_::enterConfigMode()
 {
     if (state != TimerState::Idle) return;
+    if (durationSec > kConfigHHMax) durationSec = kConfigHHMax;
     uint32_t d = durationSec;
     uint32_t h = d / 3600;
     if (h > 99) h = 99;
@@ -230,10 +278,9 @@ void TimerManager_::enterRunning()
     state = TimerState::Running;
     runStartMs = millis();
     runStartRemainingSec = remainingSec;
-    lastTickedSecond = -1;
-    lastPublishMs = 0;
     publishState();
     publishRemaining();
+    lastPublishMs = millis();
 }
 
 void TimerManager_::enterFinished()
@@ -245,7 +292,7 @@ void TimerManager_::enterFinished()
     publishState();
     publishRemaining();
 
-    if (!GAME_ACTIVE && !BLOCK_NAVIGATION)
+    if (!GAME_ACTIVE && !BLOCK_NAVIGATION && !MenuManager.inMenu)
     {
         String j = "{\"name\":\"Timer\",\"fast\":true}";
         DisplayManager.switchToApp(j.c_str());
@@ -256,8 +303,7 @@ void TimerManager_::enterFinished()
     }
     if (SOUND_ACTIVE && buzzerMode != BuzzerMode::Off)
     {
-        String t = loadRtttlFromFile("/MELODIES/timer_end.txt", FALLBACK_END_RTTTL);
-        if (t.length() > 0) PeripheryManager.playRTTTLString(t);
+        if (endRtttl.length() > 0) PeripheryManager.playRTTTLString(endRtttl);
     }
 }
 
@@ -296,7 +342,6 @@ void TimerManager_::reset()
     PeripheryManager.stopSound();
     state = TimerState::Idle;
     remainingSec = durationSec;
-    lastTickedSecond = -1;
     publishState();
     publishRemaining();
     if (MATRIX_OFF)
@@ -316,7 +361,7 @@ void TimerManager_::setDuration(uint32_t seconds)
         remainingSec = durationSec;
         publishRemaining();
     }
-    persist();
+    persistIfDirty();
     publishDuration();
 }
 
@@ -324,7 +369,7 @@ void TimerManager_::setBuzzerMode(BuzzerMode m)
 {
     if (buzzerMode == m) return;
     buzzerMode = m;
-    persist();
+    persistIfDirty();
     publishBuzzerMode();
 }
 
@@ -332,7 +377,7 @@ void TimerManager_::setFinishedMode(FinishedMode m)
 {
     if (finishedMode == m) return;
     finishedMode = m;
-    persist();
+    persistIfDirty();
     publishFinishedMode();
 }
 
@@ -350,9 +395,9 @@ void TimerManager_::tick()
 
         EasyButton *bL = PeripheryManager.buttonL;
         EasyButton *bR = PeripheryManager.buttonR;
-        if (bL && bL->isPressed() && bL->pressedFor(500))
+        if (bL && bL->isPressed() && bL->pressedFor(kBtnLongPressMs))
         {
-            if (configRepeatLeftMs == 0 || (now - configRepeatLeftMs) >= 250)
+            if (configRepeatLeftMs == 0 || (now - configRepeatLeftMs) >= kBtnRepeatMs)
             {
                 configAdjust(-1);
                 configRepeatLeftMs = now;
@@ -362,9 +407,9 @@ void TimerManager_::tick()
         {
             configRepeatLeftMs = 0;
         }
-        if (bR && bR->isPressed() && bR->pressedFor(500))
+        if (bR && bR->isPressed() && bR->pressedFor(kBtnLongPressMs))
         {
-            if (configRepeatRightMs == 0 || (now - configRepeatRightMs) >= 250)
+            if (configRepeatRightMs == 0 || (now - configRepeatRightMs) >= kBtnRepeatMs)
             {
                 configAdjust(+1);
                 configRepeatRightMs = now;
@@ -382,14 +427,21 @@ void TimerManager_::tick()
         uint32_t newRemaining = computeCurrentRemaining();
         if (newRemaining != remainingSec)
         {
+            uint32_t prevRemaining = remainingSec;
             remainingSec = newRemaining;
-            lastTickedSecond = (int32_t)newRemaining;
 
-            if (SOUND_ACTIVE && buzzerMode == BuzzerMode::Countdown
-                && newRemaining > 0 && newRemaining <= TIMER_COUNTDOWN_SECONDS)
+            if (SOUND_ACTIVE && buzzerMode == BuzzerMode::Countdown && tickRtttl.length() > 0)
             {
-                String t = loadRtttlFromFile("/MELODIES/timer_tick.txt", FALLBACK_TICK_RTTTL);
-                if (t.length() > 0) PeripheryManager.playRTTTLString(t);
+                // Beep if any second in [1, TIMER_COUNTDOWN_SECONDS] was crossed this tick.
+                // The buzzer plays one tone at a time, so a single beep covers the gap when
+                // tick() falls behind (rather than queuing N back-to-back plays).
+                uint32_t lo = newRemaining > 0 ? newRemaining : 1;
+                uint32_t hi = prevRemaining > 0 ? prevRemaining - 1 : 0;
+                if (hi > TIMER_COUNTDOWN_SECONDS) hi = TIMER_COUNTDOWN_SECONDS;
+                if (hi >= lo && !PeripheryManager.isPlaying())
+                {
+                    PeripheryManager.playRTTTLString(tickRtttl);
+                }
             }
 
             if (TIMER_PUBLISH_INTERVAL > 0 && (now - lastPublishMs >= (unsigned long)TIMER_PUBLISH_INTERVAL * 1000UL))
@@ -427,8 +479,7 @@ void TimerManager_::tick()
         {
             if (!PeripheryManager.isPlaying())
             {
-                String t = loadRtttlFromFile("/MELODIES/timer_end.txt", FALLBACK_END_RTTTL);
-                if (t.length() > 0) PeripheryManager.playRTTTLString(t);
+                if (endRtttl.length() > 0) PeripheryManager.playRTTTLString(endRtttl);
             }
             lastRealertMs = now;
         }
@@ -440,10 +491,27 @@ void TimerManager_::parseCommand(const char *json)
     if (!SHOW_TIMER) return;
     if (json == nullptr || json[0] == '\0') return;
 
-    if (inConfig) exitConfigMode();
+    if (inConfig)
+    {
+        // M1: discard the partial on-device edit; do NOT commit it via setDuration.
+        // But the deferred-notification queue still needs to drain so any messages
+        // that arrived during config aren't stranded.
+        inConfig = false;
+        DisplayManager.drainDeferredNotifications();
+        if (DEBUG_MODE) DEBUG_PRINTLN("timer: config aborted by inbound command");
+    }
 
-    DynamicJsonDocument doc(512);
-    if (deserializeJson(doc, json) != DeserializationError::Ok) return;
+    DynamicJsonDocument doc(kTimerCmdJsonSize);
+    auto err = deserializeJson(doc, json);
+    if (err == DeserializationError::NoMemory)
+    {
+        if (DEBUG_MODE) DEBUG_PRINTLN("timer: parseCommand NoMemory");
+        return;
+    }
+    if (err) return;
+
+    _suspendPersist = true;
+    _dirty = false;
 
     if (doc.containsKey("duration"))
     {
@@ -469,6 +537,14 @@ void TimerManager_::parseCommand(const char *json)
         else if (f == "hold")                            setFinishedMode(FinishedMode::Hold);
         else if (f == "re-alert"   || f == "realert")    setFinishedMode(FinishedMode::ReAlert);
     }
+
+    _suspendPersist = false;
+    if (_dirty)
+    {
+        _dirty = false;
+        persist();
+    }
+
     if (doc.containsKey("action"))
     {
         String a = doc["action"].as<String>();

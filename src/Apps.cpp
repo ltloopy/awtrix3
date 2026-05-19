@@ -416,9 +416,21 @@ void BatApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x, i
 }
 #endif
 
+namespace {
+    constexpr int16_t kTimerTextX     = 8;
+    constexpr int16_t kTimerTextY     = 6;
+    constexpr int16_t kTimerTextWidth = 24;
+    constexpr int16_t kTimerBarMaxLen = 23;
+    constexpr int16_t kTimerBarX0     = 9;
+    constexpr int16_t kTimerScreenW   = 32;
+    constexpr int16_t kTimerScreenH   = 8;
+    constexpr int    kTimerConfigUnderlineStep = 10;
+}
+
 static void drawTimerIcon(FastLED_NeoMatrix *matrix, int16_t x, int16_t y, uint32_t color, TimerState state, GifPlayer *gifPlayer)
 {
     static String     cachedName    = "\x01";
+    static uint32_t   cachedEpoch   = 0;
     static File       icon;
     static bool       isGif         = false;
     static uint8_t    currentFrame  = 0;
@@ -426,8 +438,9 @@ static void drawTimerIcon(FastLED_NeoMatrix *matrix, int16_t x, int16_t y, uint3
 
     const String &name = TimerManager.getIconForState(state);
 
-    if (name != cachedName)
+    if (name != cachedName || cachedEpoch != g_littlefsMountEpoch)
     {
+        cachedEpoch = g_littlefsMountEpoch;
         cachedName = name;
         if (icon) icon.close();
         isGif = false;
@@ -501,11 +514,11 @@ void TimerApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x,
             (unsigned)TimerManager.getConfigHH(),
             (unsigned)TimerManager.getConfigMM(),
             (unsigned)TimerManager.getConfigSS());
-        int16_t textX = ((32 - (int)getTextWidth(buf, 0)) / 2);
-        DisplayManager.printText(textX + x, 6 + y, buf, false, 0);
+        int16_t textX = ((kTimerScreenW - (int)getTextWidth(buf, 0)) / 2);
+        DisplayManager.printText(textX + x, kTimerTextY + y, buf, false, 0);
 
-        int underlineX = textX + (TimerManager.getConfigField() * 10);
-        matrix->drawFastHLine(underlineX + x, 7 + y, 8, TEXTCOLOR_888);
+        int underlineX = textX + (TimerManager.getConfigField() * kTimerConfigUnderlineStep);
+        matrix->drawFastHLine(underlineX + x, (kTimerScreenH - 1) + y, 8, TEXTCOLOR_888);
         return;
     }
 
@@ -520,8 +533,8 @@ void TimerApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x,
         if ((millis() / 500) % 2 == 0)
         {
             DisplayManager.setTextColor(TEXTCOLOR_888);
-            int16_t textX = 8 + ((24 - (int)getTextWidth("0:00", 0)) / 2);
-            DisplayManager.printText(textX + x, 6 + y, "0:00", false, 0);
+            int16_t textX = kTimerTextX + ((kTimerTextWidth - (int)getTextWidth("0:00", 0)) / 2);
+            DisplayManager.printText(textX + x, kTimerTextY + y, "0:00", false, 0);
         }
         return;
     }
@@ -544,17 +557,17 @@ void TimerApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x,
     }
 
     DisplayManager.setTextColor(TEXTCOLOR_888);
-    int16_t textX = 8 + ((24 - (int)getTextWidth(buf, 0)) / 2);
-    DisplayManager.printText(textX + x, 6 + y, buf, false, 0);
+    int16_t textX = kTimerTextX + ((kTimerTextWidth - (int)getTextWidth(buf, 0)) / 2);
+    DisplayManager.printText(textX + x, kTimerTextY + y, buf, false, 0);
 
     if (ts != TimerState::Idle && duration > 0)
     {
-        int barLen = (int)((23UL * remaining) / duration);
+        int barLen = (int)(((uint32_t)kTimerBarMaxLen * remaining) / duration);
         if (barLen > 0)
         {
-            if (barLen > 23) barLen = 23;
-            int startX = 9 + (23 - barLen);
-            matrix->drawFastHLine(startX + x, 7 + y, barLen, TEXTCOLOR_888);
+            if (barLen > kTimerBarMaxLen) barLen = kTimerBarMaxLen;
+            int startX = kTimerBarX0 + (kTimerBarMaxLen - barLen);
+            matrix->drawFastHLine(startX + x, (kTimerScreenH - 1) + y, barLen, TEXTCOLOR_888);
         }
     }
 }

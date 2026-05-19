@@ -102,6 +102,7 @@ void setup()
       if (MQTT_HOST != "")
       {
         DisplayManager.HSVtext(4, 6, "MQTT...", true, 0);
+        reconcileTimerHAState();
         MQTTManager.setup();
         MQTTManager.tick();
       }

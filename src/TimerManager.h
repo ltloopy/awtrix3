@@ -23,12 +23,14 @@ private:
     String iconPaused;
     String iconFinished;
 
+    String endRtttl;
+    String tickRtttl;
+
     unsigned long runStartMs = 0;
     uint32_t runStartRemainingSec = 0;
     unsigned long enteredFinishedMs = 0;
     unsigned long lastRealertMs = 0;
     unsigned long lastPublishMs = 0;
-    int32_t lastTickedSecond = -1;
 
     bool          inConfig            = false;
     uint8_t       configField         = 0;
@@ -36,6 +38,9 @@ private:
     unsigned long configLastInputMs   = 0;
     unsigned long configRepeatLeftMs  = 0;
     unsigned long configRepeatRightMs = 0;
+
+    bool _suspendPersist = false;
+    bool _dirty          = false;
 
     uint32_t computeCurrentRemaining() const;
     void enterRunning();
@@ -46,8 +51,10 @@ private:
     void publishBuzzerMode();
     void publishFinishedMode();
     void persist();
+    void persistIfDirty();
+    void loadMelodiesCached();
 
-    static String capIconName(const String &name);
+    static String validateIconName(const String &name);
 
 public:
     static TimerManager_ &getInstance();

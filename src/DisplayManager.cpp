@@ -1394,7 +1394,7 @@ void DisplayManager_::forceNextApp()
   MQTTManager.setCurrentApp(getAppNameAtIndex(ui->getUiState()->currentApp));
 }
 
-void DisplayManager_::refreshCurrentApp()
+void DisplayManager_::publishCurrentApp()
 {
   MQTTManager.setCurrentApp(getAppNameAtIndex(ui->getUiState()->currentApp));
 }
@@ -1454,16 +1454,21 @@ void DisplayManager_::dismissNotify()
       DisplayManager.setBrightness(0);
     }
     if (removed)
-      refreshCurrentApp();
+      publishCurrentApp();
   }
 }
 
 void DisplayManager_::dismissNotify(uint8_t source, const char *json)
 {
-  String targetChannel = DEFAULT_CHANNEL;
-  bool dismissAll = false;
+  // Legacy contract: an empty (or missing) payload dismisses whatever is at
+  // the front, regardless of channel. Channel/all filtering only kicks in
+  // when the caller explicitly provides `channel` or `all` in the JSON.
+  bool emptyPayload      = (json == nullptr || json[0] == '\0');
+  bool explicitFilter    = false;
+  bool dismissAll        = false;
+  String targetChannel   = DEFAULT_CHANNEL;
 
-  if (json && json[0] != '\0')
+  if (!emptyPayload)
   {
     DynamicJsonDocument doc(1024);
     if (deserializeJson(doc, json) == DeserializationError::Ok)
@@ -1471,6 +1476,7 @@ void DisplayManager_::dismissNotify(uint8_t source, const char *json)
       if (doc.containsKey("all") && doc["all"].as<bool>())
       {
         dismissAll = true;
+        explicitFilter = true;
       }
 
       if (doc.containsKey("channel"))
@@ -1480,11 +1486,16 @@ void DisplayManager_::dismissNotify(uint8_t source, const char *json)
         if (c == "*")
         {
           dismissAll = true;
+          explicitFilter = true;
         }
         else
         {
           c.toLowerCase();
-          if (!c.isEmpty()) targetChannel = c;
+          if (!c.isEmpty())
+          {
+            targetChannel = c;
+            explicitFilter = true;
+          }
         }
       }
 
@@ -1513,9 +1524,14 @@ void DisplayManager_::dismissNotify(uint8_t source, const char *json)
     }
   }
 
+  // Without an explicit filter, behave like the legacy single-arg dismissNotify:
+  // pop the front item regardless of channel.
+  bool unfilteredDismiss = !explicitFilter;
+
   bool removedFront = false;
   bool wakeup = false;
-  if (!notifications.empty() && (dismissAll || notifications.front().channel == targetChannel))
+  if (!notifications.empty()
+      && (unfilteredDismiss || dismissAll || notifications.front().channel == targetChannel))
   {
     wakeup = notifications.front().wakeup;
     notifications.front().icon.close();
@@ -1526,14 +1542,23 @@ void DisplayManager_::dismissNotify(uint8_t source, const char *json)
 
   if (dismissAll)
   {
+    for (auto &n : notifications) n.icon.close();
     notifications.clear();
   }
-  else
+  else if (explicitFilter)
   {
-    notifications.erase(
-        std::remove_if(notifications.begin(), notifications.end(),
-                       [&](const Notification &n) { return n.channel == targetChannel; }),
-        notifications.end());
+    for (auto it = notifications.begin(); it != notifications.end(); )
+    {
+      if (it->channel == targetChannel)
+      {
+        it->icon.close();
+        it = notifications.erase(it);
+      }
+      else
+      {
+        ++it;
+      }
+    }
   }
 
   if (removedFront && !notifications.empty())
@@ -1546,7 +1571,7 @@ void DisplayManager_::dismissNotify(uint8_t source, const char *json)
   }
   if (removedFront && notifications.empty())
   {
-    refreshCurrentApp();
+    publishCurrentApp();
   }
 }
 
@@ -2383,6 +2408,14 @@ void DisplayManager_::setNewSettings(const char *json)
   doc.clear();
   applyAllSettings();
   TimerManager.onShowTimerChange(prevShowTimer, SHOW_TIMER);
+  if (prevShowTimer && !SHOW_TIMER)
+  {
+    MQTTManager.removeTimerHAEntities();
+  }
+  if (prevShowTimer != SHOW_TIMER)
+  {
+    SHOW_TIMER_HA_PREV = SHOW_TIMER;
+  }
   loadNativeApps();
   saveSettings();
   if (DEBUG_MODE)

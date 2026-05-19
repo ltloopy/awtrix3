@@ -58,6 +58,7 @@ void ServerManager_::erase()
     memset(&conf, 0, sizeof(conf)); // Set all the bytes in the structure to 0
     esp_wifi_set_config(WIFI_IF_STA, &conf);
     LittleFS.format();
+    g_littlefsMountEpoch++;
     delay(200);
     formatSettings();
     delay(200);
@@ -376,7 +377,7 @@ void ServerManager_::loadSettings()
         DEFAULT_CHANNEL = doc["Default Channel"].as<String>();
         DEFAULT_CHANNEL.trim();
         DEFAULT_CHANNEL.toLowerCase();
-        if (DEFAULT_CHANNEL.isEmpty()) DEFAULT_CHANNEL = "default";
+        if (DEFAULT_CHANNEL.isEmpty()) DEFAULT_CHANNEL = kDefaultChannelName;
         NET_STATIC = doc["Static IP"];
         HA_DISCOVERY = doc["Homeassistant Discovery"];
         NET_IP = doc["Local IP"].as<String>();

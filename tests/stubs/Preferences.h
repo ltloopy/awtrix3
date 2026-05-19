@@ -5,7 +5,9 @@
 
 class Preferences {
 public:
-    bool begin(const char *name, bool readOnly = false) { (void)name; (void)readOnly; return true; }
+    static int begin_calls;
+
+    bool begin(const char *name, bool readOnly = false) { (void)name; (void)readOnly; begin_calls++; return true; }
     void end() {}
 
     uint32_t getUInt(const char *key, uint32_t def = 0) {
@@ -29,7 +31,7 @@ public:
         return value.length();
     }
 
-    static void __test_reset() { u32_.clear(); u8_.clear(); str_.clear(); }
+    static void __test_reset() { u32_.clear(); u8_.clear(); str_.clear(); begin_calls = 0; }
 
 private:
     static std::map<String, uint32_t> u32_;

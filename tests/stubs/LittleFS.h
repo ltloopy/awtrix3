@@ -7,6 +7,7 @@ public:
     explicit operator bool() const { return false; }
     int available() { return 0; }
     int read() { return -1; }
+    size_t size() { return 0; }
     void close() {}
 };
 

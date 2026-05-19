@@ -442,6 +442,104 @@ void test_U18_config_exit_value_already_within_cap(void) {
     TEST_ASSERT_EQUAL_UINT32(3600, TimerManager.getDuration());
 }
 
+// ============================================================================
+// U19 (M2) — enterConfigMode clamps durationSec to 99h to keep HH editable
+// ============================================================================
+void test_U19_enterConfig_clamps_duration_at_99h(void) {
+    TIMER_MAX_DURATION = 0;  // disable the upper cap so we can install a huge value
+    TimerManager.setDuration(99UL * 3600UL + 1UL * 3600UL + 30UL);  // 100h00m30s
+    TimerManager.enterConfigMode();
+    TEST_ASSERT_TRUE(TimerManager.isInConfig());
+    TEST_ASSERT_EQUAL_UINT8(99, TimerManager.getConfigHH());
+    TEST_ASSERT_EQUAL_UINT32(99UL * 3600UL, TimerManager.getDuration());
+}
+
+// ============================================================================
+// U20 (H1) — icon name validation: strict whitelist
+// ============================================================================
+void test_U20_icon_name_validation(void) {
+    // Valid: alnum + _ - up to 32 chars
+    TimerManager.setIconRunning("Run_01-2", false);
+    TEST_ASSERT_EQUAL_STRING("Run_01-2", TimerManager.getIconRunning().c_str());
+
+    // Empty is allowed (clears).
+    TimerManager.setIconRunning("", false);
+    TEST_ASSERT_EQUAL_STRING("", TimerManager.getIconRunning().c_str());
+
+    // Path traversal: rejected, value unchanged.
+    TimerManager.setIconRunning("ok_name", false);
+    TimerManager.setIconRunning("../etc/passwd", false);
+    TEST_ASSERT_EQUAL_STRING("ok_name", TimerManager.getIconRunning().c_str());
+
+    // Slash: rejected.
+    TimerManager.setIconRunning("foo/bar", false);
+    TEST_ASSERT_EQUAL_STRING("ok_name", TimerManager.getIconRunning().c_str());
+
+    // Spaces: rejected.
+    TimerManager.setIconRunning("has space", false);
+    TEST_ASSERT_EQUAL_STRING("ok_name", TimerManager.getIconRunning().c_str());
+
+    // Over-length (33 chars): rejected.
+    TimerManager.setIconRunning("aaaaaaaaaabbbbbbbbbbccccccccccddd", false);
+    TEST_ASSERT_EQUAL_STRING("ok_name", TimerManager.getIconRunning().c_str());
+}
+
+// ============================================================================
+// U21 (C4) — parseCommand batches NVS writes into one persist()
+// Baseline: setup() calls Preferences.begin() once. A multi-field command
+// should add exactly one more begin() call (the persist at the end), not one
+// per field.
+// ============================================================================
+void test_U21_parseCommand_batches_persist(void) {
+    int begin_at_start = Preferences::begin_calls;
+
+    TimerManager.parseCommand("{\"duration\":600,\"buzzer\":\"end\",\"finished\":\"hold\","
+                              "\"icon_idle\":\"a\",\"icon_running\":\"b\"}");
+
+    int delta = Preferences::begin_calls - begin_at_start;
+    // One persist call (begin + 7 puts + end) for all 5 changed fields.
+    TEST_ASSERT_EQUAL_INT(1, delta);
+    // Values applied:
+    TEST_ASSERT_EQUAL_UINT32(600, TimerManager.getDuration());
+    TEST_ASSERT_EQUAL(static_cast<int>(BuzzerMode::End),
+                      static_cast<int>(TimerManager.getBuzzerMode()));
+    TEST_ASSERT_EQUAL(static_cast<int>(FinishedMode::Hold),
+                      static_cast<int>(TimerManager.getFinishedMode()));
+    TEST_ASSERT_EQUAL_STRING("a", TimerManager.getIconIdle().c_str());
+    TEST_ASSERT_EQUAL_STRING("b", TimerManager.getIconRunning().c_str());
+}
+
+// ============================================================================
+// U22 (M1) — parseCommand while in config: drop partial edit, drain deferred,
+// accept command. The partial edit must NOT be committed to durationSec.
+// ============================================================================
+void test_U22_parseCommand_aborts_config_without_committing_edit(void) {
+    TimerManager.setDuration(300);
+    TimerManager.enterConfigMode();
+    // Move HH up so the partial edit (if committed) would diverge from 300s.
+    TimerManager.configAdjust(+1);  // HH 0 -> 1, total would be 3600 + (300%3600)
+    TEST_ASSERT_TRUE(TimerManager.isInConfig());
+
+    int drain_before = DisplayManager.drain_calls;
+
+    TimerManager.parseCommand("{\"action\":\"start\"}");
+
+    // Config exited.
+    TEST_ASSERT_FALSE(TimerManager.isInConfig());
+    // Deferred notifications drained (M1 invariant).
+    TEST_ASSERT_EQUAL_INT(drain_before + 1, DisplayManager.drain_calls);
+    // The on-device edit was DISCARDED — duration unchanged.
+    TEST_ASSERT_EQUAL_UINT32(300, TimerManager.getDuration());
+    // The command was honored.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Running),
+                      static_cast<int>(TimerManager.getState()));
+}
+
+// ============================================================================
+// D1–D4, I1 — TODO: requires native DisplayManager.cpp test infrastructure
+// (currently DisplayManager is stubbed). Tracked separately.
+// ============================================================================
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
@@ -462,5 +560,9 @@ int main(int, char **) {
     RUN_TEST(test_U16_config_no_cap_when_max_is_zero);
     RUN_TEST(test_U17_config_decrement_wraps_to_dynamic_max);
     RUN_TEST(test_U18_config_exit_value_already_within_cap);
+    RUN_TEST(test_U19_enterConfig_clamps_duration_at_99h);
+    RUN_TEST(test_U20_icon_name_validation);
+    RUN_TEST(test_U21_parseCommand_batches_persist);
+    RUN_TEST(test_U22_parseCommand_aborts_config_without_committing_edit);
     return UNITY_END();
 }

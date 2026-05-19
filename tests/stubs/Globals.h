@@ -31,4 +31,10 @@ extern String   TIMER_ICON_FINISHED;
 
 extern uint32_t TEXTCOLOR_888;
 
+extern bool DEBUG_MODE;
+
+#ifndef DEBUG_PRINTLN
+#define DEBUG_PRINTLN(x) do { (void)(x); } while (0)
+#endif
+
 #endif

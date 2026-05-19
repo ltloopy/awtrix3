@@ -66,13 +66,12 @@ void HAText::onMqttMessage(
         uniqueId(),
         AHATOFSTR(HACommandTopic)
     )) {
-        char* message = new char[length + 1];
-        if (message) {
-            memcpy(message, payload, length);
-            message[length] = '\0';
-            _messageCallback(message, length, this);
-            delete[] message;
-        }
+        static constexpr uint16_t kMaxMsg = 255;
+        char buf[kMaxMsg + 1];
+        uint16_t copyLen = length > kMaxMsg ? kMaxMsg : length;
+        memcpy(buf, payload, copyLen);
+        buf[copyLen] = '\0';
+        _messageCallback(buf, copyLen, this);
     }
 }
 

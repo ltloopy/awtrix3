@@ -12,11 +12,13 @@
 #include "MQTTManager.h"
 #include "PeripheryManager.h"
 #include "DisplayManager.h"
+#include "MenuManager.h"
 #include "Globals.h"
 
 std::map<String, uint32_t> Preferences::u32_;
 std::map<String, uint8_t>  Preferences::u8_;
 std::map<String, String>   Preferences::str_;
+int Preferences::begin_calls = 0;
 
 LittleFS_Stub LittleFS;
 
@@ -25,6 +27,7 @@ std::vector<Notification> notifications;
 MQTTManager_      MQTTManager;
 PeripheryManager_ PeripheryManager;
 DisplayManager_   DisplayManager;
+MenuManager_      MenuManager;
 
 String   CURRENT_APP       = "Time";
 bool     SOUND_ACTIVE      = true;
@@ -48,3 +51,5 @@ String   TIMER_ICON_PAUSED      = "";
 String   TIMER_ICON_FINISHED    = "";
 
 uint32_t TEXTCOLOR_888 = 0xFFFFFF;
+
+bool DEBUG_MODE = false;

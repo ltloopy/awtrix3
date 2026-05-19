@@ -164,4 +164,8 @@ extern String TIMER_ICON_IDLE;
 extern String TIMER_ICON_RUNNING;
 extern String TIMER_ICON_PAUSED;
 extern String TIMER_ICON_FINISHED;
+
+extern const char kDefaultChannelName[];
+
+extern uint32_t g_littlefsMountEpoch;
 #endif // Globals_H

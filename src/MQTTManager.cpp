@@ -13,9 +13,14 @@
 
 const uint16_t PORT = 1883;
 
+namespace {
+    constexpr uint8_t  kMaxHAEntities  = 36;
+    constexpr uint16_t kNotifySniffMax = 1024;
+}
+
 WiFiClient espClient;
 HADevice device;
-HAMqtt mqtt(espClient, device, 36);
+HAMqtt mqtt(espClient, device, kMaxHAEntities);
 
 HALight *Matrix, *Indikator1, *Indikator2, *Indikator3 = nullptr;
 HASelect *BriMode, *transEffect = nullptr;
@@ -38,7 +43,20 @@ char matID[40], ind1ID[40], ind2ID[40], ind3ID[40], briID[40], btnAID[40], btnBI
 char tDurID[40], tRemID[40], tStateID[40], tBuzID[40], tFinID[40], tStartID[40], tPauseID[40], tResetID[40];
 bool pendingTimerHADiscoveryCleanup = false;
 
-static void clearTimerHADiscovery()
+void reconcileTimerHAState()
+{
+    if (SHOW_TIMER_HA_PREV && !SHOW_TIMER)
+    {
+        pendingTimerHADiscoveryCleanup = true;
+    }
+    if (SHOW_TIMER_HA_PREV != SHOW_TIMER)
+    {
+        SHOW_TIMER_HA_PREV = SHOW_TIMER;
+        saveSettings();
+    }
+}
+
+void MQTTManager_::removeTimerHAEntities()
 {
     const struct { const char *component; const char *objectId; } pairs[] = {
         {"number", tDurID},
@@ -119,10 +137,16 @@ void processMqttMessage(const String &strTopic, const String &payloadCopy)
         return;
     }
 
-    if (strTopic.equals(MQTT_PREFIX + "/timer"))
     {
-        TimerManager.parseCommand(payloadCopy.c_str());
-        return;
+        size_t plen = MQTT_PREFIX.length();
+        const char *t = strTopic.c_str();
+        if (strTopic.length() > plen
+            && strncmp(t, MQTT_PREFIX.c_str(), plen) == 0
+            && strcmp(t + plen, "/timer") == 0)
+        {
+            TimerManager.parseCommand(payloadCopy.c_str());
+            return;
+        }
     }
 
     if (strTopic.equals(MQTT_PREFIX + "/sendscreen"))
@@ -306,25 +330,30 @@ void onNotifyMessage(const char* message, uint16_t length, HANotify* sender)
 {
     if (length == 0) return;
 
-    if (message[0] == '{' && message[length - 1] == '}')
     {
-        DisplayManager.generateNotification(0, message);
-    }
-    else
-    {
-        String jsonPayload = "{\"text\":\"";
-        for (uint16_t i = 0; i < length; i++)
+        DynamicJsonDocument probe(kNotifySniffMax);
+        DeserializationError err = deserializeJson(probe, message, length);
+        if (err == DeserializationError::Ok && probe.is<JsonObject>())
         {
-            if (message[i] == '"')
-                jsonPayload += "\\\"";
-            else if (message[i] == '\\')
-                jsonPayload += "\\\\";
-            else
-                jsonPayload += message[i];
+            DisplayManager.generateNotification(0, message);
+            return;
         }
-        jsonPayload += "\"}";
-        DisplayManager.generateNotification(0, jsonPayload.c_str());
     }
+
+    String jsonPayload;
+    jsonPayload.reserve(length * 2 + 16);
+    jsonPayload = "{\"text\":\"";
+    for (uint16_t i = 0; i < length; i++)
+    {
+        if (message[i] == '"')
+            jsonPayload += "\\\"";
+        else if (message[i] == '\\')
+            jsonPayload += "\\\\";
+        else
+            jsonPayload += message[i];
+    }
+    jsonPayload += "\"}";
+    DisplayManager.generateNotification(0, jsonPayload.c_str());
 }
 
 void onDismissTextMessage(const char *message, uint16_t length, HAText *sender)
@@ -341,6 +370,7 @@ void onDismissTextMessage(const char *message, uint16_t length, HAText *sender)
     }
     else
     {
+        json.reserve(input.length() * 2 + 16);
         json = "{\"channel\":\"";
         for (uint16_t i = 0; i < input.length(); i++)
         {
@@ -387,6 +417,8 @@ void onSelectCommand(int8_t index, HASelect *sender)
     }
     else if (sender == timerBuzzer)
     {
+        // Timer selects persist via TimerManager's own NVS namespace; intentionally
+        // skip the shared saveSettings() at the bottom of this function.
         if (index >= 0 && index <= 2)
         {
             TimerManager.setBuzzerMode((BuzzerMode)index);
@@ -396,6 +428,7 @@ void onSelectCommand(int8_t index, HASelect *sender)
     }
     else if (sender == timerFinishedSel)
     {
+        // See timerBuzzer branch: timer selects own their persistence.
         if (index >= 0 && index <= 2)
         {
             TimerManager.setFinishedMode((FinishedMode)index);
@@ -566,7 +599,7 @@ void onMqttConnected()
     {
         if (pendingTimerHADiscoveryCleanup)
         {
-            clearTimerHADiscovery();
+            MQTTManager.removeTimerHAEntities();
             pendingTimerHADiscoveryCleanup = false;
         }
         myOwnID->setValue(MQTT_PREFIX.c_str());
@@ -907,16 +940,6 @@ void MQTTManager_::setup()
         sprintf(tStartID, HAtimerStartID, macStr);
         sprintf(tPauseID, HAtimerPauseID, macStr);
         sprintf(tResetID, HAtimerResetID, macStr);
-
-        if (SHOW_TIMER_HA_PREV && !SHOW_TIMER)
-        {
-            pendingTimerHADiscoveryCleanup = true;
-        }
-        if (SHOW_TIMER_HA_PREV != SHOW_TIMER)
-        {
-            SHOW_TIMER_HA_PREV = SHOW_TIMER;
-            saveSettings();
-        }
 
         if (SHOW_TIMER)
         {
