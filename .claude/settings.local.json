@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(pio test -e native -f test_timer 2>&1)"
+    ]
+  }
+}

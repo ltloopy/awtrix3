@@ -383,6 +383,38 @@ const char *PeripheryManager_::playRTTTLString(String rtttl)
     return nullptr; // RTTTL not supported with DFPlayer
 }
 
+String PeripheryManager_::resolveRtttl(const String &name, const char *fallback)
+{
+    File root = LittleFS.open("/MELODIES");
+    if (root && root.isDirectory())
+    {
+        File file = root.openNextFile();
+        while (file)
+        {
+            if (!file.isDirectory())
+            {
+                String fn = file.name();
+                int slash = fn.lastIndexOf('/');
+                int dot = fn.lastIndexOf('.');
+                int end = dot > slash ? dot : fn.length();
+                String base = fn.substring(slash + 1, end);
+                if (base == name)
+                {
+                    String s;
+                    s.reserve(file.size());
+                    while (file.available()) s += (char)file.read();
+                    file.close();
+                    s.trim();
+                    if (s.length() > 0) return s;
+                    break; // matched but empty -> fall through to fallback
+                }
+            }
+            file = root.openNextFile();
+        }
+    }
+    return fallback ? String(fallback) : String();
+}
+
 const char *PeripheryManager_::playFromFile(String file)
 {
     if (!SOUND_ACTIVE)
@@ -404,19 +436,10 @@ const char *PeripheryManager_::playFromFile(String file)
     {
         if (DEBUG_MODE)
             DEBUG_PRINTLN(F("Playing RTTTL sound file"));
-        if (LittleFS.exists("/MELODIES/" + String(file) + ".txt"))
-        {
-            static char melodyName[64];
-            Melody melody = MelodyFactory.loadRtttlFile("/MELODIES/" + String(file) + ".txt");
-            player.playAsync(melody);
-            strncpy(melodyName, melody.getTitle().c_str(), sizeof(melodyName));
-            melodyName[sizeof(melodyName) - 1] = '\0';
-            return melodyName;
-        }
-        else
-        {
+        String rtttl = resolveRtttl(file);
+        if (rtttl.length() == 0)
             return NULL;
-        }
+        return playRTTTLString(rtttl);
     }
 }
 

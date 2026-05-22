@@ -21,25 +21,6 @@ namespace {
 
 static Preferences timerPrefs;
 
-static String loadRtttlFromFile(const char *path, const char *fallback)
-{
-    if (LittleFS.exists(path))
-    {
-        File f = LittleFS.open(path, "r");
-        if (f)
-        {
-            size_t sz = f.size();
-            String s;
-            s.reserve(sz);
-            while (f.available()) s += (char)f.read();
-            f.close();
-            s.trim();
-            if (s.length() > 0) return s;
-        }
-    }
-    return String(fallback);
-}
-
 TimerManager_ &TimerManager_::getInstance()
 {
     static TimerManager_ instance;
@@ -50,8 +31,8 @@ TimerManager_ &TimerManager = TimerManager_::getInstance();
 
 void TimerManager_::loadMelodiesCached()
 {
-    endRtttl  = loadRtttlFromFile("/MELODIES/timer_end.txt",  FALLBACK_END_RTTTL);
-    tickRtttl = loadRtttlFromFile("/MELODIES/timer_tick.txt", FALLBACK_TICK_RTTTL);
+    endRtttl  = PeripheryManager.resolveRtttl("timer_end",  FALLBACK_END_RTTTL);
+    tickRtttl = PeripheryManager.resolveRtttl("timer_tick", FALLBACK_TICK_RTTTL);
 }
 
 void TimerManager_::setup()

@@ -27,6 +27,7 @@
 #include "PeripheryManager.h"
 #include "DisplayManager.h"
 #include "MQTTManager.h"
+#include "MenuManager.h"
 
 #endif  // __cplusplus
 

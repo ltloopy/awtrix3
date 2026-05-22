@@ -55,8 +55,9 @@ plan; not in the starter set).
 
 Follow-up tests (H3–H8: button parity, AutoClear timing, Hold dismissal,
 persistence across reboot, auto-switch, invalid-JSON safety) are enumerated
-in the plan file at
-`~/.claude/plans/review-this-branch-and-enumerated-hummingbird.md`.
+in the manual plan at [`/TIMER_TEST_PLAN.md`](../../TIMER_TEST_PLAN.md) —
+sections `EDGE-*`, `HW-*`, and `MQTT-*` are the source of truth for the
+scenarios the e2e harness will eventually cover.
 
 ## Expected runtime
 

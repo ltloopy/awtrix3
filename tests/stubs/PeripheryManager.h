@@ -22,6 +22,9 @@ public:
         playing_ = true;
         return nullptr;
     }
+    String resolveRtttl(const String &, const char *fallback = nullptr) {
+        return fallback ? String(fallback) : String();
+    }
 
     EasyButtonStub *buttonL = nullptr;
     EasyButtonStub *buttonR = nullptr;

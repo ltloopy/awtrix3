@@ -272,6 +272,5 @@ Automated tests for the timer state machine live in:
 - `tests/e2e/` — end-to-end MQTT harness for maintainer-only pre-merge
   validation. See [tests/e2e/README.md](../tests/e2e/README.md).
 
-The manual smoke checklist lives in
-[docs/test-plans/timer.md](test-plans/timer.md) — run it against real
-hardware for any timer-touching PR.
+The manual test plan lives at [TIMER_TEST_PLAN.md](../TIMER_TEST_PLAN.md) — run
+it against real hardware for any timer-touching PR.
