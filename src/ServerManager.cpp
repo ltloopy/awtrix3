@@ -119,8 +119,13 @@ void addHandler()
                        } });
     mws.addHandler("/api/timer", HTTP_POST, []()
                    {
-                       TimerManager.parseCommand(mws.webserver->arg("plain").c_str());
-                       mws.webserver->send(200, F("text/plain"), F("OK"));
+                       switch (TimerManager.parseCommand(mws.webserver->arg("plain").c_str()))
+                       {
+                           case TimerCmdResult::Ok:       mws.webserver->send(200, F("text/plain"), F("OK")); break;
+                           case TimerCmdResult::Disabled: mws.webserver->send(409, F("text/plain"), F("TimerDisabled")); break;
+                           case TimerCmdResult::BadJson:  mws.webserver->send(400, F("text/plain"), F("ErrorParsingJson")); break;
+                           case TimerCmdResult::BadField: mws.webserver->send(400, F("text/plain"), F("InvalidValue")); break;
+                       }
                    });
     mws.addHandler("/api/nextapp", HTTP_ANY, []()
                    { DisplayManager.nextApp(); mws.webserver->send(200,F("text/plain"),F("OK")); });

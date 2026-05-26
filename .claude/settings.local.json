@@ -1,7 +1,14 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell(pio test -e native -f test_timer 2>&1)"
+      "PowerShell(pio test -e native -f test_timer 2>&1)",
+      "Bash(Get-ChildItem -Recurse -Directory)",
+      "Bash(Select-Object -First 20)",
+      "Bash(Format-Table FullName)",
+      "Bash(xargs -I {} basename {})",
+      "Bash(Get-ChildItem -Recurse src/ -Filter \"*Manager.h\")",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Sort-Object)"
     ]
   }
 }

@@ -7,6 +7,11 @@ enum class TimerState : uint8_t { Idle = 0, Running = 1, Paused = 2, Finished = 
 enum class BuzzerMode : uint8_t { Off = 0, End = 1, Countdown = 2 };
 enum class FinishedMode : uint8_t { AutoClear = 0, Hold = 1, ReAlert = 2 };
 
+// Result of parseCommand. All control surfaces share one validation policy
+// (reject invalid input atomically); only the HTTP API surfaces this as a
+// status code — MQTT ignores it. See docs/adr/0001-timer-command-validation-parity.md.
+enum class TimerCmdResult : uint8_t { Ok = 0, BadJson = 1, BadField = 2, Disabled = 3 };
+
 class TimerManager_
 {
 private:
@@ -69,6 +74,22 @@ public:
     void setBuzzerMode(BuzzerMode m);
     void setFinishedMode(FinishedMode m);
 
+    // Time <-> seconds helpers shared by the MQTT/HA string path and the
+    // on-device config editor. parseHMS/formatHMS are the external string
+    // contract (see docs/timer.md); secondsToHMS/hmsToSeconds are the raw math.
+    static void     secondsToHMS(uint32_t sec, uint32_t &h, uint32_t &m, uint32_t &s);
+    static uint32_t hmsToSeconds(uint32_t h, uint32_t m, uint32_t s);
+    static String   formatHMS(uint32_t seconds);
+    static bool     parseHMS(const String &s, uint32_t &outSeconds);
+
+    // Validation predicates shared by parseCommand (every control surface) and
+    // the HA duration callback. Range/out-of-range is rejected, not clamped.
+    static bool     isValidDuration(uint32_t seconds);
+    static bool     parseBuzzerMode(const String &s, BuzzerMode &out);
+    static bool     parseFinishedMode(const String &s, FinishedMode &out);
+    static bool     isValidIconName(const String &name);
+    static bool     isValidAction(const String &s);
+
     void setIconIdle    (const String &name, bool publish = true);
     void setIconRunning (const String &name, bool publish = true);
     void setIconPaused  (const String &name, bool publish = true);
@@ -76,7 +97,7 @@ public:
 
     void publishIcons();
 
-    void parseCommand(const char *json);
+    TimerCmdResult parseCommand(const char *json);
 
     void onShowTimerChange(bool prev, bool now);
 

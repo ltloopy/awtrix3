@@ -146,43 +146,7 @@ extern const char HAipAddrRID[];
 extern const char HAipAddrName[];
 extern const char HAipAddrIcon[];
 
-extern const char HAtimerDurID[];
-extern const char HAtimerDurIcon[];
-extern const char HAtimerDurName[];
-extern const char HAtimerDurUnit[];
-extern const char HAtimerDurClass[];
-
-extern const char HAtimerRemID[];
-extern const char HAtimerRemIcon[];
-extern const char HAtimerRemName[];
-extern const char HAtimerRemUnit[];
-extern const char HAtimerRemClass[];
-
-extern const char HAtimerStateID[];
-extern const char HAtimerStateIcon[];
-extern const char HAtimerStateName[];
-
-extern const char HAtimerBuzID[];
-extern const char HAtimerBuzIcon[];
-extern const char HAtimerBuzName[];
-extern const char HAtimerBuzOptions[];
-
-extern const char HAtimerFinID[];
-extern const char HAtimerFinIcon[];
-extern const char HAtimerFinName[];
-extern const char HAtimerFinOptions[];
-
-extern const char HAtimerStartID[];
-extern const char HAtimerStartIcon[];
-extern const char HAtimerStartName[];
-
-extern const char HAtimerPauseID[];
-extern const char HAtimerPauseIcon[];
-extern const char HAtimerPauseName[];
-
-extern const char HAtimerResetID[];
-extern const char HAtimerResetIcon[];
-extern const char HAtimerResetName[];
+// Timer HA entity strings live in src/TimerHa.h/.cpp (Timer HA Presence table).
 
 #ifndef awtrix2_upgrade
 extern const char BatKey[];

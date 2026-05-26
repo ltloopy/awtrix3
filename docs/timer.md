@@ -24,7 +24,7 @@ timer in one publish.
 
 | Key | Type | Values | Effect |
 | --- | --- | --- | --- |
-| `duration` | int | 1 to `TIMER_MAX_DURATION` (default 86400 = 24 h); clamped on out-of-range | Sets the timer duration in seconds. Persists to NVS. |
+| `duration` | string or int | A clock string `"HH:MM:SS"` / `"MM:SS"`, **or** a bare integer of seconds. Must be 1 .. `TIMER_MAX_DURATION` (default 86400 = 24 h); **out-of-range is rejected, not clamped**. | Sets the timer duration. Persists to NVS. See "Duration format" below. |
 | `buzzer`   | string | `"off"`, `"end"`, `"countdown"` (case-insensitive) | Sets the buzzer mode. Persists to NVS. |
 | `finished` | string | `"auto-clear"` (or `"autoclear"`), `"hold"`, `"re-alert"` (or `"realert"`) | Sets the finished-mode. Persists to NVS. |
 | `icon_idle`     | string | Bare icon name resolved against `/ICONS/<name>.{jpg,gif}`; empty string clears the slot; capped at 32 chars | Icon shown in the **Idle** state and used as fallback for any other state whose slot is empty. Persists to NVS. |
@@ -35,10 +35,56 @@ timer in one publish.
 
 ### Examples
 
-Start a 5-minute timer:
+Start a 5-minute timer (numeric seconds):
 ```json
 {"duration": 300, "action": "start"}
 ```
+
+Start a 5-minute timer (clock string — equivalent to the above):
+```json
+{"duration": "5:00", "action": "start"}
+```
+
+### Duration format
+
+`duration` accepts either a bare integer of seconds or a clock string. For
+strings, **the number of colons decides the units**:
+
+| Input | Interpreted as | Seconds |
+| --- | --- | --- |
+| `"1:30:00"` | `HH:MM:SS` | 5400 |
+| `"3:00"` | `MM:SS` (one colon is minutes, never hours) | 180 |
+| `"90"` or `90` | bare seconds | 90 |
+
+Fields are **summed without a 0–59 cap**, so `"3:90"` → 3·60 + 90 = 270 s.
+Surrounding whitespace is trimmed.
+
+The duration is **published back as a trimmed clock string** (hours dropped
+when zero, leading field unpadded): `300` → `5:00`, `3661` → `1:01:01`,
+`45` → `0:45`.
+
+### Invalid input is rejected on every surface
+
+A command is **invalid** if it is malformed (bad JSON, empty/`":30"`/`"5:"`
+fields, more than two colons, non-numeric like `"banana"`, or an unknown
+`buzzer`/`finished`/`action`/icon value) **or out-of-range** (a well-formed
+duration outside 1 .. `TIMER_MAX_DURATION`, e.g. `"30:00:00"` when the max is
+24 h). All three control surfaces **reject** an invalid command **atomically —
+nothing is applied** (no clamping). They differ only in how the transport can
+report it:
+
+| Surface | On invalid input |
+| --- | --- |
+| `{prefix}/timer` (MQTT) | Silently ignored — fire-and-forget. The retained `timer_dur` state still shows the unchanged value. |
+| `POST /api/timer` (HTTP) | Returns an error code — `400` (malformed/out-of-range) or `409` (timer disabled). See [api.md](api.md). |
+| `{id}_timer_dur` (HA text box) | Reverts to the previous valid time. |
+| On-device config buttons | Cannot produce invalid input — the wheels are capped at the valid range. |
+
+A partially-valid command (e.g. one good field + one bad) is rejected as a
+whole; the good field is **not** applied.
+
+See [ADR 0001](adr/0001-timer-command-validation-parity.md) for why rejection
+(not clamping) was chosen.
 
 Change buzzer mode without affecting the timer:
 ```json
@@ -143,7 +189,7 @@ With `HA_DISCOVERY=true`, the firmware advertises eight entities:
 
 | Entity | Type | Purpose |
 | --- | --- | --- |
-| `{id}_timer_dur`   | `number`      | Timer duration in seconds (writable). |
+| `{id}_timer_dur`   | `text`        | Timer duration as a clock string `HH:MM:SS` (writable; accepts `MM:SS` and bare seconds too). Invalid input (malformed or out-of-range) reverts to the previous valid time. |
 | `{id}_timer_rem`   | `sensor`      | Seconds remaining (read-only, updates every `TIMER_PUBLISH_INTERVAL` s while running). |
 | `{id}_timer_state` | `sensor`      | One of `idle` / `running` / `paused` / `finished`. |
 | `{id}_timer_buz`   | `select`      | Buzzer mode. |

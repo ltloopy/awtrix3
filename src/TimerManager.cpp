@@ -190,16 +190,120 @@ const char *TimerManager_::getStateString() const
     return "idle";
 }
 
+void TimerManager_::secondsToHMS(uint32_t sec, uint32_t &h, uint32_t &m, uint32_t &s)
+{
+    h = sec / 3600;
+    m = (sec % 3600) / 60;
+    s = sec % 60;
+}
+
+uint32_t TimerManager_::hmsToSeconds(uint32_t h, uint32_t m, uint32_t s)
+{
+    return h * 3600UL + m * 60UL + s;
+}
+
+String TimerManager_::formatHMS(uint32_t seconds)
+{
+    uint32_t h, m, s;
+    secondsToHMS(seconds, h, m, s);
+    char buf[16];
+    // Trimmed clock string: drop the hours group when zero; the most-significant
+    // shown field is unpadded, lower fields are zero-padded to two digits.
+    if (h > 0) snprintf(buf, sizeof(buf), "%u:%02u:%02u", (unsigned)h, (unsigned)m, (unsigned)s);
+    else       snprintf(buf, sizeof(buf), "%u:%02u",                 (unsigned)m, (unsigned)s);
+    return String(buf);
+}
+
+bool TimerManager_::parseHMS(const String &in, uint32_t &outSeconds)
+{
+    String s = in;
+    s.trim();
+    if (s.length() == 0) return false;
+
+    // Split on ':' into up to three numeric fields. Colon count decides units:
+    // two colons = HH:MM:SS, one = MM:SS, none = bare seconds. Each field must be
+    // a non-empty run of digits. Fields are summed without a 0-59 cap (carry).
+    uint32_t fields[3] = {0, 0, 0};
+    int count = 0;
+    int start = 0;
+    for (int i = 0; i <= s.length(); i++)
+    {
+        if (i == s.length() || s[i] == ':')
+        {
+            if (count >= 3) return false;          // more than two colons
+            int len = i - start;
+            if (len == 0) return false;            // empty field (e.g. "5:", ":30")
+            uint32_t v = 0;
+            for (int j = start; j < i; j++)
+            {
+                char c = s[j];
+                if (c < '0' || c > '9') return false;  // non-numeric
+                v = v * 10 + (uint32_t)(c - '0');
+            }
+            fields[count++] = v;
+            start = i + 1;
+        }
+    }
+
+    uint32_t h = 0, m = 0, sec = 0;
+    if (count == 3)      { h = fields[0]; m = fields[1]; sec = fields[2]; }
+    else if (count == 2) {                m = fields[0]; sec = fields[1]; }
+    else                 {                                sec = fields[0]; }
+
+    outSeconds = hmsToSeconds(h, m, sec);
+    return true;
+}
+
+bool TimerManager_::isValidDuration(uint32_t seconds)
+{
+    if (seconds < 1) return false;
+    if (TIMER_MAX_DURATION > 0 && seconds > TIMER_MAX_DURATION) return false;
+    return true;
+}
+
+bool TimerManager_::parseBuzzerMode(const String &s, BuzzerMode &out)
+{
+    String b = s; b.toLowerCase();
+    if      (b == "off")       out = BuzzerMode::Off;
+    else if (b == "end")       out = BuzzerMode::End;
+    else if (b == "countdown") out = BuzzerMode::Countdown;
+    else return false;
+    return true;
+}
+
+bool TimerManager_::parseFinishedMode(const String &s, FinishedMode &out)
+{
+    String f = s; f.toLowerCase();
+    if      (f == "auto-clear" || f == "autoclear") out = FinishedMode::AutoClear;
+    else if (f == "hold")                           out = FinishedMode::Hold;
+    else if (f == "re-alert"   || f == "realert")   out = FinishedMode::ReAlert;
+    else return false;
+    return true;
+}
+
+bool TimerManager_::isValidIconName(const String &name)
+{
+    // validateIconName returns the name unchanged when acceptable (empty = clear),
+    // or "" when rejected. So a name is valid iff it survives unchanged.
+    return validateIconName(name) == name;
+}
+
+bool TimerManager_::isValidAction(const String &s)
+{
+    String a = s; a.toLowerCase();
+    return a == "start" || a == "pause" || a == "reset";
+}
+
 void TimerManager_::enterConfigMode()
 {
     if (state != TimerState::Idle) return;
     if (durationSec > kConfigHHMax) durationSec = kConfigHHMax;
-    uint32_t d = durationSec;
-    uint32_t h = d / 3600;
+    uint32_t h, m, s;
+    secondsToHMS(durationSec, h, m, s);
     if (h > 99) h = 99;
     configHH = (uint8_t)h;
-    configMM = (uint8_t)((d % 3600) / 60);
-    configSS = (uint8_t)(d % 60);
+    configMM = (uint8_t)m;
+    configSS = (uint8_t)s;
     configField = 0;
     configLastInputMs = millis();
     configRepeatLeftMs = 0;
@@ -210,7 +314,7 @@ void TimerManager_::enterConfigMode()
 void TimerManager_::exitConfigMode()
 {
     if (!inConfig) return;
-    uint32_t total = (uint32_t)configHH * 3600UL + (uint32_t)configMM * 60UL + (uint32_t)configSS;
+    uint32_t total = hmsToSeconds(configHH, configMM, configSS);
     inConfig = false;
     setDuration(total);
     DisplayManager.drainDeferredNotifications();
@@ -467,57 +571,78 @@ void TimerManager_::tick()
     }
 }
 
-void TimerManager_::parseCommand(const char *json)
+TimerCmdResult TimerManager_::parseCommand(const char *json)
 {
-    if (!SHOW_TIMER) return;
-    if (json == nullptr || json[0] == '\0') return;
+    if (!SHOW_TIMER) return TimerCmdResult::Disabled;
+    if (json == nullptr || json[0] == '\0') return TimerCmdResult::BadJson;
 
+    DynamicJsonDocument doc(kTimerCmdJsonSize);
+    auto err = deserializeJson(doc, json);
+    if (err)
+    {
+        if (DEBUG_MODE && err == DeserializationError::NoMemory)
+            DEBUG_PRINTLN("timer: parseCommand NoMemory");
+        return TimerCmdResult::BadJson;
+    }
+
+    // -- Validation pass: mutate nothing; reject the whole command on the first
+    //    invalid field. Out-of-range is rejected here, not clamped (parity). --
+    uint32_t durSecs = 0;
+    bool haveDuration = doc.containsKey("duration");
+    if (haveDuration)
+    {
+        JsonVariant dv = doc["duration"];
+        if (dv.is<const char *>())
+        {
+            if (!parseHMS(dv.as<String>(), durSecs)) return TimerCmdResult::BadField;
+        }
+        else if (dv.is<long>() || dv.is<float>())   // any JSON number (int or float); not bool/object/null
+        {
+            durSecs = dv.as<uint32_t>();
+        }
+        else
+        {
+            return TimerCmdResult::BadField;
+        }
+        if (!isValidDuration(durSecs)) return TimerCmdResult::BadField;
+    }
+
+    BuzzerMode   buzzer   = buzzerMode;
+    FinishedMode finished = finishedMode;
+    bool haveBuzzer   = doc.containsKey("buzzer");
+    bool haveFinished = doc.containsKey("finished");
+    if (haveBuzzer   && !parseBuzzerMode  (doc["buzzer"].as<String>(),   buzzer))   return TimerCmdResult::BadField;
+    if (haveFinished && !parseFinishedMode(doc["finished"].as<String>(), finished)) return TimerCmdResult::BadField;
+
+    if (doc.containsKey("icon_idle")     && !isValidIconName(doc["icon_idle"].as<String>()))     return TimerCmdResult::BadField;
+    if (doc.containsKey("icon_running")  && !isValidIconName(doc["icon_running"].as<String>()))  return TimerCmdResult::BadField;
+    if (doc.containsKey("icon_paused")   && !isValidIconName(doc["icon_paused"].as<String>()))   return TimerCmdResult::BadField;
+    if (doc.containsKey("icon_finished") && !isValidIconName(doc["icon_finished"].as<String>())) return TimerCmdResult::BadField;
+
+    bool haveAction = doc.containsKey("action");
+    if (haveAction && !isValidAction(doc["action"].as<String>())) return TimerCmdResult::BadField;
+
+    // -- Command is known-good: only now disturb device state. --
     if (inConfig)
     {
-        // M1: discard the partial on-device edit; do NOT commit it via setDuration.
-        // But the deferred-notification queue still needs to drain so any messages
-        // that arrived during config aren't stranded.
+        // An accepted inbound command discards an in-progress on-device edit and
+        // drains any notifications deferred during config. A rejected command (above)
+        // leaves the edit untouched.
         inConfig = false;
         DisplayManager.drainDeferredNotifications();
         if (DEBUG_MODE) DEBUG_PRINTLN("timer: config aborted by inbound command");
     }
 
-    DynamicJsonDocument doc(kTimerCmdJsonSize);
-    auto err = deserializeJson(doc, json);
-    if (err == DeserializationError::NoMemory)
-    {
-        if (DEBUG_MODE) DEBUG_PRINTLN("timer: parseCommand NoMemory");
-        return;
-    }
-    if (err) return;
-
     _suspendPersist = true;
     _dirty = false;
 
-    if (doc.containsKey("duration"))
-    {
-        setDuration(doc["duration"].as<uint32_t>());
-    }
+    if (haveDuration)               setDuration(durSecs);   // pre-validated in range
     if (doc.containsKey("icon_idle"))     setIconIdle    (doc["icon_idle"].as<String>());
     if (doc.containsKey("icon_running"))  setIconRunning (doc["icon_running"].as<String>());
     if (doc.containsKey("icon_paused"))   setIconPaused  (doc["icon_paused"].as<String>());
     if (doc.containsKey("icon_finished")) setIconFinished(doc["icon_finished"].as<String>());
-    if (doc.containsKey("buzzer"))
-    {
-        String b = doc["buzzer"].as<String>();
-        b.toLowerCase();
-        if      (b == "off")       setBuzzerMode(BuzzerMode::Off);
-        else if (b == "end")       setBuzzerMode(BuzzerMode::End);
-        else if (b == "countdown") setBuzzerMode(BuzzerMode::Countdown);
-    }
-    if (doc.containsKey("finished"))
-    {
-        String f = doc["finished"].as<String>();
-        f.toLowerCase();
-        if      (f == "auto-clear" || f == "autoclear") setFinishedMode(FinishedMode::AutoClear);
-        else if (f == "hold")                            setFinishedMode(FinishedMode::Hold);
-        else if (f == "re-alert"   || f == "realert")    setFinishedMode(FinishedMode::ReAlert);
-    }
+    if (haveBuzzer)                 setBuzzerMode(buzzer);
+    if (haveFinished)               setFinishedMode(finished);
 
     _suspendPersist = false;
     if (_dirty)
@@ -526,7 +651,7 @@ void TimerManager_::parseCommand(const char *json)
         persist();
     }
 
-    if (doc.containsKey("action"))
+    if (haveAction)
     {
         String a = doc["action"].as<String>();
         a.toLowerCase();
@@ -543,6 +668,8 @@ void TimerManager_::parseCommand(const char *json)
         else if (a == "pause") pause();
         else if (a == "reset") reset();
     }
+
+    return TimerCmdResult::Ok;
 }
 
 void TimerManager_::onShowTimerChange(bool prev, bool now)

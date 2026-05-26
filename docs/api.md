@@ -411,7 +411,7 @@ All JSON properties are optional. When multiple are sent together, property sett
 | Key | Type | Values | Description |
 | --- | --- | --- | --- |
 | `action` | string | `start` / `pause` / `reset` | Performs the action. `start` from `idle` also force-switches the display to the Timer app (gated on no active game). `start` is a no-op while already running. `start` from `finished` restarts the countdown. |
-| `duration` | integer | 1 .. `timer_max_duration` | Sets the configured duration in seconds. Persists across reboots. Mid-run writes buffer until next `start`/`reset` (the current countdown is not interrupted). |
+| `duration` | string or integer | A clock string `"HH:MM:SS"`/`"MM:SS"`, or a bare integer of seconds. Must be 1 .. `timer_max_duration`. | Sets the configured duration. Colon count decides units (`"3:00"` = 3 min, never 3 h); out-of-range fields carry (`"3:90"` = 270 s). A malformed string **or** an out-of-range value is **rejected** (HTTP `400`, see Responses), not clamped. Published back as a trimmed clock string (`300` → `5:00`). Persists across reboots. Mid-run writes buffer until next `start`/`reset`. |
 | `buzzer` | string | `off` / `end` / `countdown` | Sets buzzer mode. Persists. |
 | `finished` | string | `auto-clear` / `hold` / `re-alert` | Sets what happens at `00:00`. Persists. |
 | `icon_idle` | string | Bare icon name resolved against `/ICONS/<name>.{jpg,gif}`; empty clears the slot; capped at 32 chars | Icon shown in the **Idle** state and used as fallback for any other state whose slot is empty. Persists. |
@@ -421,11 +421,27 @@ All JSON properties are optional. When multiple are sent together, property sett
 
 `action` / `buzzer` / `finished` values are case-insensitive; `auto-clear`/`autoclear` and `re-alert`/`realert` are both accepted. Icon values are **case-sensitive** (they map to filenames on LittleFS) and **capped at 32 characters**. The loader checks `/ICONS/<name>.jpg` then `/ICONS/<name>.gif`, so a single bare name supports either format.
 
+#### Responses
+
+`POST /api/timer` validates the whole command **atomically** — if any field is invalid, **nothing is applied**:
+
+| Status | Body | When |
+| --- | --- | --- |
+| `200 OK` | `OK` | Command accepted and applied. |
+| `400 Bad Request` | `ErrorParsingJson` | Body isn't valid JSON (or exceeds the parse buffer). |
+| `400 Bad Request` | `InvalidValue` | A field has an unusable value: malformed/out-of-range `duration`, or an unknown `buzzer`/`finished`/`action`/icon. |
+| `409 Conflict` | `TimerDisabled` | The Timer feature is off (`SHOW_TIMER=false`); the command is understood but can't apply. |
+
+Out-of-range durations are **rejected**, not clamped (e.g. `"30:00:00"` when the max is 24 h → `400`). The `{prefix}/timer` MQTT topic applies the same validation but, being fire-and-forget, ignores invalid commands silently (no error is published); the retained `timer_dur` state reflects the unchanged value. See [ADR 0001](adr/0001-timer-command-validation-parity.md).
+
 #### Examples
 
-Start a 5-minute timer immediately:
+Start a 5-minute timer immediately (numeric seconds or the equivalent clock string):
 ```json
 {"duration": 300, "action": "start"}
+```
+```json
+{"duration": "5:00", "action": "start"}
 ```
 
 Change buzzer mode mid-run (takes effect immediately for the countdown ticks):

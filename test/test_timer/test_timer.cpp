@@ -5,8 +5,10 @@
 
 #include <unity.h>
 #include <ArduinoFake.h>
+#include <string.h>
 
 #include "fixture.h"
+#include "../../src/TimerHa.h"
 
 void setUp(void) {
     fixture::reset_all();
@@ -148,21 +150,25 @@ void test_U5_autoclear_returns_to_idle_after_hold(void) {
 void test_U6_parseCommand_noop_when_disabled(void) {
     SHOW_TIMER = false;
 
-    TimerManager.parseCommand("{\"action\":\"start\"}");
+    // Disabled returns TimerCmdResult::Disabled (HTTP maps it to 409) and applies nothing.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Disabled),
+                      static_cast<int>(TimerManager.parseCommand("{\"action\":\"start\"}")));
     TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle),
                       static_cast<int>(TimerManager.getState()));
 
     uint32_t baseline = TimerManager.getDuration();
-    TimerManager.parseCommand("{\"duration\":120}");
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Disabled),
+                      static_cast<int>(TimerManager.parseCommand("{\"duration\":120}")));
     TEST_ASSERT_EQUAL_UINT32(baseline, TimerManager.getDuration());
 
     // Nothing published to HA from the gated commands.
     TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(PublishCall::State));
     TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(PublishCall::Duration));
 
-    // Re-enabling restores command processing.
+    // Re-enabling restores command processing (returns Ok).
     SHOW_TIMER = true;
-    TimerManager.parseCommand("{\"action\":\"start\"}");
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"action\":\"start\"}")));
     TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Running),
                       static_cast<int>(TimerManager.getState()));
 }
@@ -536,6 +542,251 @@ void test_U22_parseCommand_aborts_config_without_committing_edit(void) {
 }
 
 // ============================================================================
+// U23 — formatHMS emits a trimmed clock string (hours dropped when zero,
+// most-significant shown field unpadded, lower fields zero-padded).
+// ============================================================================
+void test_U23_formatHMS_trimmed(void) {
+    TEST_ASSERT_EQUAL_STRING("0:00",     TimerManager_::formatHMS(0).c_str());
+    TEST_ASSERT_EQUAL_STRING("0:45",     TimerManager_::formatHMS(45).c_str());
+    TEST_ASSERT_EQUAL_STRING("3:00",     TimerManager_::formatHMS(180).c_str());
+    TEST_ASSERT_EQUAL_STRING("5:05",     TimerManager_::formatHMS(305).c_str());
+    TEST_ASSERT_EQUAL_STRING("1:00:00",  TimerManager_::formatHMS(3600).c_str());
+    TEST_ASSERT_EQUAL_STRING("1:01:01",  TimerManager_::formatHMS(3661).c_str());
+    TEST_ASSERT_EQUAL_STRING("10:00:00", TimerManager_::formatHMS(36000).c_str());
+}
+
+// ============================================================================
+// U24 — parseHMS accepts bare seconds, MM:SS, HH:MM:SS, carries out-of-range
+// fields, and trims surrounding whitespace.
+// ============================================================================
+void test_U24_parseHMS_accepts(void) {
+    uint32_t s = 0;
+    TEST_ASSERT_TRUE(TimerManager_::parseHMS("00:05:00", s)); TEST_ASSERT_EQUAL_UINT32(300, s);
+    TEST_ASSERT_TRUE(TimerManager_::parseHMS("3:00", s));     TEST_ASSERT_EQUAL_UINT32(180, s);   // MM:SS
+    TEST_ASSERT_TRUE(TimerManager_::parseHMS("90", s));       TEST_ASSERT_EQUAL_UINT32(90, s);    // bare seconds
+    TEST_ASSERT_TRUE(TimerManager_::parseHMS("3:90", s));     TEST_ASSERT_EQUAL_UINT32(270, s);   // carry, no 0-59 cap
+    TEST_ASSERT_TRUE(TimerManager_::parseHMS(" 1:00:00 ", s));TEST_ASSERT_EQUAL_UINT32(3600, s);  // trims
+    TEST_ASSERT_TRUE(TimerManager_::parseHMS("0:45", s));     TEST_ASSERT_EQUAL_UINT32(45, s);
+}
+
+// ============================================================================
+// U25 — parseHMS rejects empty fields, >2 colons, non-numeric, and empty input.
+// ============================================================================
+void test_U25_parseHMS_rejects(void) {
+    uint32_t s = 12345;  // sentinel; must be left untouched on reject
+    TEST_ASSERT_FALSE(TimerManager_::parseHMS("aa:bb", s));
+    TEST_ASSERT_FALSE(TimerManager_::parseHMS("5:", s));
+    TEST_ASSERT_FALSE(TimerManager_::parseHMS(":30", s));
+    TEST_ASSERT_FALSE(TimerManager_::parseHMS("1:2:3:4", s));
+    TEST_ASSERT_FALSE(TimerManager_::parseHMS("", s));
+    TEST_ASSERT_FALSE(TimerManager_::parseHMS("   ", s));
+    TEST_ASSERT_EQUAL_UINT32(12345, s);
+}
+
+// ============================================================================
+// U26 — parseCommand "duration" accepts a clock string or a numeric value;
+// both resolve to the same seconds. Bad string is ignored (duration unchanged).
+// ============================================================================
+void test_U26_parseCommand_duration_string_and_number(void) {
+    TimerManager.parseCommand("{\"duration\":\"00:05:00\"}");
+    TEST_ASSERT_EQUAL_UINT32(300, TimerManager.getDuration());
+
+    TimerManager.parseCommand("{\"duration\":600}");
+    TEST_ASSERT_EQUAL_UINT32(600, TimerManager.getDuration());
+
+    TimerManager.parseCommand("{\"duration\":\"3:00\"}");   // MM:SS
+    TEST_ASSERT_EQUAL_UINT32(180, TimerManager.getDuration());
+
+    // Malformed string is ignored: duration stays at the last good value.
+    TimerManager.parseCommand("{\"duration\":\"banana\"}");
+    TEST_ASSERT_EQUAL_UINT32(180, TimerManager.getDuration());
+}
+
+// ============================================================================
+// U27 — config round-trip is unchanged after unifying onto the shared helpers
+// (regression guard: enter decomposes seconds, exit recomposes them).
+// ============================================================================
+void test_U27_config_roundtrip_unchanged(void) {
+    TimerManager.setDuration(3661);  // 1:01:01
+    TimerManager.enterConfigMode();
+    TEST_ASSERT_EQUAL_UINT8(1, TimerManager.getConfigHH());
+    TEST_ASSERT_EQUAL_UINT8(1, TimerManager.getConfigMM());
+    TEST_ASSERT_EQUAL_UINT8(1, TimerManager.getConfigSS());
+    TimerManager.exitConfigMode();
+    TEST_ASSERT_EQUAL_UINT32(3661, TimerManager.getDuration());
+}
+
+// ============================================================================
+// U28 — isValidDuration: range gate used by the reject-everywhere policy.
+// ============================================================================
+void test_U28_isValidDuration(void) {
+    TIMER_MAX_DURATION = 86400;
+    TEST_ASSERT_FALSE(TimerManager_::isValidDuration(0));
+    TEST_ASSERT_TRUE (TimerManager_::isValidDuration(1));
+    TEST_ASSERT_TRUE (TimerManager_::isValidDuration(86400));
+    TEST_ASSERT_FALSE(TimerManager_::isValidDuration(86401));
+
+    TIMER_MAX_DURATION = 0;  // 0 = no upper cap
+    TEST_ASSERT_TRUE (TimerManager_::isValidDuration(999999));
+    TEST_ASSERT_FALSE(TimerManager_::isValidDuration(0));
+
+    TIMER_MAX_DURATION = 86400;  // restore default for later tests
+}
+
+// ============================================================================
+// U29 — parseCommand is always strict: Ok / BadJson / BadField, and out-of-range
+// is REJECTED (not clamped). Invalid input leaves duration unchanged.
+// ============================================================================
+void test_U29_parseCommand_strict_results(void) {
+    SHOW_TIMER = true;
+    TIMER_MAX_DURATION = 86400;
+
+    // Valid: string and numeric both apply.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"duration\":\"00:05:00\"}")));
+    TEST_ASSERT_EQUAL_UINT32(300, TimerManager.getDuration());
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"duration\":600}")));
+    TEST_ASSERT_EQUAL_UINT32(600, TimerManager.getDuration());
+
+    // BadJson: unparseable / empty.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadJson),
+                      static_cast<int>(TimerManager.parseCommand("{garbage")));
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadJson),
+                      static_cast<int>(TimerManager.parseCommand("")));
+
+    // BadField: malformed duration string — duration unchanged.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"duration\":\"banana\"}")));
+    TEST_ASSERT_EQUAL_UINT32(600, TimerManager.getDuration());
+
+    // BadField: out-of-range numeric is REJECTED, NOT clamped to MAX.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"duration\":99999}")));
+    TEST_ASSERT_EQUAL_UINT32(600, TimerManager.getDuration());
+
+    // BadField: zero, and an unknown enum value.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"duration\":0}")));
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"buzzer\":\"nope\"}")));
+    TEST_ASSERT_EQUAL_UINT32(600, TimerManager.getDuration());
+}
+
+// ============================================================================
+// U30 — Atomicity: a command with one bad field applies NOTHING (the valid
+// action in the same payload must not run).
+// ============================================================================
+void test_U30_parseCommand_atomic_reject(void) {
+    SHOW_TIMER = true;
+    TIMER_MAX_DURATION = 86400;
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle),
+                      static_cast<int>(TimerManager.getState()));
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"action\":\"start\",\"buzzer\":\"nope\"}")));
+    // The action did NOT run — still Idle.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle),
+                      static_cast<int>(TimerManager.getState()));
+}
+
+// ============================================================================
+// U31 — Config-abort is atomic (#11): a rejected command leaves an in-progress
+// on-device edit intact; a valid command aborts config and applies.
+// ============================================================================
+void test_U31_config_abort_only_on_valid_command(void) {
+    SHOW_TIMER = true;
+    TIMER_MAX_DURATION = 86400;
+    TimerManager.setDuration(300);
+    TimerManager.enterConfigMode();
+    TEST_ASSERT_TRUE(TimerManager.isInConfig());
+
+    // Rejected command: config edit untouched.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"duration\":\"banana\"}")));
+    TEST_ASSERT_TRUE(TimerManager.isInConfig());
+
+    // Valid command: config aborts and the value applies.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"duration\":\"00:01:00\"}")));
+    TEST_ASSERT_FALSE(TimerManager.isInConfig());
+    TEST_ASSERT_EQUAL_UINT32(60, TimerManager.getDuration());
+}
+
+// ============================================================================
+// U32–U35 — Timer HA Presence descriptor table invariants.
+// The table (src/TimerHa.h) is the single source of truth that MQTTManager's
+// discovery setup AND teardown both read, so it cannot drift. These host tests
+// lock the contract that was previously only checked by maintainer-only E2E.
+// ============================================================================
+
+static int count_ha_options(const char *opts) {
+    if (!opts || !*opts) return 0;
+    int n = 1;
+    for (const char *p = opts; *p; ++p) if (*p == ';') ++n;
+    return n;
+}
+
+// U32 — exactly one descriptor per slot, in slot order, with a sane component
+// and a "%s"-bearing unique-id format.
+void test_U32_descriptor_table_well_formed(void) {
+    TEST_ASSERT_EQUAL_UINT(8, (unsigned)TIMER_HA_DESCRIPTOR_COUNT);
+    for (size_t i = 0; i < TIMER_HA_DESCRIPTOR_COUNT; ++i) {
+        const TimerHaDescriptor &d = TIMER_HA_DESCRIPTORS[i];
+        // Row i must describe slot i (setup/teardown index the array by slot).
+        TEST_ASSERT_EQUAL_UINT((unsigned)i, (unsigned)d.slot);
+
+        const bool validComponent =
+            strcmp(d.component, "text")   == 0 ||
+            strcmp(d.component, "sensor") == 0 ||
+            strcmp(d.component, "select") == 0 ||
+            strcmp(d.component, "button") == 0;
+        TEST_ASSERT_TRUE_MESSAGE(validComponent, d.component);
+
+        TEST_ASSERT_NOT_NULL(d.idFormat);
+        TEST_ASSERT_NOT_NULL(strstr(d.idFormat, "%s"));
+        TEST_ASSERT_NOT_NULL(d.icon);
+        TEST_ASSERT_NOT_NULL(d.name);
+    }
+}
+
+// U33 — every entity's unique-id format is distinct (no two entities collide).
+void test_U33_descriptor_ids_unique(void) {
+    for (size_t i = 0; i < TIMER_HA_DESCRIPTOR_COUNT; ++i)
+        for (size_t j = i + 1; j < TIMER_HA_DESCRIPTOR_COUNT; ++j)
+            TEST_ASSERT_TRUE_MESSAGE(
+                strcmp(TIMER_HA_DESCRIPTORS[i].idFormat,
+                       TIMER_HA_DESCRIPTORS[j].idFormat) != 0,
+                TIMER_HA_DESCRIPTORS[i].idFormat);
+}
+
+// U34 — only selects carry options; only sensors carry unit + device class.
+void test_U34_descriptor_type_specific_fields(void) {
+    for (size_t i = 0; i < TIMER_HA_DESCRIPTOR_COUNT; ++i) {
+        const TimerHaDescriptor &d = TIMER_HA_DESCRIPTORS[i];
+        if (strcmp(d.component, "select") == 0)
+            TEST_ASSERT_NOT_NULL(d.options);
+        else
+            TEST_ASSERT_NULL(d.options);
+        if (strcmp(d.component, "sensor") != 0) {
+            TEST_ASSERT_NULL(d.unit);
+            TEST_ASSERT_NULL(d.deviceClass);
+        }
+    }
+}
+
+// U35 — the HA select option lists cannot silently diverge from the enums they
+// surface: one option per enum value (Candidate-B link). If a new BuzzerMode /
+// FinishedMode value is added, its last index grows and this forces the option
+// list to grow with it.
+void test_U35_select_options_match_enums(void) {
+    const TimerHaDescriptor &buz = timerHaDescriptor(TimerHaEntity::Buzzer);
+    const TimerHaDescriptor &fin = timerHaDescriptor(TimerHaEntity::Finished);
+    TEST_ASSERT_EQUAL_INT((int)BuzzerMode::Countdown + 1, count_ha_options(buz.options));
+    TEST_ASSERT_EQUAL_INT((int)FinishedMode::ReAlert + 1, count_ha_options(fin.options));
+}
+
+// ============================================================================
 // D1–D4, I1 — TODO: requires native DisplayManager.cpp test infrastructure
 // (currently DisplayManager is stubbed). Tracked separately.
 // ============================================================================
@@ -564,5 +815,18 @@ int main(int, char **) {
     RUN_TEST(test_U20_icon_name_validation);
     RUN_TEST(test_U21_parseCommand_batches_persist);
     RUN_TEST(test_U22_parseCommand_aborts_config_without_committing_edit);
+    RUN_TEST(test_U23_formatHMS_trimmed);
+    RUN_TEST(test_U24_parseHMS_accepts);
+    RUN_TEST(test_U25_parseHMS_rejects);
+    RUN_TEST(test_U26_parseCommand_duration_string_and_number);
+    RUN_TEST(test_U27_config_roundtrip_unchanged);
+    RUN_TEST(test_U28_isValidDuration);
+    RUN_TEST(test_U29_parseCommand_strict_results);
+    RUN_TEST(test_U30_parseCommand_atomic_reject);
+    RUN_TEST(test_U31_config_abort_only_on_valid_command);
+    RUN_TEST(test_U32_descriptor_table_well_formed);
+    RUN_TEST(test_U33_descriptor_ids_unique);
+    RUN_TEST(test_U34_descriptor_type_specific_fields);
+    RUN_TEST(test_U35_select_options_match_enums);
     return UNITY_END();
 }
