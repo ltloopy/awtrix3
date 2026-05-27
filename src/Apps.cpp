@@ -12,6 +12,7 @@
 #include "Overlays.h"
 #include "timer.h"
 #include "TimerManager.h"
+#include "TimerView.h"
 #include "Globals.h"
 #include "DisplayManager.h"
 
@@ -417,14 +418,11 @@ void BatApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x, i
 #endif
 
 namespace {
-    constexpr int16_t kTimerTextX     = 8;
-    constexpr int16_t kTimerTextY     = 6;
-    constexpr int16_t kTimerTextWidth = 24;
-    constexpr int16_t kTimerBarMaxLen = 23;
-    constexpr int16_t kTimerBarX0     = 9;
-    constexpr int16_t kTimerScreenW   = 32;
-    constexpr int16_t kTimerScreenH   = 8;
-    constexpr int    kTimerConfigUnderlineStep = 10;
+    // Painter-side layout (font-/draw-dependent). The view-model owns the rest
+    // of the timer geometry (text region, progress bar) — see src/TimerView.cpp.
+    constexpr int16_t kTimerTextY               = 6;   // text baseline row
+    constexpr int16_t kTimerScreenH             = 8;   // panel height (bottom row = H-1)
+    constexpr int     kTimerConfigUnderlineStep = 10;  // px between config fields
 }
 
 static void drawTimerIcon(FastLED_NeoMatrix *matrix, int16_t x, int16_t y, uint32_t color, TimerState state, GifPlayer *gifPlayer)
@@ -502,74 +500,40 @@ void TimerApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x,
     CURRENT_APP = "Timer";
     currentCustomApp = "";
 
-    if (TimerManager.isInConfig())
-    {
+    // What to draw is decided by the display-free view-model; this function is
+    // its painter (font-dependent centering + the actual draws). See TimerView.h.
+    const TimerView view = TimerViewModel::compute(millis());
+
+    // Config and Finished pin the app in the rotation while they're on screen.
+    if (view.screen == TimerView::Screen::Config || view.screen == TimerView::Screen::Finished)
         state->ticksSinceLastStateSwitch = 0;
-
-        DisplayManager.getInstance().resetTextColor();
-        DisplayManager.setTextColor(TEXTCOLOR_888);
-
-        char buf[10];
-        snprintf(buf, sizeof(buf), "%02u:%02u:%02u",
-            (unsigned)TimerManager.getConfigHH(),
-            (unsigned)TimerManager.getConfigMM(),
-            (unsigned)TimerManager.getConfigSS());
-        int16_t textX = ((kTimerScreenW - (int)getTextWidth(buf, 0)) / 2);
-        DisplayManager.printText(textX + x, kTimerTextY + y, buf, false, 0);
-
-        int underlineX = textX + (TimerManager.getConfigField() * kTimerConfigUnderlineStep);
-        matrix->drawFastHLine(underlineX + x, (kTimerScreenH - 1) + y, 8, TEXTCOLOR_888);
-        return;
-    }
 
     DisplayManager.getInstance().resetTextColor();
 
-    TimerState ts = TimerManager.getState();
-    drawTimerIcon(matrix, x, y, TEXTCOLOR_888, ts, gifPlayer);
+    // Icon on every screen except Config (which centers text over the full panel).
+    if (view.screen != TimerView::Screen::Config)
+        drawTimerIcon(matrix, x, y, TEXTCOLOR_888, TimerManager.getState(), gifPlayer);
 
-    if (ts == TimerState::Finished)
+    // Text, centered within the view's region. getTextWidth (font metrics) is
+    // the one display dependency that stays painter-side.
+    int16_t textX = view.textRegionX0;
+    if (view.showText)
     {
-        state->ticksSinceLastStateSwitch = 0;
-        if ((millis() / 500) % 2 == 0)
-        {
-            DisplayManager.setTextColor(TEXTCOLOR_888);
-            int16_t textX = kTimerTextX + ((kTimerTextWidth - (int)getTextWidth("0:00", 0)) / 2);
-            DisplayManager.printText(textX + x, kTimerTextY + y, "0:00", false, 0);
-        }
-        return;
+        textX = view.textRegionX0 + ((view.textRegionW - (int)getTextWidth(view.text, 0)) / 2);
+        DisplayManager.setTextColor(TEXTCOLOR_888);
+        DisplayManager.printText(textX + x, kTimerTextY + y, view.text, false, 0);
     }
 
-    uint32_t duration  = TimerManager.getDuration();
-    uint32_t remaining = (ts == TimerState::Idle) ? duration : TimerManager.getRemaining();
-
-    char buf[10];
-    if (remaining < 3600)
+    // Config-mode field underline, offset from the centered text.
+    if (view.showUnderline)
     {
-        snprintf(buf, sizeof(buf), "%u:%02u", (unsigned)(remaining / 60), (unsigned)(remaining % 60));
-    }
-    else if (remaining < 36000)
-    {
-        snprintf(buf, sizeof(buf), "%u:%02u", (unsigned)(remaining / 3600), (unsigned)((remaining % 3600) / 60));
-    }
-    else
-    {
-        snprintf(buf, sizeof(buf), "%02u:%02u", (unsigned)(remaining / 3600), (unsigned)((remaining % 3600) / 60));
+        int underlineX = textX + (view.underlineField * kTimerConfigUnderlineStep);
+        matrix->drawFastHLine(underlineX + x, (kTimerScreenH - 1) + y, 8, TEXTCOLOR_888);
     }
 
-    DisplayManager.setTextColor(TEXTCOLOR_888);
-    int16_t textX = kTimerTextX + ((kTimerTextWidth - (int)getTextWidth(buf, 0)) / 2);
-    DisplayManager.printText(textX + x, kTimerTextY + y, buf, false, 0);
-
-    if (ts != TimerState::Idle && duration > 0)
-    {
-        int barLen = (int)(((uint32_t)kTimerBarMaxLen * remaining) / duration);
-        if (barLen > 0)
-        {
-            if (barLen > kTimerBarMaxLen) barLen = kTimerBarMaxLen;
-            int startX = kTimerBarX0 + (kTimerBarMaxLen - barLen);
-            matrix->drawFastHLine(startX + x, (kTimerScreenH - 1) + y, barLen, TEXTCOLOR_888);
-        }
-    }
+    // Progress bar (right-anchored, drains from the left).
+    if (view.showBar)
+        matrix->drawFastHLine(view.barStartX + x, (kTimerScreenH - 1) + y, view.barLen, TEXTCOLOR_888);
 }
 
 String replacePlaceholders(String text)

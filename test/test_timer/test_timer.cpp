@@ -9,6 +9,7 @@
 
 #include "fixture.h"
 #include "../../src/TimerHa.h"
+#include "../../src/TimerView.h"
 
 void setUp(void) {
     fixture::reset_all();
@@ -787,9 +788,127 @@ void test_U35_select_options_match_enums(void) {
 }
 
 // ============================================================================
-// D1–D4, I1 — TODO: requires native DisplayManager.cpp test infrastructure
-// (currently DisplayManager is stubbed). Tracked separately.
+// D1–D6 — Timer rendering, via the display-free TimerView model (src/TimerView).
+// The renderer's decision logic (per-state text, the compact display format,
+// progress-bar geometry, the Finished blink, the config underline) used to live
+// inside TimerApp in Apps.cpp — uncompiled on the host — so these were deferred.
+// TimerView::compute() reads the same TimerManager state the tests already drive
+// and returns a pure description of what to draw, so they run on the host now.
+// Still at the painter boundary (not covered here): font-metric text centering
+// and the icon-file (.jpg/.gif) lookup, both of which need real display I/O.
 // ============================================================================
+
+// D1 — Idle shows the configured duration as compact text, with no bar.
+void test_D1_view_idle_shows_duration_no_bar(void) {
+    TimerManager.setDuration(300);
+    TimerView v = TimerViewModel::compute(0);
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerView::Screen::Time), static_cast<int>(v.screen));
+    TEST_ASSERT_EQUAL_STRING("5:00", v.text);
+    TEST_ASSERT_TRUE(v.showText);
+    TEST_ASSERT_FALSE(v.showBar);
+}
+
+// D2 — Running shows the remaining time with a bar.
+void test_D2_view_running_shows_remaining_with_bar(void) {
+    TimerManager.setDuration(300);
+    TimerManager.start();
+    fixture::advance(60000);            // 60s elapsed -> 240s remaining
+    TimerManager.tick();
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Running),
+                      static_cast<int>(TimerManager.getState()));
+    TimerView v = TimerViewModel::compute(0);
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerView::Screen::Time), static_cast<int>(v.screen));
+    TEST_ASSERT_EQUAL_STRING("4:00", v.text);
+    TEST_ASSERT_TRUE(v.showText);
+    TEST_ASSERT_TRUE(v.showBar);
+}
+
+// D3 — Finished blinks "0:00" at the 500 ms cadence; no bar.
+void test_D3_view_finished_blinks_0_00(void) {
+    TimerManager.setDuration(5);
+    TimerManager.start();
+    fixture::advance(5000);
+    TimerManager.tick();
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Finished),
+                      static_cast<int>(TimerManager.getState()));
+
+    // nowMs drives the blink directly (independent of the run clock).
+    TimerView on  = TimerViewModel::compute(0);
+    TimerView off = TimerViewModel::compute(500);
+    TimerView on2 = TimerViewModel::compute(1000);
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerView::Screen::Finished), static_cast<int>(on.screen));
+    TEST_ASSERT_EQUAL_STRING("0:00", on.text);
+    TEST_ASSERT_TRUE(on.showText);
+    TEST_ASSERT_FALSE(off.showText);
+    TEST_ASSERT_TRUE(on2.showText);
+    TEST_ASSERT_FALSE(on.showBar);
+}
+
+// D4 — Progress bar geometry: right-anchored, drains from the left
+// (barStartX + barLen == 32, the right edge at column 31), and a sub-1-cell
+// remaining draws no bar.
+void test_D4_view_bar_geometry_right_anchored(void) {
+    // Half remaining: 23 * 50/100 = 11 cells, anchored right.
+    TimerManager.setDuration(100);
+    TimerManager.start();
+    fixture::advance(50000);
+    TimerManager.tick();
+    TEST_ASSERT_EQUAL_UINT32(50, TimerManager.getRemaining());
+    TimerView half = TimerViewModel::compute(0);
+    TEST_ASSERT_TRUE(half.showBar);
+    TEST_ASSERT_EQUAL_UINT8(11, half.barLen);
+    TEST_ASSERT_EQUAL_INT16(21, half.barStartX);                 // 9 + (23 - 11)
+    TEST_ASSERT_EQUAL_INT16(32, half.barStartX + half.barLen);   // right edge anchored
+
+    // Full remaining: full-length bar starting at the bar origin.
+    TimerManager.reset();
+    TimerManager.start();
+    TimerView full = TimerViewModel::compute(0);
+    TEST_ASSERT_EQUAL_UINT8(23, full.barLen);
+    TEST_ASSERT_EQUAL_INT16(9, full.barStartX);
+    TEST_ASSERT_EQUAL_INT16(32, full.barStartX + full.barLen);
+
+    // Tiny remaining (1s of 100): 23 * 1/100 == 0 cells -> no bar drawn.
+    fixture::advance(99000);
+    TimerManager.tick();
+    TEST_ASSERT_EQUAL_UINT32(1, TimerManager.getRemaining());
+    TimerView tiny = TimerViewModel::compute(0);
+    TEST_ASSERT_FALSE(tiny.showBar);
+}
+
+// D5 — Config screen: HH:MM:SS centered over the full panel, field underline
+// tracks configCycleField, no bar.
+void test_D5_view_config_screen(void) {
+    TimerManager.setDuration(3661);     // 1:01:01
+    TimerManager.enterConfigMode();
+    TimerView v = TimerViewModel::compute(0);
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerView::Screen::Config), static_cast<int>(v.screen));
+    TEST_ASSERT_EQUAL_STRING("01:01:01", v.text);
+    TEST_ASSERT_TRUE(v.showText);
+    TEST_ASSERT_TRUE(v.showUnderline);
+    TEST_ASSERT_EQUAL_UINT8(0, v.underlineField);   // HH highlighted first
+    TEST_ASSERT_EQUAL_INT16(0, v.textRegionX0);     // centered over the full 32px panel
+    TEST_ASSERT_EQUAL_INT16(32, v.textRegionW);
+    TEST_ASSERT_FALSE(v.showBar);
+
+    TimerManager.configCycleField();                // HH -> MM
+    TimerView v2 = TimerViewModel::compute(0);
+    TEST_ASSERT_EQUAL_UINT8(1, v2.underlineField);
+}
+
+// D6 — formatTimerDisplay is the compact on-screen format (drops seconds past
+// 1h to fit 24px), distinct from formatHMS (the wire string, always seconds).
+void test_D6_formatTimerDisplay_vs_wire_string(void) {
+    char b[12];
+    TimerViewModel::formatTimerDisplay(45, b, sizeof(b));    TEST_ASSERT_EQUAL_STRING("0:45", b);
+    TimerViewModel::formatTimerDisplay(305, b, sizeof(b));   TEST_ASSERT_EQUAL_STRING("5:05", b);
+    TimerViewModel::formatTimerDisplay(3600, b, sizeof(b));  TEST_ASSERT_EQUAL_STRING("1:00", b);
+    TimerViewModel::formatTimerDisplay(3661, b, sizeof(b));  TEST_ASSERT_EQUAL_STRING("1:01", b);  // seconds dropped
+    TimerViewModel::formatTimerDisplay(36000, b, sizeof(b)); TEST_ASSERT_EQUAL_STRING("10:00", b);
+    // Contrast: the wire string for the same value keeps seconds.
+    TEST_ASSERT_EQUAL_STRING("1:01:01", TimerManager_::formatHMS(3661).c_str());
+}
 
 int main(int, char **) {
     UNITY_BEGIN();
@@ -828,5 +947,11 @@ int main(int, char **) {
     RUN_TEST(test_U33_descriptor_ids_unique);
     RUN_TEST(test_U34_descriptor_type_specific_fields);
     RUN_TEST(test_U35_select_options_match_enums);
+    RUN_TEST(test_D1_view_idle_shows_duration_no_bar);
+    RUN_TEST(test_D2_view_running_shows_remaining_with_bar);
+    RUN_TEST(test_D3_view_finished_blinks_0_00);
+    RUN_TEST(test_D4_view_bar_geometry_right_anchored);
+    RUN_TEST(test_D5_view_config_screen);
+    RUN_TEST(test_D6_formatTimerDisplay_vs_wire_string);
     return UNITY_END();
 }

@@ -12,6 +12,14 @@ _Avoid_: just "duration" (overloaded — see Flagged ambiguities), "time", "leng
 The seconds still left on a running/paused countdown. Distinct from **Timer Duration** (the starting length).
 _Avoid_: "time left" when precision matters.
 
+**Timer Display String**:
+The compact on-screen rendering of **Timer Duration** / **Timer Remaining**, fitted to the 24px text region: `M:SS` under an hour, `H:MM` for 1–9 h (seconds dropped to fit), `HH:MM` at 10 h+. Produced by `formatTimerDisplay` (`src/TimerView`). Distinct from the **Timer wire string** (`formatHMS`, `H:MM:SS`), which always carries seconds and is the external string contract (`docs/timer.md`).
+_Avoid_: conflating the display string with the wire string — they intentionally differ past 1 h (`3661` → `1:01` on screen, `1:01:01` on the wire).
+
+**Timer View**:
+The pure, per-frame description of what the Timer app should draw — screen (Config / Finished / Time), the **Timer Display String** and its centering region, progress-bar length/anchor, and the config underline — computed by `TimerView::compute(now)` (`src/TimerView`) from Timer state with no display, font, or filesystem dependency. The `TimerApp` renderer is its painter: it owns only font-metric centering and the icon-file lookup. Being display-free is what makes the bar geometry, blink cadence, and display-string selection host-testable (tests D1–D6).
+_Avoid_: putting render-decision logic back in `TimerApp` — that re-creates the untestable tangle the view was extracted to remove.
+
 **Finished Mode**:
 What the timer does after it reaches zero: auto-clear, hold, or re-alert.
 
