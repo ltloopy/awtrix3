@@ -11,6 +11,10 @@
 #include "MQTTManager.h"
 #include "Overlays.h"
 #include "timer.h"
+#include "TimerManager.h"
+#include "TimerView.h"
+#include "Globals.h"
+#include "DisplayManager.h"
 
 const uint8_t bigdigits_mask[12][7] = {
     {132, 48, 48, 48, 48, 48, 132},      // 0
@@ -412,6 +416,125 @@ void BatApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x, i
     DisplayManager.matrixPrint("%");
 }
 #endif
+
+namespace {
+    // Painter-side layout (font-/draw-dependent). The view-model owns the rest
+    // of the timer geometry (text region, progress bar) — see src/TimerView.cpp.
+    constexpr int16_t kTimerTextY               = 6;   // text baseline row
+    constexpr int16_t kTimerScreenH             = 8;   // panel height (bottom row = H-1)
+    constexpr int     kTimerConfigUnderlineStep = 10;  // px between config fields
+}
+
+static void drawTimerIcon(FastLED_NeoMatrix *matrix, int16_t x, int16_t y, uint32_t color, TimerState state, GifPlayer *gifPlayer)
+{
+    static String     cachedName    = "\x01";
+    static uint32_t   cachedEpoch   = 0;
+    static File       icon;
+    static bool       isGif         = false;
+    static uint8_t    currentFrame  = 0;
+    static GifPlayer *lastPlayer    = nullptr;
+
+    const String &name = TimerManager.getIconForState(state);
+
+    if (name != cachedName || cachedEpoch != g_littlefsMountEpoch)
+    {
+        cachedEpoch = g_littlefsMountEpoch;
+        cachedName = name;
+        if (icon) icon.close();
+        isGif = false;
+        currentFrame = 0;
+        lastPlayer = nullptr;
+
+        if (name.length() > 0)
+        {
+            const char *extensions[] = {".jpg", ".gif"};
+            for (int i = 0; i < 2; i++)
+            {
+                String filePath = "/ICONS/" + name + extensions[i];
+                if (LittleFS.exists(filePath))
+                {
+                    isGif = (i == 1);
+                    icon  = LittleFS.open(filePath);
+                    break;
+                }
+            }
+        }
+    }
+
+    if (icon)
+    {
+        if (isGif && gifPlayer != nullptr)
+        {
+            if (gifPlayer != lastPlayer)
+            {
+                icon.seek(0);
+                currentFrame = 0;
+                lastPlayer = gifPlayer;
+            }
+            gifPlayer->playGif(x, y, &icon, currentFrame);
+            currentFrame = gifPlayer->getFrame();
+            return;
+        }
+        if (!isGif)
+        {
+            DisplayManager.drawJPG(x, y, icon);
+            return;
+        }
+    }
+
+    matrix->drawFastHLine(x + 0, y + 0, 8, color);
+    matrix->drawFastHLine(x + 1, y + 1, 6, color);
+    matrix->drawFastHLine(x + 2, y + 2, 4, color);
+    matrix->drawFastHLine(x + 3, y + 3, 2, color);
+    matrix->drawFastHLine(x + 3, y + 4, 2, color);
+    matrix->drawFastHLine(x + 2, y + 5, 4, color);
+    matrix->drawFastHLine(x + 1, y + 6, 6, color);
+    matrix->drawFastHLine(x + 0, y + 7, 8, color);
+}
+
+void TimerApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x, int16_t y, GifPlayer *gifPlayer)
+{
+    if (notifyFlag)
+        return;
+
+    CURRENT_APP = "Timer";
+    currentCustomApp = "";
+
+    // What to draw is decided by the display-free view-model; this function is
+    // its painter (font-dependent centering + the actual draws). See TimerView.h.
+    const TimerView view = TimerViewModel::compute(millis());
+
+    // Config and Finished pin the app in the rotation while they're on screen.
+    if (view.screen == TimerView::Screen::Config || view.screen == TimerView::Screen::Finished)
+        state->ticksSinceLastStateSwitch = 0;
+
+    DisplayManager.getInstance().resetTextColor();
+
+    // Icon on every screen except Config (which centers text over the full panel).
+    if (view.screen != TimerView::Screen::Config)
+        drawTimerIcon(matrix, x, y, TEXTCOLOR_888, TimerManager.getState(), gifPlayer);
+
+    // Text, centered within the view's region. getTextWidth (font metrics) is
+    // the one display dependency that stays painter-side.
+    int16_t textX = view.textRegionX0;
+    if (view.showText)
+    {
+        textX = view.textRegionX0 + ((view.textRegionW - (int)getTextWidth(view.text, 0)) / 2);
+        DisplayManager.setTextColor(TEXTCOLOR_888);
+        DisplayManager.printText(textX + x, kTimerTextY + y, view.text, false, 0);
+    }
+
+    // Config-mode field underline, offset from the centered text.
+    if (view.showUnderline)
+    {
+        int underlineX = textX + (view.underlineField * kTimerConfigUnderlineStep);
+        matrix->drawFastHLine(underlineX + x, (kTimerScreenH - 1) + y, 8, TEXTCOLOR_888);
+    }
+
+    // Progress bar (right-anchored, drains from the left).
+    if (view.showBar)
+        matrix->drawFastHLine(view.barStartX + x, (kTimerScreenH - 1) + y, view.barLen, TEXTCOLOR_888);
+}
 
 String replacePlaceholders(String text)
 {

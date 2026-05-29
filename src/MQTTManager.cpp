@@ -9,12 +9,18 @@
 #include "PeripheryManager.h"
 #include "UpdateManager.h"
 #include "PowerManager.h"
+#include "TimerManager.h"
+#include "TimerHa.h"
 
 const uint16_t PORT = 1883;
 
+namespace {
+    constexpr uint8_t  kMaxHAEntities  = 34;
+}
+
 WiFiClient espClient;
 HADevice device;
-HAMqtt mqtt(espClient, device, 26);
+HAMqtt mqtt(espClient, device, kMaxHAEntities);
 
 HALight *Matrix, *Indikator1, *Indikator2, *Indikator3 = nullptr;
 HASelect *BriMode, *transEffect = nullptr;
@@ -25,8 +31,50 @@ HASensor *battery = nullptr;
 #endif
 HASensor *temperature, *humidity, *illuminance, *uptime, *strength, *version, *ram, *curApp, *myOwnID, *ipAddr = nullptr;
 HABinarySensor *btnleft, *btnmid, *btnright = nullptr;
+HAText *timerDuration = nullptr;
+HASensorNumber *timerRemaining = nullptr;
+HASensor *timerStateSensor = nullptr;
+HASelect *timerBuzzer = nullptr, *timerFinishedSel = nullptr;
+HAButton *timerStartBtn = nullptr, *timerPauseBtn = nullptr, *timerResetBtn = nullptr;
 bool connected;
 char matID[40], ind1ID[40], ind2ID[40], ind3ID[40], briID[40], btnAID[40], btnBID[40], btnCID[40], appID[40], tempID[40], humID[40], luxID[40], verID[40], ramID[40], upID[40], sigID[40], btnLID[40], btnMID[40], btnRID[40], transID[40], doUpdateID[40], batID[40], myID[40], sSpeed[40], effectID[40], ipAddrID[40];
+char tDurID[40], tRemID[40], tStateID[40], tBuzID[40], tFinID[40], tStartID[40], tPauseID[40], tResetID[40];
+bool pendingTimerHADiscoveryCleanup = false;
+
+void reconcileTimerHAState()
+{
+    if (SHOW_TIMER_HA_PREV && !SHOW_TIMER)
+    {
+        pendingTimerHADiscoveryCleanup = true;
+    }
+    if (SHOW_TIMER_HA_PREV != SHOW_TIMER)
+    {
+        SHOW_TIMER_HA_PREV = SHOW_TIMER;
+        saveSettings();
+    }
+}
+
+// The Timer entity id buffers in TimerHaEntity slot order. The Timer HA Presence
+// table (TIMER_HA_DESCRIPTORS) drives which entities exist and their metadata;
+// these hold each entity's resolved unique id ("%s" filled with the MAC). Both
+// setup (fill + apply) and removeTimerHAEntities (teardown) index this in the
+// same slot order, so the two cannot drift.
+#define TIMER_HA_ID_BUFFERS \
+    { tDurID, tRemID, tStateID, tBuzID, tFinID, tStartID, tPauseID, tResetID }
+
+void MQTTManager_::removeTimerHAEntities()
+{
+    const char *deviceUniqueId = device.getUniqueId();
+    if (!deviceUniqueId) return;
+    char *const idBufs[TIMER_HA_DESCRIPTOR_COUNT] = TIMER_HA_ID_BUFFERS;
+    char topic[160];
+    for (size_t i = 0; i < TIMER_HA_DESCRIPTOR_COUNT; ++i)
+    {
+        snprintf(topic, sizeof(topic), "%s/%s/%s/%s/config",
+                 HA_PREFIX.c_str(), TIMER_HA_DESCRIPTORS[i].component, deviceUniqueId, idBufs[i]);
+        mqtt.publish(topic, "", true);
+    }
+}
 long previousMillis_Stats;
 std::map<String, String> mqttValues;
 std::vector<String> topicsToSubscribe;
@@ -84,6 +132,18 @@ void processMqttMessage(const String &strTopic, const String &payloadCopy)
     {
         DisplayManager.switchToApp(payloadCopy.c_str());
         return;
+    }
+
+    {
+        size_t plen = MQTT_PREFIX.length();
+        const char *t = strTopic.c_str();
+        if (strTopic.length() > plen
+            && strncmp(t, MQTT_PREFIX.c_str(), plen) == 0
+            && strcmp(t + plen, "/timer") == 0)
+        {
+            TimerManager.parseCommand(payloadCopy.c_str());
+            return;
+        }
     }
 
     if (strTopic.equals(MQTT_PREFIX + "/sendscreen"))
@@ -243,6 +303,24 @@ void onButtonCommand(HAButton *sender)
             UpdateManager.updateFirmware();
         }
     }
+    else if (sender == timerStartBtn)
+    {
+        bool fromIdle = (TimerManager.getState() == TimerState::Idle);
+        TimerManager.start();
+        if (fromIdle && !GAME_ACTIVE && !BLOCK_NAVIGATION)
+        {
+            String json = "{\"name\":\"Timer\"}";
+            DisplayManager.switchToApp(json.c_str());
+        }
+    }
+    else if (sender == timerPauseBtn)
+    {
+        TimerManager.pause();
+    }
+    else if (sender == timerResetBtn)
+    {
+        TimerManager.reset();
+    }
 }
 
 void onSwitchCommand(bool state, HASwitch *sender)
@@ -271,6 +349,27 @@ void onSelectCommand(int8_t index, HASelect *sender)
     else if (sender == transEffect)
     {
         TRANS_EFFECT = index;
+    }
+    else if (sender == timerBuzzer)
+    {
+        // Timer selects persist via TimerManager's own NVS namespace; intentionally
+        // skip the shared saveSettings() at the bottom of this function.
+        if (index >= 0 && index <= 2)
+        {
+            TimerManager.setBuzzerMode((BuzzerMode)index);
+        }
+        sender->setState(index);
+        return;
+    }
+    else if (sender == timerFinishedSel)
+    {
+        // See timerBuzzer branch: timer selects own their persistence.
+        if (index >= 0 && index <= 2)
+        {
+            TimerManager.setFinishedMode((FinishedMode)index);
+        }
+        sender->setState(index);
+        return;
     }
     saveSettings();
     sender->setState(index);
@@ -328,6 +427,24 @@ void onBrightnessCommand(uint8_t brightness, HALight *sender)
     BRIGHTNESS = brightness;
     saveSettings();
     DisplayManager.setBrightness(brightness);
+}
+
+void onTimerDurationMessage(const char *message, uint16_t length, HAText *sender)
+{
+    String in;
+    in.reserve(length);
+    for (uint16_t i = 0; i < length; i++) in += message[i];
+    in.trim();
+
+    // Reject invalid input — malformed OR out-of-range (parity with the command
+    // surfaces: reject, never clamp). Apply only a parseable, in-range value.
+    uint32_t secs;
+    if (TimerManager_::parseHMS(in, secs) && TimerManager_::isValidDuration(secs))
+        TimerManager.setDuration(secs);
+
+    // Echo the canonical value back so rejected input snaps the field to the
+    // previous valid time rather than leaving the bad text displayed.
+    sender->setState(TimerManager_::formatHMS(TimerManager.getDuration()).c_str(), true);
 }
 
 void onNumberCommand(HANumeric number, HANumber *sender)
@@ -403,7 +520,8 @@ void onMqttConnected()
         "/sound",
         "/rtttl",
         "/sendscreen",
-        "/r2d2"};
+        "/r2d2",
+        "/timer"};
     for (const char *topic : topics)
     {
         if (DEBUG_MODE)
@@ -422,8 +540,23 @@ void onMqttConnected()
     delay(200);
     if (HA_DISCOVERY)
     {
+        if (pendingTimerHADiscoveryCleanup)
+        {
+            MQTTManager.removeTimerHAEntities();
+            pendingTimerHADiscoveryCleanup = false;
+        }
         myOwnID->setValue(MQTT_PREFIX.c_str());
         version->setValue(VERSION);
+
+        if (SHOW_TIMER)
+        {
+            MQTTManager.publishTimerDuration(TimerManager.getDuration());
+            MQTTManager.publishTimerRemaining(TimerManager.getRemaining());
+            MQTTManager.publishTimerState(TimerManager.getStateString());
+            MQTTManager.publishTimerBuzzer((uint8_t)TimerManager.getBuzzerMode());
+            MQTTManager.publishTimerFinished((uint8_t)TimerManager.getFinishedMode());
+            TimerManager.publishIcons();
+        }
     }
 
     MQTTManager.publish("stats/effects", DisplayManager.getEffectNames().c_str());
@@ -729,6 +862,76 @@ void MQTTManager_::setup()
         ipAddr = new HASensor(ipAddrID);
         ipAddr->setName(HAipAddrName);
         ipAddr->setIcon(HAipAddrIcon);
+
+        // Resolve every Timer entity's unique id from the Timer HA Presence table,
+        // in slot order, into the shared id buffers (also read by teardown).
+        {
+            char *const idBufs[TIMER_HA_DESCRIPTOR_COUNT] = TIMER_HA_ID_BUFFERS;
+            for (size_t i = 0; i < TIMER_HA_DESCRIPTOR_COUNT; ++i)
+                sprintf(idBufs[i], TIMER_HA_DESCRIPTORS[i].idFormat, macStr);
+        }
+
+        if (SHOW_TIMER)
+        {
+            // Each entity's strings come from the descriptor table; the ArduinoHA
+            // object type and the type-specific wiring (callbacks, initial state)
+            // stay here because they're heterogeneous across HA component types.
+            const TimerHaDescriptor &dDur   = timerHaDescriptor(TimerHaEntity::Duration);
+            const TimerHaDescriptor &dRem   = timerHaDescriptor(TimerHaEntity::Remaining);
+            const TimerHaDescriptor &dState = timerHaDescriptor(TimerHaEntity::State);
+            const TimerHaDescriptor &dBuz   = timerHaDescriptor(TimerHaEntity::Buzzer);
+            const TimerHaDescriptor &dFin   = timerHaDescriptor(TimerHaEntity::Finished);
+            const TimerHaDescriptor &dStart = timerHaDescriptor(TimerHaEntity::Start);
+            const TimerHaDescriptor &dPause = timerHaDescriptor(TimerHaEntity::Pause);
+            const TimerHaDescriptor &dReset = timerHaDescriptor(TimerHaEntity::Reset);
+
+            timerDuration = new HAText(tDurID);
+            timerDuration->setIcon(dDur.icon);
+            timerDuration->setName(dDur.name);
+            timerDuration->setRetain(true);
+            timerDuration->onMessage(onTimerDurationMessage);
+            timerDuration->setState(TimerManager_::formatHMS(TimerManager.getDuration()).c_str(), true);
+
+            timerRemaining = new HASensorNumber(tRemID, HASensorNumber::PrecisionP0);
+            timerRemaining->setIcon(dRem.icon);
+            timerRemaining->setName(dRem.name);
+            timerRemaining->setUnitOfMeasurement(dRem.unit);
+            timerRemaining->setDeviceClass(dRem.deviceClass);
+            timerRemaining->setCurrentValue((uint32_t)TimerManager.getRemaining());
+
+            timerStateSensor = new HASensor(tStateID);
+            timerStateSensor->setIcon(dState.icon);
+            timerStateSensor->setName(dState.name);
+
+            timerBuzzer = new HASelect(tBuzID);
+            timerBuzzer->setOptions(dBuz.options);
+            timerBuzzer->onCommand(onSelectCommand);
+            timerBuzzer->setIcon(dBuz.icon);
+            timerBuzzer->setName(dBuz.name);
+            timerBuzzer->setState((uint8_t)TimerManager.getBuzzerMode(), true);
+
+            timerFinishedSel = new HASelect(tFinID);
+            timerFinishedSel->setOptions(dFin.options);
+            timerFinishedSel->onCommand(onSelectCommand);
+            timerFinishedSel->setIcon(dFin.icon);
+            timerFinishedSel->setName(dFin.name);
+            timerFinishedSel->setState((uint8_t)TimerManager.getFinishedMode(), true);
+
+            timerStartBtn = new HAButton(tStartID);
+            timerStartBtn->setIcon(dStart.icon);
+            timerStartBtn->setName(dStart.name);
+            timerStartBtn->onCommand(onButtonCommand);
+
+            timerPauseBtn = new HAButton(tPauseID);
+            timerPauseBtn->setIcon(dPause.icon);
+            timerPauseBtn->setName(dPause.name);
+            timerPauseBtn->onCommand(onButtonCommand);
+
+            timerResetBtn = new HAButton(tResetID);
+            timerResetBtn->setIcon(dReset.icon);
+            timerResetBtn->setName(dReset.name);
+            timerResetBtn->onCommand(onButtonCommand);
+        }
     }
     else
     {
@@ -751,6 +954,46 @@ void MQTTManager_::tick()
         previousMillis_Stats = currentMillis_Stats;
         sendStats();
     }
+}
+
+void MQTTManager_::publishTimerDuration(uint32_t seconds)
+{
+    if (timerDuration) timerDuration->setState(TimerManager_::formatHMS(seconds).c_str(), true);
+}
+
+void MQTTManager_::publishTimerRemaining(uint32_t seconds)
+{
+    if (timerRemaining) timerRemaining->setValue((uint32_t)seconds);
+}
+
+void MQTTManager_::publishTimerState(const char *stateStr)
+{
+    if (timerStateSensor) timerStateSensor->setValue(stateStr);
+}
+
+void MQTTManager_::publishTimerBuzzer(uint8_t index)
+{
+    if (timerBuzzer) timerBuzzer->setState(index);
+}
+
+void MQTTManager_::publishTimerFinished(uint8_t index)
+{
+    if (timerFinishedSel) timerFinishedSel->setState(index);
+}
+
+void MQTTManager_::publishTimerIcons(const String &idle, const String &running, const String &paused, const String &finished)
+{
+    if (!mqtt.isConnected())
+        return;
+    DynamicJsonDocument doc(256);
+    doc["idle"]     = idle;
+    doc["running"]  = running;
+    doc["paused"]   = paused;
+    doc["finished"] = finished;
+    String payload;
+    serializeJson(doc, payload);
+    String topic = MQTT_PREFIX + "/timer/icons";
+    mqtt.publish(topic.c_str(), payload.c_str(), true);
 }
 
 void MQTTManager_::publish(const char *topic, const char *payload)

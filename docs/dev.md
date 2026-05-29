@@ -40,6 +40,18 @@ The JSON object has the following properties:
 | `new_year` | boolean | Displays fireworks and plays a jingle at newyear. | false |
 | `swap_buttons` | boolean | Swaps the left and right hardware button. | false |
 | `ldr_on_ground` | boolean | Sets the LDR configuration to LDR-on-ground. | false |
+| `show_timer` | boolean | Master enable for the [Timer app](https://blueforcer.github.io/awtrix3/#/apps?id=timer). When `false`: app removed from rotation, 8 HA entities not published, `POST /api/timer` and the `{prefix}/timer` MQTT topic ignored, any running timer reset. On the `true → false` transition the firmware publishes empty retained discovery payloads so HA prunes the stale entities. Also exposed via `/api/settings` (`TIMER` key) and the on-device **APPS** menu. | `true` |
+| `timer_max_duration` | integer | Maximum duration (seconds). Caps the Home Assistant Number entity and also caps the HH/MM/SS wheels in on-device config mode (each wheel's effective max is computed against the other two so the displayed value never exceeds this). `0` = no cap. | `86400` |
+| `timer_step` | integer | Step size (seconds) for the Home Assistant Number entity. | `1` |
+| `timer_publish_interval` | integer | Seconds between `remaining` publishes while the timer is running. `0` = state-change only. | `1` |
+| `timer_finished_hold` | integer | Seconds the `00:00` Finished screen stays visible in Auto-clear finished mode (range 1–300). | `10` |
+| `timer_realert_interval` | integer | Seconds between buzzer re-fires in Re-alert finished mode (range 5–300). | `15` |
+| `timer_countdown_seconds` | integer | Tick window (seconds before zero) in Countdown buzzer mode (range 0–30). | `3` |
+| `timer_config_timeout` | integer | Seconds of no button input before [local config mode](https://blueforcer.github.io/awtrix3/#/apps?id=setting-the-duration-on-the-device) auto-exits and saves (range 5–300). | `30` |
+| `timer_icon_idle` | string | Bare icon name (resolved against `/ICONS/<name>.{jpg,gif}`) for the Timer app's **Idle** state. Also used as fallback for any other state with an empty slot. Empty/absent = no override of the NVS-stored value. Capped at 32 chars. **Overrides NVS on every boot.** | `""` |
+| `timer_icon_running` | string | Same, for the Running state. Empty falls back to `timer_icon_idle`. | `""` |
+| `timer_icon_paused` | string | Same, for the Paused state. Empty falls back to `timer_icon_idle`. | `""` |
+| `timer_icon_finished` | string | Same, for the Finished (blinking `0:00`) state. Empty falls back to `timer_icon_idle`. | `""` |
 
 
 #### Example:

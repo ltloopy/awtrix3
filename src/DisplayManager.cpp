@@ -22,6 +22,9 @@
 #include <HTTPClient.h>
 #include "base64.hpp"
 #include "Games/GameManager.h"
+#include "TimerManager.h"
+
+static std::vector<Notification> deferredNotifications;
 
 unsigned long lastArtnetStatusTime = 0;
 const int numberOfChannels = 256 * 3;
@@ -1008,7 +1011,16 @@ bool DisplayManager_::generateNotification(uint8_t source, const char *json)
 
   bool stack = doc.containsKey("stack") ? doc["stack"] : true;
 
-  if (stack)
+  if (TimerManager.isInConfig())
+  {
+    static const size_t MAX_DEFERRED = 10;
+    if (deferredNotifications.size() >= MAX_DEFERRED)
+    {
+      deferredNotifications.erase(deferredNotifications.begin());
+    }
+    deferredNotifications.push_back(newNotification);
+  }
+  else if (stack)
   {
     notifications.push_back(newNotification);
   }
@@ -1111,6 +1123,7 @@ void DisplayManager_::loadNativeApps()
 #ifdef ULANZI
   updateApp("Battery", BatApp, SHOW_BAT, 4);
 #endif
+  updateApp("Timer", TimerApp, SHOW_TIMER, Apps.size());
 
   ui->setApps(Apps);
   setAutoTransition(true);
@@ -1395,6 +1408,16 @@ void DisplayManager_::selectButton()
 
 void DisplayManager_::selectButtonLong()
 {
+}
+
+void DisplayManager_::drainDeferredNotifications()
+{
+  for (auto &n : deferredNotifications)
+  {
+    n.startime = millis();
+    notifications.push_back(n);
+  }
+  deferredNotifications.clear();
 }
 
 void DisplayManager_::dismissNotify()
@@ -2057,6 +2080,7 @@ String DisplayManager_::getSettings()
   doc["HUM"] = SHOW_HUM;
   doc["TEMP"] = SHOW_TEMP;
   doc["BAT"] = SHOW_BAT;
+  doc["TIMER"] = SHOW_TIMER;
   doc["VOL"] = SOUND_VOLUME;
   doc["OVERLAY"] = getOverlayName();
   String jsonString;
@@ -2126,11 +2150,13 @@ void DisplayManager_::setNewSettings(const char *json)
   UPPERCASE_LETTERS = doc.containsKey("UPPERCASE") ? doc["UPPERCASE"].as<bool>() : UPPERCASE_LETTERS;
   SHOW_WEEKDAY = doc.containsKey("WD") ? doc["WD"].as<bool>() : SHOW_WEEKDAY;
   BLOCK_NAVIGATION = doc.containsKey("BLOCKN") ? doc["BLOCKN"].as<bool>() : BLOCK_NAVIGATION;
+  bool prevShowTimer = SHOW_TIMER;
   SHOW_TIME = doc.containsKey("TIM") ? doc["TIM"].as<bool>() : SHOW_TIME;
   SHOW_DATE = doc.containsKey("DAT") ? doc["DAT"].as<bool>() : SHOW_DATE;
   SHOW_HUM = doc.containsKey("HUM") ? doc["HUM"].as<bool>() : SHOW_HUM;
   SHOW_TEMP = doc.containsKey("TEMP") ? doc["TEMP"].as<bool>() : SHOW_TEMP;
   SHOW_BAT = doc.containsKey("BAT") ? doc["BAT"].as<bool>() : SHOW_BAT;
+  SHOW_TIMER = doc.containsKey("TIMER") ? doc["TIMER"].as<bool>() : SHOW_TIMER;
   SOUND_ACTIVE = doc.containsKey("SOUND") ? doc["SOUND"].as<bool>() : SOUND_ACTIVE;
 
   if (doc.containsKey("VOL"))
@@ -2249,6 +2275,16 @@ void DisplayManager_::setNewSettings(const char *json)
   }
   doc.clear();
   applyAllSettings();
+  TimerManager.onShowTimerChange(prevShowTimer, SHOW_TIMER);
+  if (prevShowTimer && !SHOW_TIMER)
+  {
+    MQTTManager.removeTimerHAEntities();
+  }
+  if (prevShowTimer != SHOW_TIMER)
+  {
+    SHOW_TIMER_HA_PREV = SHOW_TIMER;
+  }
+  loadNativeApps();
   saveSettings();
   if (DEBUG_MODE)
     DEBUG_PRINTLN("Settings loaded");

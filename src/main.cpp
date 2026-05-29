@@ -39,6 +39,7 @@
 #include "Globals.h"
 #include "UpdateManager.h"
 #include "timer.h"
+#include "TimerManager.h"
 
 TaskHandle_t taskHandle;
 volatile bool StopTask = false;
@@ -69,6 +70,7 @@ void setup()
   PeripheryManager.setup();
   ServerManager.loadSettings();
   DisplayManager.setup();
+  TimerManager.setup();
   DisplayManager.HSVtext(9, 6, VERSION, true, 0);
   delay(500);
   xTaskCreatePinnedToCore(BootAnimation, "Task", 10000, NULL, 1, &taskHandle, 0);
@@ -100,6 +102,7 @@ void setup()
       if (MQTT_HOST != "")
       {
         DisplayManager.HSVtext(4, 6, "MQTT...", true, 0);
+        reconcileTimerHAState();
         MQTTManager.setup();
         MQTTManager.tick();
       }
@@ -119,6 +122,7 @@ void loop()
   timer_tick();
   ServerManager.tick();
   DisplayManager.tick();
+  TimerManager.tick();
   PeripheryManager.tick();
   if (ServerManager.isConnected)
   {
