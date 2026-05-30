@@ -382,8 +382,19 @@ All JSON properties are optional. When multiple are sent together, property sett
 | `icon_running` | string | Same. Empty clears (then falls back to `icon_idle`). | Icon shown while counting down. Persists. |
 | `icon_paused` | string | Same. Empty clears (then falls back to `icon_idle`). | Icon shown while paused. Persists. |
 | `icon_finished` | string | Same. Empty clears (then falls back to `icon_idle`). | Icon shown beneath the blinking `0:00`. Persists. |
+| `finished_hold`     | integer | 1–300 (s)            | Auto-clear delay (only meaningful when `finished = "auto-clear"`). Persists. |
+| `realert_interval`  | integer | 5–300 (s)            | Re-alert cadence (only meaningful when `finished = "re-alert"`). Persists. |
+| `countdown_seconds` | integer | 0–30   (s)           | Pre-expiry beep window (only meaningful when `buzzer = "countdown"`). Persists. |
+| `max_duration`               | integer | 1–604800 (s, 1 s .. 7 days) | Upper bound on accepted `duration` (ADR-0004). Persists. |
+| `button_step`                | integer | 1–99                 | Increment applied per left/right press in Timer-app config mode (ADR-0004). Persists. |
+| `remaining_publish_interval` | integer | 1–60 (s)             | How often `timer_rem` republishes while Running (ADR-0004). Persists. |
+| `app_config_timeout`         | integer | 5–300 (s)            | Idle window before Timer-app config mode auto-exits (ADR-0004). Persists. |
+| `melody_tick` | string | Bare name resolved against `/MELODIES/<name>.txt`; empty resets to default `"timer_tick"`; ≤32 chars | RTTTL countdown-beep melody (ADR-0004). Persists. |
+| `melody_end`  | string | Same. Empty resets to default `"timer_end"`. | RTTTL end melody (ADR-0004). Persists. |
+| `bar_enabled` | bool | `true` / `false` | Show/hide the Running/Paused progress bar (ADR-0004). Persists. |
+| `bar_color`   | int or hex string | `0..0xFFFFFF` or `"#RRGGBB"` / `"RRGGBB"` | Progress-bar color; `0` follows `TEXTCOLOR_888` (ADR-0004). Persists. |
 
-`action` / `buzzer` / `finished` values are case-insensitive; `auto-clear`/`autoclear` and `re-alert`/`realert` are both accepted. Icon values are **case-sensitive** (they map to filenames on LittleFS) and **capped at 32 characters**. The loader checks `/ICONS/<name>.jpg` then `/ICONS/<name>.gif`, so a single bare name supports either format.
+`action` / `buzzer` / `finished` values are case-insensitive; `auto-clear`/`autoclear` and `re-alert`/`realert` are both accepted. Icon and melody values are **case-sensitive** (they map to filenames on LittleFS) and **capped at 32 characters** (alphanumeric, `_`, `-`). The icon loader checks `/ICONS/<name>.jpg` then `/ICONS/<name>.gif`; the melody loader reads `/MELODIES/<name>.txt`.
 
 #### Responses
 

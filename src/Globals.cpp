@@ -213,17 +213,20 @@ void loadDevSettings()
 
         if (doc.containsKey("timer_max_duration"))
         {
-            TIMER_MAX_DURATION = doc["timer_max_duration"].as<uint32_t>();
+            uint32_t v = doc["timer_max_duration"].as<uint32_t>();
+            if (v >= 1 && v <= 604800) TIMER_MAX_DURATION = v;
         }
 
-        if (doc.containsKey("timer_step"))
+        if (doc.containsKey("timer_button_step"))
         {
-            TIMER_STEP = doc["timer_step"].as<uint32_t>();
+            uint32_t v = doc["timer_button_step"].as<uint32_t>();
+            if (v >= 1 && v <= 99) TIMER_STEP = v;
         }
 
-        if (doc.containsKey("timer_publish_interval"))
+        if (doc.containsKey("timer_remaining_publish_interval"))
         {
-            TIMER_PUBLISH_INTERVAL = doc["timer_publish_interval"].as<uint16_t>();
+            uint16_t v = doc["timer_remaining_publish_interval"].as<uint16_t>();
+            if (v >= 1 && v <= 60) TIMER_PUBLISH_INTERVAL = v;
         }
 
         if (doc.containsKey("timer_finished_hold"))
@@ -244,9 +247,9 @@ void loadDevSettings()
             if (v <= 30) TIMER_COUNTDOWN_SECONDS = v;
         }
 
-        if (doc.containsKey("timer_config_timeout"))
+        if (doc.containsKey("timer_app_config_timeout"))
         {
-            uint16_t v = doc["timer_config_timeout"].as<uint16_t>();
+            uint16_t v = doc["timer_app_config_timeout"].as<uint16_t>();
             if (v >= 5 && v <= 300) TIMER_CONFIG_TIMEOUT = v;
         }
 
@@ -254,6 +257,11 @@ void loadDevSettings()
         if (doc.containsKey("timer_icon_running"))  TIMER_ICON_RUNNING  = doc["timer_icon_running"].as<String>();
         if (doc.containsKey("timer_icon_paused"))   TIMER_ICON_PAUSED   = doc["timer_icon_paused"].as<String>();
         if (doc.containsKey("timer_icon_finished")) TIMER_ICON_FINISHED = doc["timer_icon_finished"].as<String>();
+
+        if (doc.containsKey("timer_melody_tick")) TIMER_MELODY_TICK = doc["timer_melody_tick"].as<String>();
+        if (doc.containsKey("timer_melody_end"))  TIMER_MELODY_END  = doc["timer_melody_end"].as<String>();
+        if (doc.containsKey("timer_bar_enabled")) TIMER_BAR_ENABLED = doc["timer_bar_enabled"].as<bool>();
+        if (doc.containsKey("timer_bar_color"))   TIMER_BAR_COLOR   = doc["timer_bar_color"].as<uint32_t>();
 
         if (doc.containsKey("color_correction"))
         {
@@ -334,6 +342,17 @@ void loadSettings()
     SHOW_HUM = Settings.getBool("HUM", true);
     SHOW_TIMER = Settings.getBool("TIMER", true);
     SHOW_TIMER_HA_PREV = Settings.getBool("TIMERPREV", true);
+    TIMER_FINISHED_HOLD     = Settings.getUInt("TFHOLD", 10);
+    TIMER_REALERT_INTERVAL  = Settings.getUInt("TRALERT", 15);
+    TIMER_COUNTDOWN_SECONDS = Settings.getUInt("TCDOWN", 3);
+    TIMER_MAX_DURATION      = Settings.getUInt("TMAXD", 86400);
+    TIMER_STEP              = Settings.getUInt("TSTEP", 1);
+    TIMER_PUBLISH_INTERVAL  = Settings.getUInt("TPUBI", 1);
+    TIMER_CONFIG_TIMEOUT    = Settings.getUInt("TCFGT", 30);
+    TIMER_MELODY_TICK       = Settings.getString("TMTICK", "timer_tick");
+    TIMER_MELODY_END        = Settings.getString("TMEND",  "timer_end");
+    TIMER_BAR_ENABLED       = Settings.getBool("TBAREN", true);
+    TIMER_BAR_COLOR         = Settings.getUInt("TBARC", 0);
     MATRIX_LAYOUT = Settings.getUInt("MAT", 0);
     SCROLL_SPEED = Settings.getUInt("SSPEED", 100);
 #ifdef ULANZI
@@ -386,6 +405,17 @@ void saveSettings()
     Settings.putBool("HUM", SHOW_HUM);
     Settings.putBool("TIMER", SHOW_TIMER);
     Settings.putBool("TIMERPREV", SHOW_TIMER_HA_PREV);
+    Settings.putUInt("TFHOLD", TIMER_FINISHED_HOLD);
+    Settings.putUInt("TRALERT", TIMER_REALERT_INTERVAL);
+    Settings.putUInt("TCDOWN", TIMER_COUNTDOWN_SECONDS);
+    Settings.putUInt("TMAXD", TIMER_MAX_DURATION);
+    Settings.putUInt("TSTEP", TIMER_STEP);
+    Settings.putUInt("TPUBI", TIMER_PUBLISH_INTERVAL);
+    Settings.putUInt("TCFGT", TIMER_CONFIG_TIMEOUT);
+    Settings.putString("TMTICK", TIMER_MELODY_TICK);
+    Settings.putString("TMEND",  TIMER_MELODY_END);
+    Settings.putBool("TBAREN", TIMER_BAR_ENABLED);
+    Settings.putUInt("TBARC", TIMER_BAR_COLOR);
     Settings.putUInt("SSPEED", SCROLL_SPEED);
 #ifdef ULANZI
     Settings.putBool("BAT", SHOW_BAT);
@@ -513,6 +543,10 @@ String TIMER_ICON_IDLE = "";
 String TIMER_ICON_RUNNING = "";
 String TIMER_ICON_PAUSED = "";
 String TIMER_ICON_FINISHED = "";
+String TIMER_MELODY_TICK = "timer_tick";
+String TIMER_MELODY_END = "timer_end";
+bool TIMER_BAR_ENABLED = true;
+uint32_t TIMER_BAR_COLOR = 0;
 uint8_t MAX_BRIGHTNESS = 160;
 double movementFactor = 0.5;
 int8_t TRANS_EFFECT = 1;

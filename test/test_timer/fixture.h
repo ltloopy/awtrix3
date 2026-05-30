@@ -38,6 +38,7 @@ inline void reset_all() {
     DisplayManager.__test_reset();
     Preferences::__test_reset();
     notifications.clear();
+    saveSettings_calls = 0;
 
     CURRENT_APP       = "Time";
     SOUND_ACTIVE      = true;
@@ -58,6 +59,10 @@ inline void reset_all() {
     TIMER_ICON_RUNNING      = "";
     TIMER_ICON_PAUSED       = "";
     TIMER_ICON_FINISHED     = "";
+    TIMER_MELODY_TICK       = "timer_tick";
+    TIMER_MELODY_END        = "timer_end";
+    TIMER_BAR_ENABLED       = true;
+    TIMER_BAR_COLOR         = 0;
 }
 
 inline int count_publish(PublishCall::Kind k) {

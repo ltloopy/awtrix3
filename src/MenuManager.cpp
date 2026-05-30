@@ -25,6 +25,7 @@ enum MenuState
     SoundMenu,
     VolumeMenu,
     UpdateMenu,
+    TimerConfigMenu,
     MaxMenu
 };
 
@@ -41,7 +42,8 @@ const char *menuItems[] PROGMEM = {
     "APPS",
     "SOUND",
     "VOLUME",
-    "UPDATE"};
+    "UPDATE",
+    "TIMER"};
 
 int8_t menuIndex = 0;
 uint8_t menuItemCount = MaxMenu - 1;
@@ -79,6 +81,9 @@ uint8_t appsCount = 6;
 #else
 uint8_t appsCount = 5;
 #endif
+
+int8_t timerConfigIndex;
+uint8_t timerConfigCount = 5;
 
 MenuState currentState = MainMenu;
 
@@ -216,6 +221,34 @@ String MenuManager_::menutext()
         {
             return String(SOUND_VOLUME);
         }
+    case TimerConfigMenu:
+        DisplayManager.drawMenuIndicator(timerConfigIndex, timerConfigCount, 0xFBC000);
+        switch (timerConfigIndex)
+        {
+        case 0:
+            switch (TimerManager.getBuzzerMode())
+            {
+            case BuzzerMode::Off:       return "BZR OFF";
+            case BuzzerMode::End:       return "BZR END";
+            case BuzzerMode::Countdown: return "BZR CDN";
+            }
+            break;
+        case 1:
+            return "CDOWN " + String(TIMER_COUNTDOWN_SECONDS);
+        case 2:
+            switch (TimerManager.getFinishedMode())
+            {
+            case FinishedMode::AutoClear: return "FIN AUTO";
+            case FinishedMode::Hold:      return "FIN HOLD";
+            case FinishedMode::ReAlert:   return "FIN RALT";
+            }
+            break;
+        case 3:
+            return "CLEAR " + String(TIMER_FINISHED_HOLD);
+        case 4:
+            return "ALERT " + String(TIMER_REALERT_INTERVAL);
+        }
+        break;
     default:
         break;
     }
@@ -276,6 +309,26 @@ void MenuManager_::rightButton()
             SOUND_VOLUME = 0;
         else
             SOUND_VOLUME++;
+        break;
+    case TimerConfigMenu:
+        switch (timerConfigIndex)
+        {
+        case 0:
+            TimerManager.setBuzzerMode((BuzzerMode)(((uint8_t)TimerManager.getBuzzerMode() + 1) % 3));
+            break;
+        case 1:
+            if (TIMER_COUNTDOWN_SECONDS < 30) TIMER_COUNTDOWN_SECONDS++;
+            break;
+        case 2:
+            TimerManager.setFinishedMode((FinishedMode)(((uint8_t)TimerManager.getFinishedMode() + 1) % 3));
+            break;
+        case 3:
+            TIMER_FINISHED_HOLD = (TIMER_FINISHED_HOLD + 5 <= 300) ? TIMER_FINISHED_HOLD + 5 : 300;
+            break;
+        case 4:
+            TIMER_REALERT_INTERVAL = (TIMER_REALERT_INTERVAL + 5 <= 300) ? TIMER_REALERT_INTERVAL + 5 : 300;
+            break;
+        }
         break;
     default:
         break;
@@ -338,6 +391,27 @@ void MenuManager_::leftButton()
             SOUND_VOLUME = 30;
         else
             SOUND_VOLUME--;
+        break;
+    case TimerConfigMenu:
+        switch (timerConfigIndex)
+        {
+        case 0:
+            TimerManager.setBuzzerMode((BuzzerMode)(((uint8_t)TimerManager.getBuzzerMode() + 2) % 3));
+            break;
+        case 1:
+            if (TIMER_COUNTDOWN_SECONDS > 0) TIMER_COUNTDOWN_SECONDS--;
+            break;
+        case 2:
+            TimerManager.setFinishedMode((FinishedMode)(((uint8_t)TimerManager.getFinishedMode() + 2) % 3));
+            break;
+        case 3:
+            TIMER_FINISHED_HOLD = (TIMER_FINISHED_HOLD >= 1 + 5) ? TIMER_FINISHED_HOLD - 5 : 1;
+            break;
+        case 4:
+            TIMER_REALERT_INTERVAL = (TIMER_REALERT_INTERVAL >= 5 + 5) ? TIMER_REALERT_INTERVAL - 5 : 5;
+            break;
+        }
+        break;
     default:
         break;
     }
@@ -381,6 +455,9 @@ void MenuManager_::selectButton()
             BRIGHTNESS = convertBRIPercentTo8Bit(BRIGHTNESS_PERCENT);
             DisplayManager.setBrightness(BRIGHTNESS);
         }
+        break;
+    case TimerConfigMenu:
+        timerConfigIndex = (timerConfigIndex + 1) % timerConfigCount;
         break;
     case Appmenu:
         switch (appsIndex)
@@ -472,6 +549,9 @@ void MenuManager_::selectButtonLong()
             break;
         case VolumeMenu:
             PeripheryManager.setVolume(SOUND_VOLUME);
+            saveSettings();
+            break;
+        case TimerConfigMenu:
             saveSettings();
             break;
         default:

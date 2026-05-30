@@ -715,6 +715,254 @@ void test_U31_config_abort_only_on_valid_command(void) {
 }
 
 // ============================================================================
+// U36 — parseCommand accepts the three tuning-knob keys in range and writes
+// them to the awtrix-namespace globals. Per ADR-0003 these keys exist so the
+// timer command surface has parity with the on-device TIMER menu.
+// ============================================================================
+void test_U36_parseCommand_tuning_keys_accepted_in_range(void) {
+    SHOW_TIMER = true;
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand(
+                          "{\"finished_hold\":42,\"realert_interval\":30,\"countdown_seconds\":5}")));
+    TEST_ASSERT_EQUAL_UINT16(42, TIMER_FINISHED_HOLD);
+    TEST_ASSERT_EQUAL_UINT16(30, TIMER_REALERT_INTERVAL);
+    TEST_ASSERT_EQUAL_UINT16(5,  TIMER_COUNTDOWN_SECONDS);
+
+    // Range boundaries — all min/max should accept.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand(
+                          "{\"finished_hold\":1,\"realert_interval\":5,\"countdown_seconds\":0}")));
+    TEST_ASSERT_EQUAL_UINT16(1, TIMER_FINISHED_HOLD);
+    TEST_ASSERT_EQUAL_UINT16(5, TIMER_REALERT_INTERVAL);
+    TEST_ASSERT_EQUAL_UINT16(0, TIMER_COUNTDOWN_SECONDS);
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand(
+                          "{\"finished_hold\":300,\"realert_interval\":300,\"countdown_seconds\":30}")));
+    TEST_ASSERT_EQUAL_UINT16(300, TIMER_FINISHED_HOLD);
+    TEST_ASSERT_EQUAL_UINT16(300, TIMER_REALERT_INTERVAL);
+    TEST_ASSERT_EQUAL_UINT16(30,  TIMER_COUNTDOWN_SECONDS);
+}
+
+// ============================================================================
+// U37 — Out-of-range tuning values are REJECTED atomically per ADR-0001: the
+// whole command is rejected and no field (including a valid action) applies.
+// ============================================================================
+void test_U37_parseCommand_tuning_keys_atomic_reject_out_of_range(void) {
+    SHOW_TIMER = true;
+    TIMER_FINISHED_HOLD     = 10;
+    TIMER_REALERT_INTERVAL  = 15;
+    TIMER_COUNTDOWN_SECONDS = 3;
+
+    // finished_hold below min (1).
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"finished_hold\":0}")));
+    TEST_ASSERT_EQUAL_UINT16(10, TIMER_FINISHED_HOLD);
+
+    // finished_hold above max (300).
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"finished_hold\":301}")));
+    TEST_ASSERT_EQUAL_UINT16(10, TIMER_FINISHED_HOLD);
+
+    // realert_interval below min (5).
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"realert_interval\":4}")));
+    TEST_ASSERT_EQUAL_UINT16(15, TIMER_REALERT_INTERVAL);
+
+    // countdown_seconds above max (30).
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"countdown_seconds\":31}")));
+    TEST_ASSERT_EQUAL_UINT16(3, TIMER_COUNTDOWN_SECONDS);
+
+    // Non-numeric type → BadField.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"finished_hold\":\"ten\"}")));
+    TEST_ASSERT_EQUAL_UINT16(10, TIMER_FINISHED_HOLD);
+
+    // Atomicity: one bad tuning field rejects the whole command — paired action
+    // does not run, paired good fields don't apply.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle),
+                      static_cast<int>(TimerManager.getState()));
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand(
+                          "{\"action\":\"start\",\"finished_hold\":50,\"countdown_seconds\":99}")));
+    TEST_ASSERT_EQUAL_UINT16(10, TIMER_FINISHED_HOLD);
+    TEST_ASSERT_EQUAL_UINT16(3,  TIMER_COUNTDOWN_SECONDS);
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle),
+                      static_cast<int>(TimerManager.getState()));
+}
+
+// ============================================================================
+// U38 — A tuning-key command persists via saveSettings(); a command with only
+// modes/duration/action does NOT (those go through TimerManager.persist()).
+// ============================================================================
+void test_U38_parseCommand_tuning_change_persists_via_saveSettings(void) {
+    SHOW_TIMER = true;
+
+    saveSettings_calls = 0;
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"finished_hold\":42}")));
+    TEST_ASSERT_EQUAL_INT(1, saveSettings_calls);
+
+    // Mode-only / duration-only commands do not touch awtrix Settings.
+    saveSettings_calls = 0;
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"buzzer\":\"off\",\"duration\":120}")));
+    TEST_ASSERT_EQUAL_INT(0, saveSettings_calls);
+
+    // Rejected command does not call saveSettings.
+    saveSettings_calls = 0;
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"finished_hold\":999}")));
+    TEST_ASSERT_EQUAL_INT(0, saveSettings_calls);
+}
+
+// ============================================================================
+// U39 (ADR-0004) — Four behavior parameters accepted within their principled
+// ranges, applied to the globals.
+// ============================================================================
+void test_U39_parseCommand_behavior_params_accepted_in_range(void) {
+    SHOW_TIMER = true;
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand(
+                          "{\"max_duration\":3600,\"button_step\":5,"
+                          "\"remaining_publish_interval\":2,\"app_config_timeout\":60}")));
+    TEST_ASSERT_EQUAL_UINT32(3600, TIMER_MAX_DURATION);
+    TEST_ASSERT_EQUAL_UINT32(5,    TIMER_STEP);
+    TEST_ASSERT_EQUAL_UINT16(2,    TIMER_PUBLISH_INTERVAL);
+    TEST_ASSERT_EQUAL_UINT16(60,   TIMER_CONFIG_TIMEOUT);
+
+    // Lower bounds.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand(
+                          "{\"max_duration\":1,\"button_step\":1,"
+                          "\"remaining_publish_interval\":1,\"app_config_timeout\":5}")));
+    TEST_ASSERT_EQUAL_UINT32(1,  TIMER_MAX_DURATION);
+    TEST_ASSERT_EQUAL_UINT32(1,  TIMER_STEP);
+    TEST_ASSERT_EQUAL_UINT16(1,  TIMER_PUBLISH_INTERVAL);
+    TEST_ASSERT_EQUAL_UINT16(5,  TIMER_CONFIG_TIMEOUT);
+
+    // Reset max_duration so it doesn't reject other tests' duration commands.
+    TIMER_MAX_DURATION = 86400;
+
+    // Upper bounds.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand(
+                          "{\"max_duration\":604800,\"button_step\":99,"
+                          "\"remaining_publish_interval\":60,\"app_config_timeout\":300}")));
+    TEST_ASSERT_EQUAL_UINT32(604800, TIMER_MAX_DURATION);
+    TEST_ASSERT_EQUAL_UINT32(99,     TIMER_STEP);
+    TEST_ASSERT_EQUAL_UINT16(60,     TIMER_PUBLISH_INTERVAL);
+    TEST_ASSERT_EQUAL_UINT16(300,    TIMER_CONFIG_TIMEOUT);
+}
+
+// ============================================================================
+// U40 (ADR-0004) — Out-of-range behavior parameters are rejected atomically.
+// ============================================================================
+void test_U40_parseCommand_behavior_params_atomic_reject(void) {
+    SHOW_TIMER = true;
+    TIMER_MAX_DURATION     = 86400;
+    TIMER_STEP             = 1;
+    TIMER_PUBLISH_INTERVAL = 1;
+    TIMER_CONFIG_TIMEOUT   = 30;
+
+    // max_duration below floor.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"max_duration\":0}")));
+    TEST_ASSERT_EQUAL_UINT32(86400, TIMER_MAX_DURATION);
+
+    // max_duration above ceiling.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"max_duration\":604801}")));
+    TEST_ASSERT_EQUAL_UINT32(86400, TIMER_MAX_DURATION);
+
+    // button_step out of range.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"button_step\":100}")));
+    TEST_ASSERT_EQUAL_UINT32(1, TIMER_STEP);
+
+    // remaining_publish_interval out of range.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"remaining_publish_interval\":0}")));
+    TEST_ASSERT_EQUAL_UINT16(1, TIMER_PUBLISH_INTERVAL);
+
+    // app_config_timeout out of range.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"app_config_timeout\":4}")));
+    TEST_ASSERT_EQUAL_UINT16(30, TIMER_CONFIG_TIMEOUT);
+
+    // Non-numeric is rejected.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"max_duration\":\"big\"}")));
+    TEST_ASSERT_EQUAL_UINT32(86400, TIMER_MAX_DURATION);
+}
+
+// ============================================================================
+// U41 (ADR-0004) — Melody filenames and progress-bar options.
+// ============================================================================
+void test_U41_parseCommand_melody_and_bar(void) {
+    SHOW_TIMER = true;
+    TIMER_MELODY_TICK = "timer_tick";
+    TIMER_MELODY_END  = "timer_end";
+    TIMER_BAR_ENABLED = true;
+    TIMER_BAR_COLOR   = 0;
+
+    // Valid custom names apply.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand(
+                          "{\"melody_tick\":\"custom_tick\",\"melody_end\":\"jingle\"}")));
+    TEST_ASSERT_TRUE(TIMER_MELODY_TICK == "custom_tick");
+    TEST_ASSERT_TRUE(TIMER_MELODY_END  == "jingle");
+
+    // Empty string resets to canonical defaults.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand(
+                          "{\"melody_tick\":\"\",\"melody_end\":\"\"}")));
+    TEST_ASSERT_TRUE(TIMER_MELODY_TICK == "timer_tick");
+    TEST_ASSERT_TRUE(TIMER_MELODY_END  == "timer_end");
+
+    // Invalid melody name (path separator) is rejected.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"melody_tick\":\"foo/bar\"}")));
+    TEST_ASSERT_TRUE(TIMER_MELODY_TICK == "timer_tick");
+
+    // bar_enabled bool round-trip.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"bar_enabled\":false}")));
+    TEST_ASSERT_FALSE(TIMER_BAR_ENABLED);
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"bar_enabled\":true}")));
+    TEST_ASSERT_TRUE(TIMER_BAR_ENABLED);
+
+    // bar_enabled non-bool rejected.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"bar_enabled\":\"yes\"}")));
+    TEST_ASSERT_TRUE(TIMER_BAR_ENABLED);
+
+    // bar_color numeric.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"bar_color\":16711680}")));
+    TEST_ASSERT_EQUAL_UINT32(0xFF0000, TIMER_BAR_COLOR);
+
+    // bar_color hex string with leading '#'.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"bar_color\":\"#00FF00\"}")));
+    TEST_ASSERT_EQUAL_UINT32(0x00FF00, TIMER_BAR_COLOR);
+
+    // bar_color hex string without '#'.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"bar_color\":\"0000FF\"}")));
+    TEST_ASSERT_EQUAL_UINT32(0x0000FF, TIMER_BAR_COLOR);
+
+    // bar_color malformed string rejected.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"bar_color\":\"notahex\"}")));
+    TEST_ASSERT_EQUAL_UINT32(0x0000FF, TIMER_BAR_COLOR);
+}
+
+// ============================================================================
 // U32–U35 — Timer HA Presence descriptor table invariants.
 // The table (src/TimerHa.h) is the single source of truth that MQTTManager's
 // discovery setup AND teardown both read, so it cannot drift. These host tests
@@ -943,6 +1191,12 @@ int main(int, char **) {
     RUN_TEST(test_U29_parseCommand_strict_results);
     RUN_TEST(test_U30_parseCommand_atomic_reject);
     RUN_TEST(test_U31_config_abort_only_on_valid_command);
+    RUN_TEST(test_U36_parseCommand_tuning_keys_accepted_in_range);
+    RUN_TEST(test_U37_parseCommand_tuning_keys_atomic_reject_out_of_range);
+    RUN_TEST(test_U38_parseCommand_tuning_change_persists_via_saveSettings);
+    RUN_TEST(test_U39_parseCommand_behavior_params_accepted_in_range);
+    RUN_TEST(test_U40_parseCommand_behavior_params_atomic_reject);
+    RUN_TEST(test_U41_parseCommand_melody_and_bar);
     RUN_TEST(test_U32_descriptor_table_well_formed);
     RUN_TEST(test_U33_descriptor_ids_unique);
     RUN_TEST(test_U34_descriptor_type_specific_fields);

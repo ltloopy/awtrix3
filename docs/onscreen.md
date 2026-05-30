@@ -21,4 +21,5 @@ Hold down the middle button for 2s to exit the current menu and to save your set
 | `APPS` | Allows to enable or disable internal apps  |
 | `SOUND` | Allows to enable or disable sound output   |
 | `UPDATE` | Check and download new firmware if available. |
+| `TIMER` | Configure the Timer app. Submenu of five items in order: `BUZZER` (Off/End/Countdown), `CDOWN` (countdown beep window, 0–30 s), `FINISH` (auto-clear/hold/re-alert), `CLEAR` (auto-clear delay, 1–300 s), `ALERT` (re-alert cadence, 5–300 s). In the submenu: left/right cycles enum values or adjusts the number (step 5 for `CLEAR`/`ALERT`, step 1 for `CDOWN`); short-press middle advances to the next field; long-press middle saves and exits. Mode changes (`BUZZER`/`FINISH`) apply and publish to MQTT/HA immediately on each press; numeric changes commit on long-press save. |
 

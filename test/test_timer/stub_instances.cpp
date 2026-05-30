@@ -49,7 +49,14 @@ String   TIMER_ICON_IDLE        = "";
 String   TIMER_ICON_RUNNING     = "";
 String   TIMER_ICON_PAUSED      = "";
 String   TIMER_ICON_FINISHED    = "";
+String   TIMER_MELODY_TICK      = "timer_tick";
+String   TIMER_MELODY_END       = "timer_end";
+bool     TIMER_BAR_ENABLED      = true;
+uint32_t TIMER_BAR_COLOR        = 0;
 
 uint32_t TEXTCOLOR_888 = 0xFFFFFF;
 
 bool DEBUG_MODE = false;
+
+int saveSettings_calls = 0;
+void saveSettings() { ++saveSettings_calls; }

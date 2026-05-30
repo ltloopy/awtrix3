@@ -28,10 +28,17 @@ extern String   TIMER_ICON_IDLE;
 extern String   TIMER_ICON_RUNNING;
 extern String   TIMER_ICON_PAUSED;
 extern String   TIMER_ICON_FINISHED;
+extern String   TIMER_MELODY_TICK;
+extern String   TIMER_MELODY_END;
+extern bool     TIMER_BAR_ENABLED;
+extern uint32_t TIMER_BAR_COLOR;
 
 extern uint32_t TEXTCOLOR_888;
 
 extern bool DEBUG_MODE;
+
+void saveSettings();
+extern int saveSettings_calls;
 
 #ifndef DEBUG_PRINTLN
 #define DEBUG_PRINTLN(x) do { (void)(x); } while (0)

@@ -31,8 +31,10 @@ TimerManager_ &TimerManager = TimerManager_::getInstance();
 
 void TimerManager_::loadMelodiesCached()
 {
-    endRtttl  = PeripheryManager.resolveRtttl("timer_end",  FALLBACK_END_RTTTL);
-    tickRtttl = PeripheryManager.resolveRtttl("timer_tick", FALLBACK_TICK_RTTTL);
+    const char *endName  = TIMER_MELODY_END.length()  > 0 ? TIMER_MELODY_END.c_str()  : "timer_end";
+    const char *tickName = TIMER_MELODY_TICK.length() > 0 ? TIMER_MELODY_TICK.c_str() : "timer_tick";
+    endRtttl  = PeripheryManager.resolveRtttl(endName,  FALLBACK_END_RTTTL);
+    tickRtttl = PeripheryManager.resolveRtttl(tickName, FALLBACK_TICK_RTTTL);
 }
 
 void TimerManager_::setup()
@@ -349,7 +351,8 @@ void TimerManager_::configAdjust(int delta)
 
     uint8_t cur = (configField == 0) ? configHH : (configField == 1 ? configMM : configSS);
     if (cur > maxVal) cur = maxVal;
-    int next = (int)cur + delta;
+    const int step = (TIMER_STEP > 0 && TIMER_STEP <= 99) ? (int)TIMER_STEP : 1;
+    int next = (int)cur + (delta >= 0 ? step : -step);
     if (next < 0) next = maxVal;
     else if (next > (int)maxVal) next = 0;
     if      (configField == 0) configHH = (uint8_t)next;
@@ -619,6 +622,124 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     if (doc.containsKey("icon_paused")   && !isValidIconName(doc["icon_paused"].as<String>()))   return TimerCmdResult::BadField;
     if (doc.containsKey("icon_finished") && !isValidIconName(doc["icon_finished"].as<String>())) return TimerCmdResult::BadField;
 
+    uint16_t finishedHold     = TIMER_FINISHED_HOLD;
+    uint16_t realertInterval  = TIMER_REALERT_INTERVAL;
+    uint16_t countdownSeconds = TIMER_COUNTDOWN_SECONDS;
+    bool haveFinishedHold     = doc.containsKey("finished_hold");
+    bool haveRealertInterval  = doc.containsKey("realert_interval");
+    bool haveCountdownSeconds = doc.containsKey("countdown_seconds");
+    if (haveFinishedHold)
+    {
+        JsonVariant v = doc["finished_hold"];
+        if (!(v.is<long>() || v.is<float>())) return TimerCmdResult::BadField;
+        uint32_t n = v.as<uint32_t>();
+        if (n < 1 || n > 300) return TimerCmdResult::BadField;
+        finishedHold = (uint16_t)n;
+    }
+    if (haveRealertInterval)
+    {
+        JsonVariant v = doc["realert_interval"];
+        if (!(v.is<long>() || v.is<float>())) return TimerCmdResult::BadField;
+        uint32_t n = v.as<uint32_t>();
+        if (n < 5 || n > 300) return TimerCmdResult::BadField;
+        realertInterval = (uint16_t)n;
+    }
+    if (haveCountdownSeconds)
+    {
+        JsonVariant v = doc["countdown_seconds"];
+        if (!(v.is<long>() || v.is<float>())) return TimerCmdResult::BadField;
+        uint32_t n = v.as<uint32_t>();
+        if (n > 30) return TimerCmdResult::BadField;
+        countdownSeconds = (uint16_t)n;
+    }
+
+    // Behavior parameters (ADR-0004): four distinct categories, atomic-reject validation.
+    uint32_t maxDuration       = TIMER_MAX_DURATION;
+    uint32_t buttonStep        = TIMER_STEP;
+    uint16_t publishInterval   = TIMER_PUBLISH_INTERVAL;
+    uint16_t appConfigTimeout  = TIMER_CONFIG_TIMEOUT;
+    bool haveMaxDuration       = doc.containsKey("max_duration");
+    bool haveButtonStep        = doc.containsKey("button_step");
+    bool havePublishInterval   = doc.containsKey("remaining_publish_interval");
+    bool haveAppConfigTimeout  = doc.containsKey("app_config_timeout");
+    if (haveMaxDuration)
+    {
+        JsonVariant v = doc["max_duration"];
+        if (!(v.is<long>() || v.is<float>())) return TimerCmdResult::BadField;
+        uint32_t n = v.as<uint32_t>();
+        if (n < 1 || n > 604800) return TimerCmdResult::BadField;
+        maxDuration = n;
+    }
+    if (haveButtonStep)
+    {
+        JsonVariant v = doc["button_step"];
+        if (!(v.is<long>() || v.is<float>())) return TimerCmdResult::BadField;
+        uint32_t n = v.as<uint32_t>();
+        if (n < 1 || n > 99) return TimerCmdResult::BadField;
+        buttonStep = n;
+    }
+    if (havePublishInterval)
+    {
+        JsonVariant v = doc["remaining_publish_interval"];
+        if (!(v.is<long>() || v.is<float>())) return TimerCmdResult::BadField;
+        uint32_t n = v.as<uint32_t>();
+        if (n < 1 || n > 60) return TimerCmdResult::BadField;
+        publishInterval = (uint16_t)n;
+    }
+    if (haveAppConfigTimeout)
+    {
+        JsonVariant v = doc["app_config_timeout"];
+        if (!(v.is<long>() || v.is<float>())) return TimerCmdResult::BadField;
+        uint32_t n = v.as<uint32_t>();
+        if (n < 5 || n > 300) return TimerCmdResult::BadField;
+        appConfigTimeout = (uint16_t)n;
+    }
+
+    // Melody filenames (bare names, same validation as icons — alphanumeric + _ + -).
+    // Empty resets to canonical defaults at apply time. (ADR-0004 §melody empty semantics.)
+    if (doc.containsKey("melody_tick") && !isValidIconName(doc["melody_tick"].as<String>())) return TimerCmdResult::BadField;
+    if (doc.containsKey("melody_end")  && !isValidIconName(doc["melody_end"].as<String>()))  return TimerCmdResult::BadField;
+
+    // bar_enabled: strict bool. bar_color: number or "#RRGGBB" hex string (0..0xFFFFFF).
+    bool haveBarEnabled = doc.containsKey("bar_enabled");
+    bool haveBarColor   = doc.containsKey("bar_color");
+    bool barEnabled     = TIMER_BAR_ENABLED;
+    uint32_t barColor   = TIMER_BAR_COLOR;
+    if (haveBarEnabled)
+    {
+        JsonVariant v = doc["bar_enabled"];
+        if (!v.is<bool>()) return TimerCmdResult::BadField;
+        barEnabled = v.as<bool>();
+    }
+    if (haveBarColor)
+    {
+        JsonVariant v = doc["bar_color"];
+        if (v.is<long>() || v.is<float>())
+        {
+            uint32_t n = v.as<uint32_t>();
+            if (n > 0xFFFFFFu) return TimerCmdResult::BadField;
+            barColor = n;
+        }
+        else if (v.is<const char*>() || v.is<String>())
+        {
+            String s = v.as<String>();
+            s.trim();
+            if (s.length() > 0 && s[0] == '#') s = s.substring(1);
+            if (s.length() == 0 || s.length() > 6) return TimerCmdResult::BadField;
+            for (size_t i = 0; i < s.length(); ++i)
+            {
+                char c = s[i];
+                bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+                if (!ok) return TimerCmdResult::BadField;
+            }
+            barColor = (uint32_t)strtoul(s.c_str(), nullptr, 16);
+        }
+        else
+        {
+            return TimerCmdResult::BadField;
+        }
+    }
+
     bool haveAction = doc.containsKey("action");
     if (haveAction && !isValidAction(doc["action"].as<String>())) return TimerCmdResult::BadField;
 
@@ -650,6 +771,35 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
         _dirty = false;
         persist();
     }
+
+    bool tuningChanged = false;
+    if (haveFinishedHold)     { TIMER_FINISHED_HOLD     = finishedHold;     tuningChanged = true; }
+    if (haveRealertInterval)  { TIMER_REALERT_INTERVAL  = realertInterval;  tuningChanged = true; }
+    if (haveCountdownSeconds) { TIMER_COUNTDOWN_SECONDS = countdownSeconds; tuningChanged = true; }
+    if (haveMaxDuration)      { TIMER_MAX_DURATION      = maxDuration;      tuningChanged = true; }
+    if (haveButtonStep)       { TIMER_STEP              = buttonStep;       tuningChanged = true; }
+    if (havePublishInterval)  { TIMER_PUBLISH_INTERVAL  = publishInterval;  tuningChanged = true; }
+    if (haveAppConfigTimeout) { TIMER_CONFIG_TIMEOUT    = appConfigTimeout; tuningChanged = true; }
+    if (haveBarEnabled)       { TIMER_BAR_ENABLED       = barEnabled;       tuningChanged = true; }
+    if (haveBarColor)         { TIMER_BAR_COLOR         = barColor;         tuningChanged = true; }
+
+    bool melodyChanged = false;
+    if (doc.containsKey("melody_tick"))
+    {
+        String s = doc["melody_tick"].as<String>();
+        TIMER_MELODY_TICK = (s.length() == 0) ? String("timer_tick") : s;
+        tuningChanged = true;
+        melodyChanged = true;
+    }
+    if (doc.containsKey("melody_end"))
+    {
+        String s = doc["melody_end"].as<String>();
+        TIMER_MELODY_END = (s.length() == 0) ? String("timer_end") : s;
+        tuningChanged = true;
+        melodyChanged = true;
+    }
+    if (tuningChanged) saveSettings();
+    if (melodyChanged) loadMelodiesCached();
 
     if (haveAction)
     {

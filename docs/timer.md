@@ -31,6 +31,17 @@ timer in one publish.
 | `icon_running`  | string | Same. Empty clears (then falls back to `icon_idle`). | Icon shown while counting down. Persists. |
 | `icon_paused`   | string | Same. Empty clears (then falls back to `icon_idle`). | Icon shown while paused. Persists. |
 | `icon_finished` | string | Same. Empty clears (then falls back to `icon_idle`). | Icon shown beneath the blinking `0:00`. Persists. |
+| `finished_hold`     | integer | 1–300 (seconds) | Auto-clear delay (only meaningful when `finished = "auto-clear"`). Persists to NVS `"awtrix"`. Same value as the `CLEAR` slot of the on-device `TIMER` menu. |
+| `realert_interval`  | integer | 5–300 (seconds) | Re-alert cadence (only meaningful when `finished = "re-alert"`). Persists to NVS `"awtrix"`. Same value as the `ALERT` slot of the on-device `TIMER` menu. |
+| `countdown_seconds` | integer | 0–30   (seconds) | Pre-expiry beep window (only meaningful when `buzzer = "countdown"`). Persists to NVS `"awtrix"`. Same value as the `CDOWN` slot of the on-device `TIMER` menu. |
+| `max_duration`               | integer | 1–604800 (seconds, 1 s .. 7 days) | Upper bound on accepted `duration` commands. Out-of-range duration is rejected, not clamped (ADR-0001). Persists to NVS `"awtrix"`. See ADR-0004. |
+| `button_step`                | integer | 1–99 | Increment applied per left/right press while editing duration in the **Timer-app config mode**. Persists to NVS `"awtrix"`. See ADR-0004. |
+| `remaining_publish_interval` | integer | 1–60 (seconds) | How often `timer_rem` republishes while Running (drives the HA `{id}_timer_rem` sensor cadence). Persists to NVS `"awtrix"`. See ADR-0004. |
+| `app_config_timeout`         | integer | 5–300 (seconds) | No-input idle window before the **Timer-app config mode** auto-applies and exits to `Idle`. Does **not** affect the TIMER global menu. Persists to NVS `"awtrix"`. See ADR-0004. |
+| `melody_tick` | string | Bare name resolved against `/MELODIES/<name>.txt`; empty resets to default `"timer_tick"`; capped at 32 chars (alphanumeric, `_`, `-` only) | RTTTL melody played for each countdown beep when `buzzer = "countdown"`. Persists to NVS `"awtrix"`. See ADR-0004. |
+| `melody_end`  | string | Same. Empty resets to default `"timer_end"`. | RTTTL melody played on timer expiry (subject to `buzzer` mode). Persists to NVS `"awtrix"`. See ADR-0004. |
+| `bar_enabled` | bool | `true` / `false` | When `false`, the progress bar is hidden in Running/Paused. Persists to NVS `"awtrix"`. See ADR-0004. |
+| `bar_color`   | int or hex string | Numeric (0..0xFFFFFF) or `"#RRGGBB"` / `"RRGGBB"` | Progress-bar color. `0` follows `TEXTCOLOR_888` (the global default). Persists to NVS `"awtrix"`. See ADR-0004. |
 | `action`   | string | `"start"`, `"pause"`, `"reset"` (case-insensitive) | Drives the state machine. |
 
 ### Examples
@@ -166,6 +177,8 @@ depends on `finishedMode`:
 | `hold` | The Finished screen persists indefinitely, blinking at 500 ms. Cleared by a `start`/`reset` command (MQTT/HTTP or the HA Start/Reset buttons) or the physical middle button. |
 | `re-alert` | The Finished screen persists; every `TIMER_REALERT_INTERVAL` seconds (default 15) the end-melody re-plays until cleared (`start`/`reset`). |
 
+Also editable on-device via the `FINISH` slot of the `TIMER` top menu (see [`onscreen.md`](onscreen.md)) — each press cycles modes and immediately persists + publishes (same path as MQTT/HA).
+
 ---
 
 ## Buzzer modes
@@ -176,10 +189,14 @@ depends on `finishedMode`:
 | `end` (default) | End melody plays once on expiry. |
 | `countdown` | Short beep each of the final `TIMER_COUNTDOWN_SECONDS` seconds (default 3), plus the end melody on expiry. |
 
-Beeps and end melody use RTTTL strings loaded from LittleFS
-(`/MELODIES/timer_tick.txt` for countdown beeps, `/MELODIES/timer_end.txt`
-for end melody). If the file is missing, a small built-in fallback RTTTL is
-used instead.
+Beeps and end melody use RTTTL strings loaded from LittleFS. The filenames
+are configurable per ADR-0004 (`melody_tick` and `melody_end` keys on
+`{prefix}/timer`); defaults are `timer_tick` and `timer_end`, resolving to
+`/MELODIES/timer_tick.txt` and `/MELODIES/timer_end.txt`. Empty resets to
+defaults. If the resolved file is missing, a small built-in fallback RTTTL
+is used instead.
+
+Also editable on-device via the `BUZZER` slot of the `TIMER` top menu (see [`onscreen.md`](onscreen.md)) — each press cycles modes and immediately persists + publishes (same path as MQTT/HA).
 
 ---
 
@@ -258,6 +275,9 @@ the existing web UI — nothing about icons is bundled in firmware.
 | Field | Persisted? |
 | --- | --- |
 | `duration`, `buzzer mode`, `finished mode`, per-state icons | Yes (NVS namespace `"timer"`, keys `DUR` / `BUZ` / `FIN` / `ICON_IDLE` / `ICON_RUN` / `ICON_PAUSE` / `ICON_FIN`). Survives reboot, **but** any matching key in `dev.json` overrides NVS on every boot — see [`dev.md`](dev.md). |
+| `TIMER_FINISHED_HOLD`, `TIMER_REALERT_INTERVAL`, `TIMER_COUNTDOWN_SECONDS` | Yes (NVS namespace `"awtrix"`, keys `TFHOLD` / `TRALERT` / `TCDOWN`), written when the `TIMER` top menu's long-press save fires. Same dev.json-overrides-NVS rule applies. |
+| `TIMER_MAX_DURATION`, `TIMER_STEP`, `TIMER_PUBLISH_INTERVAL`, `TIMER_CONFIG_TIMEOUT` (the four ADR-0004 behavior parameters) | Yes (NVS namespace `"awtrix"`, keys `TMAXD` / `TSTEP` / `TPUBI` / `TCFGT`), written by `parseCommand` whenever any of these keys is supplied on `{prefix}/timer`. Same dev.json-overrides-NVS rule applies. |
+| `TIMER_MELODY_TICK`, `TIMER_MELODY_END`, `TIMER_BAR_ENABLED`, `TIMER_BAR_COLOR` (the four ADR-0004 new options) | Yes (NVS namespace `"awtrix"`, keys `TMTICK` / `TMEND` / `TBAREN` / `TBARC`). Same dev.json-overrides-NVS rule applies. |
 | Runtime state (Running / Paused / Finished, remaining seconds, elapsed time) | **No.** A reboot mid-run returns the device to `Idle` with the saved duration. This is intentional — the device has no RTC backup and resuming a timer with a wrong elapsed-time estimate would be worse than restarting. |
 
 ---
@@ -265,19 +285,36 @@ the existing web UI — nothing about icons is bundled in firmware.
 ## Settings (globals, defaults)
 
 These tune timer behavior. With the exception of `SHOW_TIMER`, they are
-**not currently exposed via the `/settings` MQTT topic** — they're
-compile-time defaults overridable via [`dev.json`](dev.md).
+**not exposed via the `/settings` MQTT topic** — they reach the timer via
+[`dev.json`](dev.md), the `{prefix}/timer` MQTT topic, and `POST /api/timer`
+(same atomic-reject validation as the rest of `parseCommand` per ADR-0001).
+
+`TIMER_FINISHED_HOLD`, `TIMER_REALERT_INTERVAL`, and `TIMER_COUNTDOWN_SECONDS`
+are additionally user-editable via the on-device `TIMER` top menu (see
+[`onscreen.md`](onscreen.md)) — see ADR-0003.
+
+The remaining ADR-0004 behavior parameters (`TIMER_MAX_DURATION`,
+`TIMER_STEP`, `TIMER_PUBLISH_INTERVAL`, `TIMER_CONFIG_TIMEOUT`) and the
+ADR-0004 new options (`TIMER_MELODY_TICK`, `TIMER_MELODY_END`,
+`TIMER_BAR_ENABLED`, `TIMER_BAR_COLOR`) reach the timer only via the
+`{prefix}/timer` / `POST /api/timer` / dev.json surfaces — no on-device
+menu, no HA entities. All persist to NVS namespace `"awtrix"`; any matching
+`dev.json` key still overrides NVS on every boot.
 
 | Global | Default | Effect |
 | --- | --- | --- |
 | `SHOW_TIMER` | `true` | Master enable. When `false`, the Timer app is hidden from rotation, the 8 Home Assistant entities are not published, `POST /api/timer` and the MQTT `{prefix}/timer` topic are ignored, and any running timer is reset. On the `true → false` transition the firmware publishes empty retained discovery payloads so HA prunes the stale entities on next reconnect. Toggle from `/api/settings` (`TIMER` key), `dev.json` (`show_timer`), or the on-device **APPS** menu (last entry). |
-| `TIMER_MAX_DURATION` | `86400` (24 h) | Upper clamp for `setDuration`. |
-| `TIMER_STEP` | `1` | Increment step for left/right adjusts in config mode. |
-| `TIMER_PUBLISH_INTERVAL` | `1` (s) | How often `timer_rem` re-publishes while running. |
+| `TIMER_MAX_DURATION` | `86400` (24 h) | Upper bound on accepted `duration` (range: 1..604800). |
+| `TIMER_STEP` | `1` | Increment step for left/right adjusts in Timer-app config mode (range: 1..99). |
+| `TIMER_PUBLISH_INTERVAL` | `1` (s) | How often `timer_rem` re-publishes while running (range: 1..60). |
 | `TIMER_FINISHED_HOLD` | `10` (s) | AutoClear notification hold time. |
 | `TIMER_REALERT_INTERVAL` | `15` (s) | Re-alert cadence in re-alert mode. |
 | `TIMER_COUNTDOWN_SECONDS` | `3` | Number of pre-expiry beep seconds in countdown buzzer mode. |
-| `TIMER_CONFIG_TIMEOUT` | `30` (s) | Idle timeout before config mode auto-exits. |
+| `TIMER_CONFIG_TIMEOUT` | `30` (s) | Idle timeout before the Timer-app config mode auto-exits (range: 5..300). |
+| `TIMER_MELODY_TICK` | `"timer_tick"` | Bare name resolved against `/MELODIES/<name>.txt` for countdown beeps. |
+| `TIMER_MELODY_END` | `"timer_end"` | Bare name resolved against `/MELODIES/<name>.txt` for the end melody. |
+| `TIMER_BAR_ENABLED` | `true` | When `false`, the Running/Paused progress bar is hidden. |
+| `TIMER_BAR_COLOR` | `0` (= `TEXTCOLOR_888`) | Hex color for the progress bar. `0` follows the global text color. |
 
 ---
 

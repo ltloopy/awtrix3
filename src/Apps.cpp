@@ -532,8 +532,9 @@ void TimerApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x,
     }
 
     // Progress bar (right-anchored, drains from the left).
-    if (view.showBar)
-        matrix->drawFastHLine(view.barStartX + x, (kTimerScreenH - 1) + y, view.barLen, TEXTCOLOR_888);
+    if (view.showBar && TIMER_BAR_ENABLED)
+        matrix->drawFastHLine(view.barStartX + x, (kTimerScreenH - 1) + y, view.barLen,
+                              TIMER_BAR_COLOR ? TIMER_BAR_COLOR : TEXTCOLOR_888);
 }
 
 String replacePlaceholders(String text)
