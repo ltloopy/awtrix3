@@ -57,6 +57,18 @@ carried the two modes — so all five settings reach every relevant control surf
    are bulk-editable in the menu and reach NVS only on long-press, matching how every other global
    menu setting persists.
 
+5. **Each numeric tuning-knob slot has a deliberate left/right step magnitude.** Within the ranges
+   named in decision 2, one press moves the wheel by:
+   - `CLEAR` (`finished_hold`, range 1–300 s): **5 s**.
+   - `ALERT` (`realert_interval`, range 5–300 s): **5 s**.
+   - `CDOWN` (`countdown_seconds`, range 0–30 s): **1 s**.
+
+   `CLEAR`/`ALERT` step by 5 s because those delays are measured in tens of seconds, so a 1 s step
+   would make the wheel tedious to drive to a useful value. `CDOWN` steps by 1 s because the field
+   spans only 0–30 and every single second is meaningful (it is the countdown-beep window), so a
+   coarser step would skip useful settings. The clamping in decision 2 caps each step at the range
+   bound.
+
 ## Consequences
 
 - The previously-documented "compile-time defaults overridable via dev.json only" status of the
