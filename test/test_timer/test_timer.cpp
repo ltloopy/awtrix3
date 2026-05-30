@@ -960,6 +960,35 @@ void test_U41_parseCommand_melody_and_bar(void) {
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
                       static_cast<int>(TimerManager.parseCommand("{\"bar_color\":\"notahex\"}")));
     TEST_ASSERT_EQUAL_UINT32(0x0000FF, TIMER_BAR_COLOR);
+
+    // bar_color hex string must be exactly 6 digits wrong lengths
+    // are rejected and leave the previous color unchanged (atomic reject).
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"bar_color\":\"#abc\"}")));
+    TEST_ASSERT_EQUAL_UINT32(0x0000FF, TIMER_BAR_COLOR);
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"bar_color\":\"\"}")));
+    TEST_ASSERT_EQUAL_UINT32(0x0000FF, TIMER_BAR_COLOR);
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"bar_color\":\"12345\"}")));
+    TEST_ASSERT_EQUAL_UINT32(0x0000FF, TIMER_BAR_COLOR);
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"bar_color\":\"1234567\"}")));
+    TEST_ASSERT_EQUAL_UINT32(0x0000FF, TIMER_BAR_COLOR);
+
+    // Exactly-6-digit forms succeed, with and without leading '#'.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"bar_color\":\"FFAA00\"}")));
+    TEST_ASSERT_EQUAL_UINT32(0xFFAA00, TIMER_BAR_COLOR);
+    TIMER_BAR_COLOR = 0x0000FF;
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"bar_color\":\"#FFAA00\"}")));
+    TEST_ASSERT_EQUAL_UINT32(0xFFAA00, TIMER_BAR_COLOR);
+
+    // Numeric one past 0xFFFFFF is out of range and rejected (color unchanged).
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"bar_color\":16777216}")));
+    TEST_ASSERT_EQUAL_UINT32(0xFFAA00, TIMER_BAR_COLOR);
 }
 
 // ============================================================================

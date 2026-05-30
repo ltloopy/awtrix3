@@ -732,7 +732,7 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
             String s = v.as<String>();
             s.trim();
             if (s.length() > 0 && s[0] == '#') s = s.substring(1);
-            if (s.length() == 0 || s.length() > 6) return TimerCmdResult::BadField;
+            if (s.length() != 6) return TimerCmdResult::BadField;  // exactly RRGGBB
             for (size_t i = 0; i < s.length(); ++i)
             {
                 char c = s[i];
