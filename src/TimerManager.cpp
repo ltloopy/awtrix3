@@ -772,33 +772,33 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
         persist();
     }
 
-    bool tuningChanged = false;
-    if (haveFinishedHold)     { TIMER_FINISHED_HOLD     = finishedHold;     tuningChanged = true; }
-    if (haveRealertInterval)  { TIMER_REALERT_INTERVAL  = realertInterval;  tuningChanged = true; }
-    if (haveCountdownSeconds) { TIMER_COUNTDOWN_SECONDS = countdownSeconds; tuningChanged = true; }
-    if (haveMaxDuration)      { TIMER_MAX_DURATION      = maxDuration;      tuningChanged = true; }
-    if (haveButtonStep)       { TIMER_STEP              = buttonStep;       tuningChanged = true; }
-    if (havePublishInterval)  { TIMER_PUBLISH_INTERVAL  = publishInterval;  tuningChanged = true; }
-    if (haveAppConfigTimeout) { TIMER_CONFIG_TIMEOUT    = appConfigTimeout; tuningChanged = true; }
-    if (haveBarEnabled)       { TIMER_BAR_ENABLED       = barEnabled;       tuningChanged = true; }
-    if (haveBarColor)         { TIMER_BAR_COLOR         = barColor;         tuningChanged = true; }
+    bool persistedKeyChanged = false;
+    if (haveFinishedHold)     { TIMER_FINISHED_HOLD     = finishedHold;     persistedKeyChanged = true; }
+    if (haveRealertInterval)  { TIMER_REALERT_INTERVAL  = realertInterval;  persistedKeyChanged = true; }
+    if (haveCountdownSeconds) { TIMER_COUNTDOWN_SECONDS = countdownSeconds; persistedKeyChanged = true; }
+    if (haveMaxDuration)      { TIMER_MAX_DURATION      = maxDuration;      persistedKeyChanged = true; }
+    if (haveButtonStep)       { TIMER_STEP              = buttonStep;       persistedKeyChanged = true; }
+    if (havePublishInterval)  { TIMER_PUBLISH_INTERVAL  = publishInterval;  persistedKeyChanged = true; }
+    if (haveAppConfigTimeout) { TIMER_CONFIG_TIMEOUT    = appConfigTimeout; persistedKeyChanged = true; }
+    if (haveBarEnabled)       { TIMER_BAR_ENABLED       = barEnabled;       persistedKeyChanged = true; }
+    if (haveBarColor)         { TIMER_BAR_COLOR         = barColor;         persistedKeyChanged = true; }
 
     bool melodyChanged = false;
     if (doc.containsKey("melody_tick"))
     {
         String s = doc["melody_tick"].as<String>();
         TIMER_MELODY_TICK = (s.length() == 0) ? String("timer_tick") : s;
-        tuningChanged = true;
+        persistedKeyChanged = true;
         melodyChanged = true;
     }
     if (doc.containsKey("melody_end"))
     {
         String s = doc["melody_end"].as<String>();
         TIMER_MELODY_END = (s.length() == 0) ? String("timer_end") : s;
-        tuningChanged = true;
+        persistedKeyChanged = true;
         melodyChanged = true;
     }
-    if (tuningChanged) saveSettings();
+    if (persistedKeyChanged) saveSettings();
     if (melodyChanged) loadMelodiesCached();
 
     if (haveAction)
