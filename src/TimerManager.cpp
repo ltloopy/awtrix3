@@ -590,6 +590,22 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
 
     // -- Validation pass: mutate nothing; reject the whole command on the first
     //    invalid field. Out-of-range is rejected here, not clamped (parity). --
+
+    // max_duration is range-defining for duration; validate first so a payload
+    // that raises the ceiling and sets a duration within the new ceiling in the
+    // same call is accepted atomically (ADR-0001 addendum).
+    uint32_t maxDuration = TIMER_MAX_DURATION;
+    bool haveMaxDuration = doc.containsKey("max_duration");
+    if (haveMaxDuration)
+    {
+        JsonVariant v = doc["max_duration"];
+        if (!(v.is<long>() || v.is<float>())) return TimerCmdResult::BadField;
+        uint32_t n = v.as<uint32_t>();
+        if (n < 1 || n > 604800) return TimerCmdResult::BadField;
+        maxDuration = n;
+    }
+    const uint32_t effectiveMaxDuration = haveMaxDuration ? maxDuration : TIMER_MAX_DURATION;
+
     uint32_t durSecs = 0;
     bool haveDuration = doc.containsKey("duration");
     if (haveDuration)
@@ -607,7 +623,7 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
         {
             return TimerCmdResult::BadField;
         }
-        if (!isValidDuration(durSecs)) return TimerCmdResult::BadField;
+        if (durSecs < 1 || (effectiveMaxDuration > 0 && durSecs > effectiveMaxDuration)) return TimerCmdResult::BadField;
     }
 
     BuzzerMode   buzzer   = buzzerMode;
@@ -654,22 +670,13 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     }
 
     // Behavior parameters (ADR-0004): four distinct categories, atomic-reject validation.
-    uint32_t maxDuration       = TIMER_MAX_DURATION;
+    // (max_duration is hoisted above to gate duration's effective ceiling — ADR-0001 addendum.)
     uint32_t buttonStep        = TIMER_STEP;
     uint16_t publishInterval   = TIMER_PUBLISH_INTERVAL;
     uint16_t appConfigTimeout  = TIMER_CONFIG_TIMEOUT;
-    bool haveMaxDuration       = doc.containsKey("max_duration");
     bool haveButtonStep        = doc.containsKey("button_step");
     bool havePublishInterval   = doc.containsKey("remaining_publish_interval");
     bool haveAppConfigTimeout  = doc.containsKey("app_config_timeout");
-    if (haveMaxDuration)
-    {
-        JsonVariant v = doc["max_duration"];
-        if (!(v.is<long>() || v.is<float>())) return TimerCmdResult::BadField;
-        uint32_t n = v.as<uint32_t>();
-        if (n < 1 || n > 604800) return TimerCmdResult::BadField;
-        maxDuration = n;
-    }
     if (haveButtonStep)
     {
         JsonVariant v = doc["button_step"];
@@ -757,6 +764,10 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     _suspendPersist = true;
     _dirty = false;
 
+    // TIMER_MAX_DURATION must land before setDuration() so its internal backstop
+    // clamp sees the in-payload ceiling, not the pre-payload one (ADR-0001 addendum).
+    if (haveMaxDuration)            TIMER_MAX_DURATION = maxDuration;
+
     if (haveDuration)               setDuration(durSecs);   // pre-validated in range
     if (doc.containsKey("icon_idle"))     setIconIdle    (doc["icon_idle"].as<String>());
     if (doc.containsKey("icon_running"))  setIconRunning (doc["icon_running"].as<String>());
@@ -776,7 +787,7 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     if (haveFinishedHold)     { TIMER_FINISHED_HOLD     = finishedHold;     persistedKeyChanged = true; }
     if (haveRealertInterval)  { TIMER_REALERT_INTERVAL  = realertInterval;  persistedKeyChanged = true; }
     if (haveCountdownSeconds) { TIMER_COUNTDOWN_SECONDS = countdownSeconds; persistedKeyChanged = true; }
-    if (haveMaxDuration)      { TIMER_MAX_DURATION      = maxDuration;      persistedKeyChanged = true; }
+    if (haveMaxDuration)      { /* TIMER_MAX_DURATION already assigned above */ persistedKeyChanged = true; }
     if (haveButtonStep)       { TIMER_STEP              = buttonStep;       persistedKeyChanged = true; }
     if (havePublishInterval)  { TIMER_PUBLISH_INTERVAL  = publishInterval;  persistedKeyChanged = true; }
     if (haveAppConfigTimeout) { TIMER_CONFIG_TIMEOUT    = appConfigTimeout; persistedKeyChanged = true; }

@@ -963,6 +963,48 @@ void test_U41_parseCommand_melody_and_bar(void) {
 }
 
 // ============================================================================
+// U42 (ADR-0001 addendum) — In a multi-key payload, max_duration is evaluated
+// before duration so {max_duration, duration} is judged against the in-payload
+// ceiling, not the pre-payload one. Atomic-reject is preserved for inconsistent
+// payloads and single-key duration behavior is unchanged.
+// ============================================================================
+void test_U42_parseCommand_multi_key_validation_ordering(void) {
+    SHOW_TIMER = true;
+
+    // Case 1: payload raises ceiling and sets a duration within the new ceiling
+    // in one atomic call. Pre-payload ceiling would have rejected duration=9000.
+    TIMER_MAX_DURATION = 5000;
+    TimerManager.setDuration(100);
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand(
+                          "{\"max_duration\":10000,\"duration\":9000}")));
+    TEST_ASSERT_EQUAL_UINT32(10000, TIMER_MAX_DURATION);
+    TEST_ASSERT_EQUAL_UINT32(9000,  TimerManager.getDuration());
+
+    // Case 2: payload is internally inconsistent (duration > in-payload ceiling).
+    // Atomic-reject: neither key applies.
+    TIMER_MAX_DURATION = 5000;
+    TimerManager.setDuration(100);
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand(
+                          "{\"max_duration\":100,\"duration\":9000}")));
+    TEST_ASSERT_EQUAL_UINT32(5000, TIMER_MAX_DURATION);
+    TEST_ASSERT_EQUAL_UINT32(100,  TimerManager.getDuration());
+
+    // Case 3: single-key duration above the live ceiling is still rejected
+    // (no in-payload ceiling to fall back on).
+    TIMER_MAX_DURATION = 5000;
+    TimerManager.setDuration(100);
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"duration\":9000}")));
+    TEST_ASSERT_EQUAL_UINT32(5000, TIMER_MAX_DURATION);
+    TEST_ASSERT_EQUAL_UINT32(100,  TimerManager.getDuration());
+
+    // Reset for downstream tests.
+    TIMER_MAX_DURATION = 86400;
+}
+
+// ============================================================================
 // U32–U35 — Timer HA Presence descriptor table invariants.
 // The table (src/TimerHa.h) is the single source of truth that MQTTManager's
 // discovery setup AND teardown both read, so it cannot drift. These host tests
@@ -1197,6 +1239,7 @@ int main(int, char **) {
     RUN_TEST(test_U39_parseCommand_behavior_params_accepted_in_range);
     RUN_TEST(test_U40_parseCommand_behavior_params_atomic_reject);
     RUN_TEST(test_U41_parseCommand_melody_and_bar);
+    RUN_TEST(test_U42_parseCommand_multi_key_validation_ordering);
     RUN_TEST(test_U32_descriptor_table_well_formed);
     RUN_TEST(test_U33_descriptor_ids_unique);
     RUN_TEST(test_U34_descriptor_type_specific_fields);

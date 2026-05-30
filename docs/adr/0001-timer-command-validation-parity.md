@@ -31,6 +31,17 @@ can't report what a request/response one can):
 `setDuration`'s clamp is kept only as an internal backstop (it still guards the
 config editor); external input never reaches it out of range.
 
+**Addendum — multi-key validation ordering.** Range-defining keys in the same
+payload are validated first, into effective-bound locals; dependent keys are
+then validated against those effective bounds. The whole payload still rejects
+atomically if any individual key is invalid against its own absolute bounds, or
+if a dependent key is out of range against the effective bound. Today the only
+such pair is `max_duration` → `duration`: a payload like
+`{"max_duration": 10000, "duration": 9000}` against a current ceiling of `5000`
+is accepted as one atomic call, because `duration` sees the in-payload ceiling
+of `10000`, not the pre-payload `5000`. Future range-defining keys follow the
+same pattern.
+
 ## Consequences
 
 - Revokes the previously documented "clamped on out-of-range" behavior. Clients that relied on clamping (e.g. sending `99999` expecting the max) must now send in-range values, or they get a `400` / silent no-op.
