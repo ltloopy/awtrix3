@@ -1034,6 +1034,44 @@ void test_U42_parseCommand_multi_key_validation_ordering(void) {
 }
 
 // ============================================================================
+// U43 — bar_enabled is a STRICT bool. Only JSON true/false are
+// accepted; every other JSON shape (integer 0/1, float, numeric/word string,
+// null, object, array) is rejected with BadField and leaves TIMER_BAR_ENABLED
+// ArduinoJson is<bool>() coercion quirks
+// ============================================================================
+void test_U43_parseCommand_bar_enabled_strict_bool(void) {
+    SHOW_TIMER = true;
+
+    // Every non-bool JSON shape is rejected and leaves the prior value intact.
+    // Prior value held at `true` throughout so a sloppy coercion to false shows.
+    TIMER_BAR_ENABLED = true;
+    const char *rejected[] = {
+        "{\"bar_enabled\":1}",       // integer truthy
+        "{\"bar_enabled\":0}",       // integer falsy
+        "{\"bar_enabled\":1.0}",     // float
+        "{\"bar_enabled\":\"yes\"}", // arbitrary truthy string
+        "{\"bar_enabled\":\"true\"}",// literal bool-word string (not a JSON bool)
+        "{\"bar_enabled\":null}",    // null is not false
+        "{\"bar_enabled\":{}}",      // object
+        "{\"bar_enabled\":[]}",      // array
+    };
+    for (const char *cmd : rejected) {
+        TEST_ASSERT_EQUAL_MESSAGE(static_cast<int>(TimerCmdResult::BadField),
+                                  static_cast<int>(TimerManager.parseCommand(cmd)),
+                                  cmd);
+        TEST_ASSERT_TRUE_MESSAGE(TIMER_BAR_ENABLED, cmd);  // unchanged
+    }
+
+    // Only genuine JSON booleans apply.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"bar_enabled\":false}")));
+    TEST_ASSERT_FALSE(TIMER_BAR_ENABLED);
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"bar_enabled\":true}")));
+    TEST_ASSERT_TRUE(TIMER_BAR_ENABLED);
+}
+
+// ============================================================================
 // U32–U35 — Timer HA Presence descriptor table invariants.
 // The table (src/TimerHa.h) is the single source of truth that MQTTManager's
 // discovery setup AND teardown both read, so it cannot drift. These host tests
@@ -1269,6 +1307,7 @@ int main(int, char **) {
     RUN_TEST(test_U40_parseCommand_behavior_params_atomic_reject);
     RUN_TEST(test_U41_parseCommand_melody_and_bar);
     RUN_TEST(test_U42_parseCommand_multi_key_validation_ordering);
+    RUN_TEST(test_U43_parseCommand_bar_enabled_strict_bool);
     RUN_TEST(test_U32_descriptor_table_well_formed);
     RUN_TEST(test_U33_descriptor_ids_unique);
     RUN_TEST(test_U34_descriptor_type_specific_fields);
