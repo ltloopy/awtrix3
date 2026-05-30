@@ -79,3 +79,9 @@ carried the two modes — so all five settings reach every relevant control surf
 - Adjusting buzzer/finished mode on-device generates one MQTT publish per left/right press. This is
   consistent with how MQTT-driven mode changes already behave (the setter always publishes), and is
   bounded by the press cadence — not a flood concern in practice.
+- Drive-by (unrelated to this ADR's scope): adding `TimerConfigMenu` made a pre-existing latent
+  fall-through reachable, so a missing `break;` was added to `MenuManager::leftButton`'s `VolumeMenu`
+  case. The fall-through was harmless while `VolumeMenu` fell through to `default` (a no-op), but
+  would have let a left-press in the Volume menu also mutate timer config once `TimerConfigMenu`
+  became the next case. `rightButton`'s `VolumeMenu` case already had its `break;`, so only
+  `leftButton` needed the fix.
