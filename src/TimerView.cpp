@@ -28,7 +28,7 @@ void TimerViewModel::formatTimerDisplay(uint32_t seconds, char *out, size_t outL
         snprintf(out, outLen, "%02u:%02u", (unsigned)(seconds / 3600), (unsigned)((seconds % 3600) / 60));
 }
 
-TimerView TimerViewModel::compute(unsigned long nowMs)
+TimerView TimerViewModel::compute(unsigned long nowMs, bool iconEnabled)
 {
     TimerView v = {};
 
@@ -50,9 +50,12 @@ TimerView TimerViewModel::compute(unsigned long nowMs)
 
     const TimerState ts = TimerManager.getState();
 
-    // Non-config screens center their text in the 24px area right of the icon.
-    v.textRegionX0 = kTextX;
-    v.textRegionW  = kTextWidth;
+    // Non-config screens draw the icon (unless disabled) and center their text in
+    // the 24px area right of it. When the icon is hidden, text reflows to the full
+    // 32px panel.
+    v.showIcon = iconEnabled;
+    if (iconEnabled) { v.textRegionX0 = kTextX; v.textRegionW = kTextWidth; } // 8 / 24
+    else             { v.textRegionX0 = 0;      v.textRegionW = kScreenW;   } // full 32px
 
     // Finished screen: blinking "0:00", no bar.
     if (ts == TimerState::Finished)
@@ -72,14 +75,19 @@ TimerView TimerViewModel::compute(unsigned long nowMs)
 
     if (ts != TimerState::Idle && duration > 0)
     {
-        uint32_t len = ((uint32_t)kBarMaxLen * remaining) / duration;
-        if (len > (uint32_t)kBarMaxLen)
-            len = (uint32_t)kBarMaxLen;
+        // The bar also reflows when the icon is hidden: it spans the full panel
+        // instead of the 23px region right of the icon. Right edge stays anchored
+        // at col 31 either way (barX0 + barMaxLen == kScreenW).
+        const int16_t barX0     = iconEnabled ? kBarX0     : 0;          // 9  or 0
+        const int16_t barMaxLen = iconEnabled ? kBarMaxLen : kScreenW;   // 23 or 32
+        uint32_t len = ((uint32_t)barMaxLen * remaining) / duration;
+        if (len > (uint32_t)barMaxLen)
+            len = (uint32_t)barMaxLen;
         if (len > 0)
         {
             v.showBar   = true;
             v.barLen    = (uint8_t)len;
-            v.barStartX = kBarX0 + (kBarMaxLen - (int16_t)len);  // right edge anchored at col 31
+            v.barStartX = barX0 + (barMaxLen - (int16_t)len);  // right edge anchored at col 31
         }
     }
 

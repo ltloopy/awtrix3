@@ -759,6 +759,16 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
         if (!v.is<bool>()) return TimerCmdResult::BadField;
         barEnabled = v.as<bool>();
     }
+
+    // icon_enabled: strict bool (same shape as bar_enabled).
+    bool haveIconEnabled = doc.containsKey("icon_enabled");
+    bool iconEnabled     = TIMER_ICON_ENABLED;
+    if (haveIconEnabled)
+    {
+        JsonVariant v = doc["icon_enabled"];
+        if (!v.is<bool>()) return TimerCmdResult::BadField;
+        iconEnabled = v.as<bool>();
+    }
     if (haveBarColor)
     {
         JsonVariant v = doc["bar_color"];
@@ -833,6 +843,7 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     if (havePublishInterval)  { TIMER_PUBLISH_INTERVAL  = publishInterval;  persistedKeyChanged = true; }
     if (haveAppConfigTimeout) { TIMER_CONFIG_TIMEOUT    = appConfigTimeout; persistedKeyChanged = true; }
     if (haveBarEnabled)       { TIMER_BAR_ENABLED       = barEnabled;       persistedKeyChanged = true; }
+    if (haveIconEnabled)      { TIMER_ICON_ENABLED      = iconEnabled;      persistedKeyChanged = true; }
     if (haveBarColor)         { TIMER_BAR_COLOR         = barColor;         persistedKeyChanged = true; }
 
     bool melodyChanged = false;

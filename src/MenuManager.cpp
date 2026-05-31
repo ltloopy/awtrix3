@@ -83,7 +83,7 @@ uint8_t appsCount = 5;
 #endif
 
 int8_t timerConfigIndex;
-uint8_t timerConfigCount = 5;
+uint8_t timerConfigCount = 7;
 
 MenuState currentState = MainMenu;
 
@@ -247,6 +247,10 @@ String MenuManager_::menutext()
             return "CLEAR " + String(TIMER_FINISHED_HOLD);
         case 4:
             return "ALERT " + String(TIMER_REALERT_INTERVAL);
+        case 5:
+            return TIMER_ICON_ENABLED ? "ICON ON" : "ICON OFF";
+        case 6:
+            return TIMER_BAR_ENABLED ? "BAR ON" : "BAR OFF";
         }
         break;
     default:
@@ -327,6 +331,12 @@ void MenuManager_::rightButton()
             break;
         case 4:
             TIMER_REALERT_INTERVAL = (TIMER_REALERT_INTERVAL + 5 <= 300) ? TIMER_REALERT_INTERVAL + 5 : 300;
+            break;
+        case 5:
+            TIMER_ICON_ENABLED = !TIMER_ICON_ENABLED;
+            break;
+        case 6:
+            TIMER_BAR_ENABLED = !TIMER_BAR_ENABLED;
             break;
         }
         break;
@@ -409,6 +419,12 @@ void MenuManager_::leftButton()
             break;
         case 4:
             TIMER_REALERT_INTERVAL = (TIMER_REALERT_INTERVAL >= 5 + 5) ? TIMER_REALERT_INTERVAL - 5 : 5;
+            break;
+        case 5:
+            TIMER_ICON_ENABLED = !TIMER_ICON_ENABLED;
+            break;
+        case 6:
+            TIMER_BAR_ENABLED = !TIMER_BAR_ENABLED;
             break;
         }
         break;

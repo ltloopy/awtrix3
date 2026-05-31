@@ -31,6 +31,7 @@ extern String   TIMER_ICON_FINISHED;
 extern String   TIMER_MELODY_TICK;
 extern String   TIMER_MELODY_END;
 extern bool     TIMER_BAR_ENABLED;
+extern bool     TIMER_ICON_ENABLED;
 extern uint32_t TIMER_BAR_COLOR;
 
 extern uint32_t TEXTCOLOR_888;

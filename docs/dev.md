@@ -55,6 +55,7 @@ The JSON object has the following properties:
 | `timer_melody_tick` | string | Bare melody name (resolved against `/MELODIES/<name>.txt`) for countdown beeps. Empty resets to default `"timer_tick"`. Per ADR-0004. | `"timer_tick"` |
 | `timer_melody_end` | string | Bare melody name for the end melody. Empty resets to default `"timer_end"`. Per ADR-0004. | `"timer_end"` |
 | `timer_bar_enabled` | boolean | Show/hide the Running/Paused progress bar. Per ADR-0004. | `true` |
+| `timer_icon_enabled` | boolean | Show/hide the timer icon; when hidden the time text and bar reflow to the full panel. Per ADR-0005. | `true` |
 | `timer_bar_color` | integer | Hex color (0..0xFFFFFF) for the progress bar. `0` follows `TEXTCOLOR_888`. Per ADR-0004. | `0` |
 
 

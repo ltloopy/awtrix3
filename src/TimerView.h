@@ -4,16 +4,22 @@
 #include <Arduino.h>
 
 // A pure, per-frame description of what the Timer app should draw. It holds no
-// pixels and no font metrics: it is fully determined by TimerManager state plus
-// the current time (for the Finished blink). TimerApp (src/Apps.cpp) is its
-// painter — it maps this struct to DisplayManager / matrix calls and owns the
-// font-dependent text centering. Keeping the view display-free is what lets the
-// host tests cover the bar geometry, blink cadence and display-string selection
-// that the renderer previously hid. See CONTEXT.md ("Timer View").
+// pixels and no font metrics: it is fully determined by TimerManager state, the
+// current time (for the Finished blink), and the icon-enabled display flag (which
+// gates the icon and, when off, reflows text+bar to the full panel). TimerApp
+// (src/Apps.cpp) is its painter — it maps this struct to DisplayManager / matrix
+// calls and owns the font-dependent text centering. Keeping the view display-free
+// is what lets the host tests cover the bar geometry, blink cadence and
+// display-string selection that the renderer previously hid. See CONTEXT.md
+// ("Timer View").
 struct TimerView
 {
     enum class Screen : uint8_t { Config, Finished, Time };
     Screen screen;
+
+    // Whether to draw the timer icon (false on Config, or when icon_enabled is off).
+    // When false, text and bar reflow to span the full 32px panel.
+    bool    showIcon;
 
     // Text to draw, centered by the painter within [textRegionX0, +textRegionW).
     char    text[12];
@@ -22,9 +28,11 @@ struct TimerView
     int16_t textRegionW;     // width of the centering region
 
     // Progress bar (Time screen, running/paused, duration > 0). Right-anchored,
-    // drains from the left: invariant barStartX + barLen == panel width (32).
+    // drains from the left: invariant barStartX + barLen == panel width (32). Its
+    // max length depends on showIcon (icon on -> 23px right of the icon; icon off
+    // -> the full 32px panel).
     bool    showBar;
-    uint8_t barLen;          // 0 .. kBarMaxLen
+    uint8_t barLen;          // 0 .. (kBarMaxLen, or kScreenW when the icon is hidden)
     int16_t barStartX;       // app-local start column
 
     // Config-mode field underline (Config screen only).
@@ -35,8 +43,9 @@ struct TimerView
 namespace TimerViewModel
 {
     // Compute the view from the live TimerManager state. `nowMs` (millis())
-    // drives the 500 ms Finished blink only.
-    TimerView compute(unsigned long nowMs);
+    // drives the 500 ms Finished blink only. `iconEnabled` (TIMER_ICON_ENABLED)
+    // gates the icon and, when false, reflows text + bar to the full panel.
+    TimerView compute(unsigned long nowMs, bool iconEnabled = true);
 
     // The compact on-screen format, fitted to the 24px text region:
     //   < 1h   -> "M:SS"   (305  -> "5:05")

@@ -393,6 +393,7 @@ All JSON properties are optional. When multiple are sent together, property sett
 | `melody_tick` | string | Bare name resolved against `/MELODIES/<name>.txt`; empty resets to default `"timer_tick"`; ≤32 chars | RTTTL countdown-beep melody (ADR-0004). Persists. |
 | `melody_end`  | string | Same. Empty resets to default `"timer_end"`. | RTTTL end melody (ADR-0004). Persists. |
 | `bar_enabled` | bool | `true` / `false` | Show/hide the Running/Paused progress bar (ADR-0004). Persists. |
+| `icon_enabled` | bool | `true` / `false` | Show/hide the timer icon; when hidden the time text and bar reflow to span the full panel (ADR-0005). Persists. |
 | `bar_color`   | int or hex string | `0..0xFFFFFF` or `"#RRGGBB"` / `"RRGGBB"` | Progress-bar color; `0` follows `TEXTCOLOR_888` (ADR-0004). Persists. |
 
 `action` / `buzzer` / `finished` values are case-insensitive; `auto-clear`/`autoclear` and `re-alert`/`realert` are both accepted. Icon and melody values are **case-sensitive** (they map to filenames on LittleFS) and **capped at 32 characters** (alphanumeric, `_`, `-`). The icon loader checks `/ICONS/<name>.jpg` then `/ICONS/<name>.gif`; the melody loader reads `/MELODIES/<name>.txt`.

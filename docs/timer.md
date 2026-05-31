@@ -41,6 +41,7 @@ timer in one publish.
 | `melody_tick` | string | Bare name resolved against `/MELODIES/<name>.txt`; empty resets to default `"timer_tick"`; capped at 32 chars (alphanumeric, `_`, `-` only) | RTTTL melody played for each countdown beep when `buzzer = "countdown"`. Persists to NVS `"awtrix"`. See ADR-0004. |
 | `melody_end`  | string | Same. Empty resets to default `"timer_end"`. | RTTTL melody played on timer expiry (subject to `buzzer` mode). Persists to NVS `"awtrix"`. See ADR-0004. |
 | `bar_enabled` | bool | `true` / `false` | When `false`, the progress bar is hidden in Running/Paused. Persists to NVS `"awtrix"`. See ADR-0004. |
+| `icon_enabled` | bool | `true` / `false` | When `false`, the timer icon (including the built-in hourglass fallback) is hidden and the time text + progress bar reflow to span the full 32px panel. Persists to NVS `"awtrix"`. See ADR-0005. |
 | `bar_color`   | int or hex string | Numeric (0..0xFFFFFF) or `"#RRGGBB"` / `"RRGGBB"` | Progress-bar color. `0` follows `TEXTCOLOR_888` (the global default). Persists to NVS `"awtrix"`. See ADR-0004. |
 | `action`   | string | `"start"`, `"pause"`, `"reset"` (case-insensitive) | Drives the state machine. |
 
@@ -278,6 +279,7 @@ the existing web UI — nothing about icons is bundled in firmware.
 | `TIMER_FINISHED_HOLD`, `TIMER_REALERT_INTERVAL`, `TIMER_COUNTDOWN_SECONDS` | Yes (NVS namespace `"awtrix"`, keys `TFHOLD` / `TRALERT` / `TCDOWN`), written when the `TIMER` top menu's long-press save fires. Same dev.json-overrides-NVS rule applies. |
 | `TIMER_MAX_DURATION`, `TIMER_STEP`, `TIMER_PUBLISH_INTERVAL`, `TIMER_CONFIG_TIMEOUT` (the four ADR-0004 behavior parameters) | Yes (NVS namespace `"awtrix"`, keys `TMAXD` / `TSTEP` / `TPUBI` / `TCFGT`), written by `parseCommand` whenever any of these keys is supplied on `{prefix}/timer`. Same dev.json-overrides-NVS rule applies. |
 | `TIMER_MELODY_TICK`, `TIMER_MELODY_END`, `TIMER_BAR_ENABLED`, `TIMER_BAR_COLOR` (the four ADR-0004 new options) | Yes (NVS namespace `"awtrix"`, keys `TMTICK` / `TMEND` / `TBAREN` / `TBARC`). Same dev.json-overrides-NVS rule applies. |
+| `TIMER_ICON_ENABLED` (ADR-0005) | Yes (NVS namespace `"awtrix"`, key `TICONEN`), written by `parseCommand` and by the on-device `TIMER` menu's `ICON` slot long-press save. Same dev.json-overrides-NVS rule applies. |
 | Runtime state (Running / Paused / Finished, remaining seconds, elapsed time) | **No.** A reboot mid-run returns the device to `Idle` with the saved duration. This is intentional — the device has no RTC backup and resuming a timer with a wrong elapsed-time estimate would be worse than restarting. |
 
 ---
@@ -295,11 +297,14 @@ are additionally user-editable via the on-device `TIMER` top menu (see
 
 The remaining ADR-0004 behavior parameters (`TIMER_MAX_DURATION`,
 `TIMER_STEP`, `TIMER_PUBLISH_INTERVAL`, `TIMER_CONFIG_TIMEOUT`) and the
-ADR-0004 new options (`TIMER_MELODY_TICK`, `TIMER_MELODY_END`,
-`TIMER_BAR_ENABLED`, `TIMER_BAR_COLOR`) reach the timer only via the
-`{prefix}/timer` / `POST /api/timer` / dev.json surfaces — no on-device
-menu, no HA entities. All persist to NVS namespace `"awtrix"`; any matching
-`dev.json` key still overrides NVS on every boot.
+melody/color options (`TIMER_MELODY_TICK`, `TIMER_MELODY_END`,
+`TIMER_BAR_COLOR`) reach the timer only via the `{prefix}/timer` /
+`POST /api/timer` / dev.json surfaces — no on-device menu, no HA entities.
+The two display toggles `TIMER_ICON_ENABLED` (ADR-0005) and
+`TIMER_BAR_ENABLED` (ADR-0004) reach the timer via those same three surfaces
+**and** the on-device `TIMER` menu's `ICON` / `BAR` slots — still no HA
+entities. All persist to NVS namespace `"awtrix"`; any matching `dev.json`
+key still overrides NVS on every boot.
 
 | Global | Default | Effect |
 | --- | --- | --- |
@@ -314,6 +319,7 @@ menu, no HA entities. All persist to NVS namespace `"awtrix"`; any matching
 | `TIMER_MELODY_TICK` | `"timer_tick"` | Bare name resolved against `/MELODIES/<name>.txt` for countdown beeps. |
 | `TIMER_MELODY_END` | `"timer_end"` | Bare name resolved against `/MELODIES/<name>.txt` for the end melody. |
 | `TIMER_BAR_ENABLED` | `true` | When `false`, the Running/Paused progress bar is hidden. |
+| `TIMER_ICON_ENABLED` | `true` | When `false`, the timer icon is hidden and the time text + bar reflow to the full panel (ADR-0005). |
 | `TIMER_BAR_COLOR` | `0` (= `TEXTCOLOR_888`) | Hex color for the progress bar. `0` follows the global text color. |
 
 ---

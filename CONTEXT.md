@@ -41,12 +41,21 @@ All four reach: `dev.json` (`timer_max_duration` / `timer_button_step` / `timer_
 
 _Avoid_: "tuning knobs" (reserved for the three per-mode knobs above); "compile-time globals" (they aren't — they're runtime-mutable as of ADR-0004).
 
+### Display-element toggles vs. icon image selection
+
+Two different `icon`/`bar`-named families on the Timer surface; do not conflate them.
+
+- **Display-element toggles** — the `_enabled`-suffixed booleans `icon_enabled` (`TIMER_ICON_ENABLED`, ADR-0005) and `bar_enabled` (`TIMER_BAR_ENABLED`, ADR-0004). Each shows/hides a *drawn element*. `icon_enabled = false` suppresses the icon region entirely — including the built-in hourglass fallback — and reflows **both** the time text and the progress bar to span the full 32px panel (ADR-0005); `bar_enabled = false` only hides the bar. Reachable via `dev.json` / `POST /api/timer` / `{prefix}/timer` MQTT **and** the on-device `TIMER` menu's `ICON` / `BAR` slots. No HA entity; not echoed in `GET /api/timer`. Persisted in NVS `"awtrix"` (`TICONEN` / `TBAREN`).
+- **Icon image selection** — the `icon_<state>` family `icon_idle` / `icon_running` / `icon_paused` / `icon_finished` (`TIMER_ICON_*`). Each selects *which image* is drawn in a given state; empty falls back per [timer.md](docs/timer.md). These pick the picture; `icon_enabled` decides whether *any* icon (picture or hourglass) is drawn at all.
+
+_Avoid_: reading `icon_enabled` as "enable the idle icon" or as a member of the `icon_<state>` family — it is the master on/off for the whole icon region.
+
 ### Two on-device timer-config surfaces
 
 There are two physically distinct on-device places to configure the Timer; use the right name for the right one.
 
 - **Timer-app config mode** — long-press middle from `Idle` while the Timer app is on screen. Edits **duration only** (HH/MM/SS wheels, auto-repeat on hold, 30 s no-input auto-applies). Lives in `TimerManager` ([TimerManager.cpp:483-499](src/TimerManager.cpp#L483)).
-- **TIMER global menu** — long-press middle from any app to open the global menu, navigate to the `TIMER` top entry. Edits **buzzer mode, finished mode, and the three per-mode timing knobs**. Lives in `MenuManager` ([MenuManager.cpp](src/MenuManager.cpp)).
+- **TIMER global menu** — long-press middle from any app to open the global menu, navigate to the `TIMER` top entry. A seven-slot field walker that edits **buzzer mode, finished mode, the three per-mode timing knobs, and the two display-element toggles** (`ICON` / `BAR`, see below). Lives in `MenuManager` ([MenuManager.cpp](src/MenuManager.cpp)).
 
 ADR-0001 originally named "the on-device config buttons" as the timer's single on-device control surface — that referred to the Timer-app config mode. With the global `TIMER` menu added, on-device timer configuration now spans both surfaces; ADR-0003 documents the addition.
 

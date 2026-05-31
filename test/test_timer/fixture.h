@@ -62,6 +62,7 @@ inline void reset_all() {
     TIMER_MELODY_TICK       = "timer_tick";
     TIMER_MELODY_END        = "timer_end";
     TIMER_BAR_ENABLED       = true;
+    TIMER_ICON_ENABLED      = true;
     TIMER_BAR_COLOR         = 0;
 }
 

@@ -261,6 +261,7 @@ void loadDevSettings()
         if (doc.containsKey("timer_melody_tick")) TIMER_MELODY_TICK = doc["timer_melody_tick"].as<String>();
         if (doc.containsKey("timer_melody_end"))  TIMER_MELODY_END  = doc["timer_melody_end"].as<String>();
         if (doc.containsKey("timer_bar_enabled")) TIMER_BAR_ENABLED = doc["timer_bar_enabled"].as<bool>();
+        if (doc.containsKey("timer_icon_enabled")) TIMER_ICON_ENABLED = doc["timer_icon_enabled"].as<bool>();
         if (doc.containsKey("timer_bar_color"))   TIMER_BAR_COLOR   = doc["timer_bar_color"].as<uint32_t>();
 
         if (doc.containsKey("color_correction"))
@@ -352,6 +353,7 @@ void loadSettings()
     TIMER_MELODY_TICK       = Settings.getString("TMTICK", "timer_tick");
     TIMER_MELODY_END        = Settings.getString("TMEND",  "timer_end");
     TIMER_BAR_ENABLED       = Settings.getBool("TBAREN", true);
+    TIMER_ICON_ENABLED      = Settings.getBool("TICONEN", true);
     TIMER_BAR_COLOR         = Settings.getUInt("TBARC", 0);
     MATRIX_LAYOUT = Settings.getUInt("MAT", 0);
     SCROLL_SPEED = Settings.getUInt("SSPEED", 100);
@@ -415,6 +417,7 @@ void saveSettings()
     Settings.putString("TMTICK", TIMER_MELODY_TICK);
     Settings.putString("TMEND",  TIMER_MELODY_END);
     Settings.putBool("TBAREN", TIMER_BAR_ENABLED);
+    Settings.putBool("TICONEN", TIMER_ICON_ENABLED);
     Settings.putUInt("TBARC", TIMER_BAR_COLOR);
     Settings.putUInt("SSPEED", SCROLL_SPEED);
 #ifdef ULANZI
@@ -546,6 +549,7 @@ String TIMER_ICON_FINISHED = "";
 String TIMER_MELODY_TICK = "timer_tick";
 String TIMER_MELODY_END = "timer_end";
 bool TIMER_BAR_ENABLED = true;
+bool TIMER_ICON_ENABLED = true;
 uint32_t TIMER_BAR_COLOR = 0;
 uint8_t MAX_BRIGHTNESS = 160;
 double movementFactor = 0.5;

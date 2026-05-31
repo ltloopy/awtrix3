@@ -502,7 +502,8 @@ void TimerApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x,
 
     // What to draw is decided by the display-free view-model; this function is
     // its painter (font-dependent centering + the actual draws). See TimerView.h.
-    const TimerView view = TimerViewModel::compute(millis());
+    const bool iconEnabled = TIMER_ICON_ENABLED;
+    const TimerView view = TimerViewModel::compute(millis(), iconEnabled);
 
     // Config and Finished pin the app in the rotation while they're on screen.
     if (view.screen == TimerView::Screen::Config || view.screen == TimerView::Screen::Finished)
@@ -510,8 +511,9 @@ void TimerApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x,
 
     DisplayManager.getInstance().resetTextColor();
 
-    // Icon on every screen except Config (which centers text over the full panel).
-    if (view.screen != TimerView::Screen::Config)
+    // Icon on every screen except Config (which centers text over the full panel),
+    // and only when icon_enabled is on. view.showIcon folds both conditions in.
+    if (view.showIcon)
         drawTimerIcon(matrix, x, y, TEXTCOLOR_888, TimerManager.getState(), gifPlayer);
 
     // Text, centered within the view's region. getTextWidth (font metrics) is

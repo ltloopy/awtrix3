@@ -937,6 +937,14 @@ void test_U41_parseCommand_melody_and_bar(void) {
                       static_cast<int>(TimerManager.parseCommand("{\"bar_enabled\":true}")));
     TEST_ASSERT_TRUE(TIMER_BAR_ENABLED);
 
+    // icon_enabled bool round-trip.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"icon_enabled\":false}")));
+    TEST_ASSERT_FALSE(TIMER_ICON_ENABLED);
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"icon_enabled\":true}")));
+    TEST_ASSERT_TRUE(TIMER_ICON_ENABLED);
+
     // bar_enabled non-bool rejected.
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
                       static_cast<int>(TimerManager.parseCommand("{\"bar_enabled\":\"yes\"}")));
@@ -1070,6 +1078,44 @@ void test_U43_parseCommand_bar_enabled_strict_bool(void) {
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
                       static_cast<int>(TimerManager.parseCommand("{\"bar_enabled\":true}")));
     TEST_ASSERT_TRUE(TIMER_BAR_ENABLED);
+}
+
+// ============================================================================
+// U50 — icon_enabled is a STRICT bool (same contract as bar_enabled, U43).
+// Only JSON true/false are accepted; every other JSON shape (integer 0/1, float,
+// numeric/word string, null, object, array) is rejected with BadField and leaves
+// TIMER_ICON_ENABLED intact.
+// ============================================================================
+void test_U50_parseCommand_icon_enabled_strict_bool(void) {
+    SHOW_TIMER = true;
+
+    // Every non-bool JSON shape is rejected and leaves the prior value intact.
+    // Prior value held at `true` throughout so a sloppy coercion to false shows.
+    TIMER_ICON_ENABLED = true;
+    const char *rejected[] = {
+        "{\"icon_enabled\":1}",       // integer truthy
+        "{\"icon_enabled\":0}",       // integer falsy
+        "{\"icon_enabled\":1.0}",     // float
+        "{\"icon_enabled\":\"yes\"}", // arbitrary truthy string
+        "{\"icon_enabled\":\"true\"}",// literal bool-word string (not a JSON bool)
+        "{\"icon_enabled\":null}",    // null is not false
+        "{\"icon_enabled\":{}}",      // object
+        "{\"icon_enabled\":[]}",      // array
+    };
+    for (const char *cmd : rejected) {
+        TEST_ASSERT_EQUAL_MESSAGE(static_cast<int>(TimerCmdResult::BadField),
+                                  static_cast<int>(TimerManager.parseCommand(cmd)),
+                                  cmd);
+        TEST_ASSERT_TRUE_MESSAGE(TIMER_ICON_ENABLED, cmd);  // unchanged
+    }
+
+    // Only genuine JSON booleans apply.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"icon_enabled\":false}")));
+    TEST_ASSERT_FALSE(TIMER_ICON_ENABLED);
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"icon_enabled\":true}")));
+    TEST_ASSERT_TRUE(TIMER_ICON_ENABLED);
 }
 
 // ============================================================================
@@ -1268,6 +1314,32 @@ void test_D6_formatTimerDisplay_vs_wire_string(void) {
     TEST_ASSERT_EQUAL_STRING("1:01:01", TimerManager_::formatHMS(3661).c_str());
 }
 
+// D7 — icon_enabled gates showIcon and reflows text + bar to the full panel.
+// Icon on (default): text region 8..32, bar in the 23px region right of the icon.
+// Icon off: showIcon false, text region 0..32, bar spans the full 32px panel.
+void test_D7_view_icon_disabled_reflows_text_and_bar(void) {
+    TimerManager.setDuration(100);
+    TimerManager.start();                               // full remaining -> full bar
+
+    // Icon on (explicit true == the default).
+    TimerView on = TimerViewModel::compute(0, true);
+    TEST_ASSERT_TRUE(on.showIcon);
+    TEST_ASSERT_EQUAL_INT16(8, on.textRegionX0);
+    TEST_ASSERT_EQUAL_INT16(24, on.textRegionW);
+    TEST_ASSERT_EQUAL_UINT8(23, on.barLen);
+    TEST_ASSERT_EQUAL_INT16(9, on.barStartX);
+    TEST_ASSERT_EQUAL_INT16(32, on.barStartX + on.barLen);
+
+    // Icon off: everything reflows to the full panel, bar still right-anchored.
+    TimerView off = TimerViewModel::compute(0, false);
+    TEST_ASSERT_FALSE(off.showIcon);
+    TEST_ASSERT_EQUAL_INT16(0, off.textRegionX0);
+    TEST_ASSERT_EQUAL_INT16(32, off.textRegionW);
+    TEST_ASSERT_EQUAL_UINT8(32, off.barLen);
+    TEST_ASSERT_EQUAL_INT16(0, off.barStartX);
+    TEST_ASSERT_EQUAL_INT16(32, off.barStartX + off.barLen);
+}
+
 // ============================================================================
 // U44 — getStateJson() observation snapshot: shape + field values per state
 // Proves: the read-only GET /api/timer surface reports the live timer state,
@@ -1386,6 +1458,7 @@ int main(int, char **) {
     RUN_TEST(test_U41_parseCommand_melody_and_bar);
     RUN_TEST(test_U42_parseCommand_multi_key_validation_ordering);
     RUN_TEST(test_U43_parseCommand_bar_enabled_strict_bool);
+    RUN_TEST(test_U50_parseCommand_icon_enabled_strict_bool);
     RUN_TEST(test_U32_descriptor_table_well_formed);
     RUN_TEST(test_U33_descriptor_ids_unique);
     RUN_TEST(test_U34_descriptor_type_specific_fields);
@@ -1396,6 +1469,7 @@ int main(int, char **) {
     RUN_TEST(test_D4_view_bar_geometry_right_anchored);
     RUN_TEST(test_D5_view_config_screen);
     RUN_TEST(test_D6_formatTimerDisplay_vs_wire_string);
+    RUN_TEST(test_D7_view_icon_disabled_reflows_text_and_bar);
     RUN_TEST(test_U44_getStateJson_idle_snapshot);
     RUN_TEST(test_U45_getStateJson_running_is_wallclock_fresh);
     RUN_TEST(test_U46_getStateJson_paused_frozen);
