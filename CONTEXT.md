@@ -49,3 +49,12 @@ There are two physically distinct on-device places to configure the Timer; use t
 - **TIMER global menu** — long-press middle from any app to open the global menu, navigate to the `TIMER` top entry. Edits **buzzer mode, finished mode, and the three per-mode timing knobs**. Lives in `MenuManager` ([MenuManager.cpp](src/MenuManager.cpp)).
 
 ADR-0001 originally named "the on-device config buttons" as the timer's single on-device control surface — that referred to the Timer-app config mode. With the global `TIMER` menu added, on-device timer configuration now spans both surfaces; ADR-0003 documents the addition.
+
+### Control surface vs. observation surface
+
+Two distinct kinds of Timer interface; do not conflate them.
+
+- **Control surface** — *writes* timer state/config. The three that must stay in parity (ADR-0001): on-device config buttons, `POST /api/timer`, and the `{prefix}/timer` MQTT topic (plus the HA `timer_dur` text entity as the discovery face of the MQTT one). Their shared obligation is the **atomic-reject validation contract**: an invalid command is rejected whole, nothing applied.
+- **Observation surface** — *reads* timer state without mutating it. Today: the Home Assistant MQTT discovery sensors (`{id}_timer_state` / `{id}_timer_rem`, etc.) and `GET /api/timer`. Their obligation is **parity of reported values**: every observation surface reports the same live values (same `state` vocabulary, same remaining-seconds basis) the others do. They carry *none* of the validation contract — there is no input to validate.
+
+_Avoid_: calling `GET /api/timer` a "control surface" or implying it participates in atomic-reject. It observes; it never writes.
