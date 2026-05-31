@@ -58,6 +58,7 @@ void TimerManager_::setup()
     if (TIMER_MAX_DURATION > 0 && durationSec > TIMER_MAX_DURATION) durationSec = TIMER_MAX_DURATION;
     remainingSec = durationSec;
     state = TimerState::Idle;
+    inConfig = false;   // a (re)boot is never mid-edit; complete the runtime reset
 
     loadMelodiesCached();
 }
@@ -190,6 +191,46 @@ const char *TimerManager_::getStateString() const
         case TimerState::Finished: return "finished";
     }
     return "idle";
+}
+
+const char *TimerManager_::buzzerModeString() const
+{
+    switch (buzzerMode)
+    {
+        case BuzzerMode::Off:       return "off";
+        case BuzzerMode::End:       return "end";
+        case BuzzerMode::Countdown: return "countdown";
+    }
+    return "end";
+}
+
+const char *TimerManager_::finishedModeString() const
+{
+    switch (finishedMode)
+    {
+        case FinishedMode::AutoClear: return "auto-clear";
+        case FinishedMode::Hold:      return "hold";
+        case FinishedMode::ReAlert:   return "re-alert";
+    }
+    return "auto-clear";
+}
+
+String TimerManager_::getStateJson() const
+{
+    StaticJsonDocument<512> doc;
+    uint32_t remaining = computeCurrentRemaining();
+    doc["state"]         = getStateString();
+    doc["enabled"]       = (bool)SHOW_TIMER;
+    doc["remaining"]     = remaining;
+    doc["remaining_str"] = formatHMS(remaining);
+    doc["duration"]      = durationSec;
+    doc["duration_str"]  = formatHMS(durationSec);
+    doc["buzzer"]        = buzzerModeString();
+    doc["finished"]      = finishedModeString();
+
+    String out;
+    serializeJson(doc, out);
+    return out;
 }
 
 void TimerManager_::secondsToHMS(uint32_t sec, uint32_t &h, uint32_t &m, uint32_t &s)

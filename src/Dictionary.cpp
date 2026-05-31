@@ -141,7 +141,6 @@ const char HAipAddrRID[] PROGMEM = {"%s_ip_address"};
 const char HAipAddrName[] PROGMEM = {"IP Address"};
 const char HAipAddrIcon[] PROGMEM = {"mdi:wifi"};
 
-// Timer HA entity strings moved to src/TimerHa.cpp (Timer HA Presence table).
 
 
 

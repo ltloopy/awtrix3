@@ -127,6 +127,9 @@ void addHandler()
                            case TimerCmdResult::BadField: mws.webserver->send(400, F("text/plain"), F("InvalidValue")); break;
                        }
                    });
+    // Observation surface (read-only): always 200; `enabled` carries SHOW_TIMER.
+    mws.addHandler("/api/timer", HTTP_GET, []()
+                   { mws.webserver->send(200, F("application/json"), TimerManager.getStateJson().c_str()); });
     mws.addHandler("/api/nextapp", HTTP_ANY, []()
                    { DisplayManager.nextApp(); mws.webserver->send(200,F("text/plain"),F("OK")); });
     mws.addHandler("/fullscreen", HTTP_GET, []()

@@ -61,6 +61,12 @@ private:
 
     static String validateIconName(const String &name);
 
+    // Canonical output spellings for the timer enums, co-located with
+    // getStateString() so the one true spelling of each enum lives in one place.
+    // (The command parser additionally tolerates non-hyphen aliases on input.)
+    const char *buzzerModeString() const;
+    const char *finishedModeString() const;
+
 public:
     static TimerManager_ &getInstance();
     void setup();
@@ -124,6 +130,11 @@ public:
     const String &getIconForState(TimerState s) const;
 
     const char *getStateString() const;
+
+    // Live read-only snapshot for the GET /api/timer observation surface.
+    // Reports computeCurrentRemaining() (wall-clock fresh), not the throttled
+    // cached value. See docs/api.md and CONTEXT.md "observation surface".
+    String getStateJson() const;
 };
 
 extern TimerManager_ &TimerManager;

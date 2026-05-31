@@ -5,6 +5,7 @@
 
 #include <unity.h>
 #include <ArduinoFake.h>
+#include <ArduinoJson.h>
 #include <string.h>
 
 #include "fixture.h"
@@ -1267,6 +1268,83 @@ void test_D6_formatTimerDisplay_vs_wire_string(void) {
     TEST_ASSERT_EQUAL_STRING("1:01:01", TimerManager_::formatHMS(3661).c_str());
 }
 
+// ============================================================================
+// U44 — getStateJson() observation snapshot: shape + field values per state
+// Proves: the read-only GET /api/timer surface reports the live timer state,
+// using computeCurrentRemaining() (not the throttled cache), with the canonical
+// enum spellings and stable JSON shape.
+// ============================================================================
+void test_U44_getStateJson_idle_snapshot(void) {
+    TimerManager.setDuration(300);
+    StaticJsonDocument<512> doc;
+    TEST_ASSERT_FALSE(deserializeJson(doc, TimerManager.getStateJson()));
+    TEST_ASSERT_EQUAL_STRING("idle", doc["state"]);
+    TEST_ASSERT_TRUE(doc["enabled"].as<bool>());
+    TEST_ASSERT_EQUAL_UINT32(300, doc["remaining"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_STRING("5:00", doc["remaining_str"]);
+    TEST_ASSERT_EQUAL_UINT32(300, doc["duration"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_STRING("5:00", doc["duration_str"]);
+    // Defaults: buzzer=end, finished=auto-clear.
+    TEST_ASSERT_EQUAL_STRING("end", doc["buzzer"]);
+    TEST_ASSERT_EQUAL_STRING("auto-clear", doc["finished"]);
+}
+
+void test_U45_getStateJson_running_is_wallclock_fresh(void) {
+    TimerManager.setDuration(300);
+    TimerManager.start();
+    fixture::advance(126000);   // 126 s elapsed; NO tick() — proves live compute,
+                                // not the cached remainingSec the publish path uses.
+    StaticJsonDocument<512> doc;
+    TEST_ASSERT_FALSE(deserializeJson(doc, TimerManager.getStateJson()));
+    TEST_ASSERT_EQUAL_STRING("running", doc["state"]);
+    TEST_ASSERT_EQUAL_UINT32(174, doc["remaining"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_STRING("2:54", doc["remaining_str"]);
+}
+
+void test_U46_getStateJson_paused_frozen(void) {
+    TimerManager.setDuration(300);
+    TimerManager.start();
+    fixture::advance(100000);
+    TimerManager.pause();
+    uint32_t frozen = TimerManager.getRemaining();
+    fixture::advance(50000);    // time passes while paused; remaining must not move.
+    StaticJsonDocument<512> doc;
+    TEST_ASSERT_FALSE(deserializeJson(doc, TimerManager.getStateJson()));
+    TEST_ASSERT_EQUAL_STRING("paused", doc["state"]);
+    TEST_ASSERT_EQUAL_UINT32(frozen, doc["remaining"].as<uint32_t>());
+}
+
+void test_U47_getStateJson_finished_zero(void) {
+    TimerManager.setDuration(5);
+    TimerManager.start();
+    fixture::advance(5000);
+    TimerManager.tick();
+    StaticJsonDocument<512> doc;
+    TEST_ASSERT_FALSE(deserializeJson(doc, TimerManager.getStateJson()));
+    TEST_ASSERT_EQUAL_STRING("finished", doc["state"]);
+    TEST_ASSERT_EQUAL_UINT32(0, doc["remaining"].as<uint32_t>());
+}
+
+void test_U48_getStateJson_disabled_still_200_shape(void) {
+    SHOW_TIMER = false;
+    StaticJsonDocument<512> doc;
+    TEST_ASSERT_FALSE(deserializeJson(doc, TimerManager.getStateJson()));
+    TEST_ASSERT_FALSE(doc["enabled"].as<bool>());
+    TEST_ASSERT_EQUAL_STRING("idle", doc["state"]);   // disabled timer is forced Idle
+}
+
+void test_U49_getStateJson_enum_canonical_spellings(void) {
+    TimerManager.parseCommand("{\"buzzer\":\"countdown\",\"finished\":\"re-alert\"}");
+    StaticJsonDocument<512> doc;
+    TEST_ASSERT_FALSE(deserializeJson(doc, TimerManager.getStateJson()));
+    TEST_ASSERT_EQUAL_STRING("countdown", doc["buzzer"]);
+    TEST_ASSERT_EQUAL_STRING("re-alert", doc["finished"]);
+    // The parser also accepts the non-hyphen alias on input; output stays canonical.
+    TimerManager.parseCommand("{\"finished\":\"autoclear\"}");
+    TEST_ASSERT_FALSE(deserializeJson(doc, TimerManager.getStateJson()));
+    TEST_ASSERT_EQUAL_STRING("auto-clear", doc["finished"]);
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
@@ -1318,5 +1396,11 @@ int main(int, char **) {
     RUN_TEST(test_D4_view_bar_geometry_right_anchored);
     RUN_TEST(test_D5_view_config_screen);
     RUN_TEST(test_D6_formatTimerDisplay_vs_wire_string);
+    RUN_TEST(test_U44_getStateJson_idle_snapshot);
+    RUN_TEST(test_U45_getStateJson_running_is_wallclock_fresh);
+    RUN_TEST(test_U46_getStateJson_paused_frozen);
+    RUN_TEST(test_U47_getStateJson_finished_zero);
+    RUN_TEST(test_U48_getStateJson_disabled_still_200_shape);
+    RUN_TEST(test_U49_getStateJson_enum_canonical_spellings);
     return UNITY_END();
 }

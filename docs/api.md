@@ -367,6 +367,7 @@ Control the built-in Timer app. See the [Timer app overview](https://blueforcer.
 | MQTT Topic       | HTTP URL                  | Payload/Body | HTTP Method |
 | ---------------- | ------------------------- | ------------ | ----------- |
 | `[PREFIX]/timer` | `http://[IP]/api/timer`   | JSON (see below) | POST    |
+| –                | `http://[IP]/api/timer`   | – (returns JSON snapshot, see [State observation](#state-observation)) | GET |
 
 All JSON properties are optional. When multiple are sent together, property setters apply first and then `action` runs — so `{"duration":600,"action":"start"}` starts a fresh 10-minute timer in one request.
 
@@ -441,7 +442,37 @@ Clear an override so the slot falls back to the Idle icon:
 
 #### State observation
 
-There is currently no native read endpoint for the timer's `state`/`remaining` values. When `HA_DISCOVERY` is enabled, Home Assistant receives live updates of all timer properties via MQTT discovery sensors — that is the supported path for observing the timer remotely.
+`GET http://[IP]/api/timer` returns a read-only JSON snapshot of the live timer. This is an **observation** endpoint — it never mutates state and takes no body. It always responds `200 OK`; there is no `409` when the timer is disabled (the `enabled` field carries that bit instead).
+
+```json
+{
+  "state": "running",
+  "enabled": true,
+  "remaining": 174,
+  "remaining_str": "2:54",
+  "duration": 300,
+  "duration_str": "5:00",
+  "buzzer": "end",
+  "finished": "auto-clear"
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `state` | string | `idle` / `running` / `paused` / `finished`. |
+| `enabled` | bool | Mirrors the `TIMER` master enable (`SHOW_TIMER`). When `false` the timer is forced to `idle`; the snapshot is still returned. |
+| `remaining` | integer | Seconds remaining, computed live at request time (wall-clock accurate). Frozen while `paused`; `0` while `finished`. |
+| `remaining_str` | string | `remaining` as a trimmed clock string (same format as `duration_str`, e.g. `174` → `2:54`). |
+| `duration` | integer | Configured duration in seconds. |
+| `duration_str` | string | `duration` as a trimmed clock string (`300` → `5:00`, hours dropped when zero). |
+| `buzzer` | string | Buzzer mode: `off` / `end` / `countdown`. |
+| `finished` | string | Finished mode: `auto-clear` / `hold` / `re-alert`. |
+
+The `buzzer` / `finished` strings are the **canonical output spellings** (hyphenated, lowercase). The `POST` command parser additionally tolerates aliases on input (e.g. `autoclear`, `realert`), but the read endpoint always reports the canonical form.
+
+> **Note on freshness vs. Home Assistant:** `remaining` here is computed at the moment of the request, so during `running` it can read a second or two lower than the HA `{id}_timer_rem` sensor, which is push-throttled to `remaining_publish_interval` (default 1 s). This is expected — the polled HTTP read is simply fresher than the throttled push sensor; the two are not in disagreement.
+
+When `HA_DISCOVERY` is enabled, Home Assistant also receives live updates of all timer properties via MQTT discovery sensors — an alternative path for observing the timer remotely.
 
 The current icon configuration is also published as a retained JSON message to `[PREFIX]/timer/icons` whenever it changes (and on MQTT connect). Subscribe to that topic to read back current icon slots without HA. Payload shape: `{"idle": "...", "running": "...", "paused": "...", "finished": "..."}`.
 
