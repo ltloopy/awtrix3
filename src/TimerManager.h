@@ -2,6 +2,7 @@
 #define TimerManager_h
 
 #include <Arduino.h>
+#include <ArduinoJson.h>
 
 enum class TimerState : uint8_t { Idle = 0, Running = 1, Paused = 2, Finished = 3 };
 enum class BuzzerMode : uint8_t { Off = 0, End = 1, Countdown = 2 };
@@ -46,6 +47,25 @@ private:
 
     bool _suspendPersist = false;
     bool _dirty          = false;
+
+    // -- Propagation surface (device-to-device timer sync) --
+    // While true, an inbound sync packet is being applied via parseCommand; the
+    // broadcast* methods early-return so a received command is never re-emitted
+    // (one-hop topology). See CONTEXT.md "Propagation surface".
+    bool     _remoteApply = false;
+    uint32_t _syncSeq     = 0;     // per-command sequence; only needs uniqueness within the dedup window
+
+    // Bounded recently-seen (src,seq) cache so the 3x redundant send is applied
+    // once. TTL-based, so a sender reboot (seq restart) self-clears by ageing out.
+    struct SyncSeen { String src; uint32_t seq = 0; unsigned long atMs = 0; };
+    static constexpr uint8_t kSyncSeenMax = 8;
+    SyncSeen _syncSeen[kSyncSeenMax];
+    uint8_t  _syncSeenIdx = 0;
+    bool syncSeenRecently(const String &src, uint32_t seq, unsigned long nowMs);
+
+    void buildConfigSnapshot(JsonDocument &doc) const;   // config keys only; no action/duration/sync_*
+    void addSyncEnvelope(JsonObject &sync);              // src/seq/tgt
+    bool syncTargetsMe(JsonVariantConst tgt) const;      // does _sync.tgt cover this clock's uniqueID?
 
     uint32_t computeCurrentRemaining() const;
     void enterRunning();
@@ -104,6 +124,17 @@ public:
     void publishIcons();
 
     TimerCmdResult parseCommand(const char *json);
+
+    // -- Propagation surface --
+    // Emit one UDP broadcast mirroring a locally-accepted action to peers. No-ops
+    // when sync is off (empty target list) or while applying an inbound packet
+    // (_remoteApply). Run-state and config travel on separate packets; `action`
+    // may be nullptr for a duration-only edit. See docs/adr/0006.
+    void broadcastRunState(const char *action);
+    void broadcastConfig();
+    // Validate, gate (echo/follow/target/dedup), then apply an inbound sync packet
+    // through parseCommand under the _remoteApply guard.
+    void applySyncCommand(const char *json);
 
     void onShowTimerChange(bool prev, bool now);
 

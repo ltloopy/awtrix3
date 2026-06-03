@@ -569,6 +569,7 @@ void MenuManager_::selectButtonLong()
             break;
         case TimerConfigMenu:
             saveSettings();
+            TimerManager.broadcastConfig();   // propagate the committed timer config to peers
             break;
         default:
             break;

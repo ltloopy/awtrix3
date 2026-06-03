@@ -280,6 +280,7 @@ the existing web UI — nothing about icons is bundled in firmware.
 | `TIMER_MAX_DURATION`, `TIMER_STEP`, `TIMER_PUBLISH_INTERVAL`, `TIMER_CONFIG_TIMEOUT` (the four ADR-0004 behavior parameters) | Yes (NVS namespace `"awtrix"`, keys `TMAXD` / `TSTEP` / `TPUBI` / `TCFGT`), written by `parseCommand` whenever any of these keys is supplied on `{prefix}/timer`. Same dev.json-overrides-NVS rule applies. |
 | `TIMER_MELODY_TICK`, `TIMER_MELODY_END`, `TIMER_BAR_ENABLED`, `TIMER_BAR_COLOR` (the four ADR-0004 new options) | Yes (NVS namespace `"awtrix"`, keys `TMTICK` / `TMEND` / `TBAREN` / `TBARC`). Same dev.json-overrides-NVS rule applies. |
 | `TIMER_ICON_ENABLED` (ADR-0005) | Yes (NVS namespace `"awtrix"`, key `TICONEN`), written by `parseCommand` and by the on-device `TIMER` menu's `ICON` slot long-press save. Same dev.json-overrides-NVS rule applies. |
+| `TIMER_SYNC_FOLLOW`, `TIMER_SYNC_TARGETS` (ADR-0006, multi-device sync) | Yes (NVS namespace `"awtrix"`, keys `TSYNF` / `TSYNT`), written by `parseCommand`. Same dev.json-overrides-NVS rule applies. These are **local identity** and are never propagated to peers. |
 | Runtime state (Running / Paused / Finished, remaining seconds, elapsed time) | **No.** A reboot mid-run returns the device to `Idle` with the saved duration. This is intentional — the device has no RTC backup and resuming a timer with a wrong elapsed-time estimate would be worse than restarting. |
 
 ---
@@ -321,6 +322,56 @@ key still overrides NVS on every boot.
 | `TIMER_BAR_ENABLED` | `true` | When `false`, the Running/Paused progress bar is hidden. |
 | `TIMER_ICON_ENABLED` | `true` | When `false`, the timer icon is hidden and the time text + bar reflow to the full panel (ADR-0005). |
 | `TIMER_BAR_COLOR` | `0` (= `TEXTCOLOR_888`) | Hex color for the progress bar. `0` follows the global text color. |
+| `TIMER_SYNC_FOLLOW` | `false` | When `true`, this clock applies inbound timer-sync packets it is targeted by (the follow consent gate). See **Multi-device sync** below. |
+| `TIMER_SYNC_TARGETS` | `""` | Whom this clock commands when *it* acts: `""` (sync off), `all`, or a comma list of peer device IDs (e.g. `awtrix_ab12,awtrix_cd34`). See **Multi-device sync** below. |
+
+---
+
+## Multi-device sync (propagation surface)
+
+Two or more clocks on the same LAN can mirror each other's timer — when one
+starts/pauses/resets, or its configuration is edited, the change propagates to a
+chosen set of peers (or `all`). This is the **propagation surface** (see
+[`CONTEXT.md`](../CONTEXT.md)); it is **broker-free** (no MQTT broker required) and
+rides a dedicated **UDP broadcast** on **port 4212**. Full rationale in
+[ADR-0006](adr/0006-timer-multi-device-sync.md).
+
+### Roles (two independent axes)
+
+| Setting | Axis | Meaning |
+| --- | --- | --- |
+| `sync_targets` | **send** | Whom this clock commands on a *local* action. `""` = send nothing; `all`; or a comma list of peer `uniqueID`s. |
+| `sync_follow` | **receive** | Whether this clock *obeys* inbound sync it is targeted by (consent gate; default off). |
+
+Compose them: a **leader** (targets set, follow off) commands but never obeys; a
+**follower** (follow on, no targets) obeys but never commands; a **peer/mirror** (both)
+does both; **standalone** (neither) is sync off. For "everyone mirrors everyone," set
+every clock to `sync_targets=all` and `sync_follow=true`.
+
+### What propagates, and when
+
+- **Run-state** — a `start` / `pause` / `reset` (and on-device duration edits) propagate
+  the action and, for a start, the `duration`. `duration` is run-state: a bare start
+  never carries config, so it cannot clobber a peer's settings.
+- **Config** — a deliberate config edit (buzzer, finished, the timing knobs, behavior
+  parameters, bar/icon toggles, icon images, melodies) propagates a **full config
+  snapshot**; the group ends up configured identically (last-config-writer-wins).
+- **Not propagated:** `sync_follow` / `sync_targets` (each clock's own identity), and the
+  live `remaining` (receivers snapshot their own; a missed packet self-heals on the next
+  start/reset).
+
+### Behavior notes
+
+- **Targeting** is by stable `uniqueID` (the same id shown in the web UI / mDNS), not
+  hostname. The `all` keyword spares you from listing ids.
+- **One-hop:** an applied inbound command is never re-broadcast. `all` reaches everyone
+  directly; partial target lists do **not** chain.
+- **Delivery** is best-effort: each packet is sent 3× and receivers de-duplicate by
+  `(src, seq)`, so a single dropped frame rarely desyncs a clock.
+- A clock with `SHOW_TIMER = false` ignores inbound sync (its `parseCommand` is disabled).
+- Reachable as `sync_follow` / `sync_targets` on `POST /api/timer` and `{prefix}/timer`
+  MQTT, and as `timer_sync_follow` / `timer_sync_targets` in `dev.json`. No on-device
+  menu, no HA entity (consistent with the other ADR-0004/0005 config flags).
 
 ---
 

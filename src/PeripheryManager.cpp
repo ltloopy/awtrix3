@@ -199,12 +199,13 @@ void select_button_pressed()
             if (ts == TimerState::Finished)
             {
                 TimerManager.reset();
+                TimerManager.broadcastRunState("reset");
                 return;
             }
             if (CURRENT_APP == "Timer")
             {
-                if (ts == TimerState::Running) TimerManager.pause();
-                else                            TimerManager.start();
+                if (ts == TimerState::Running) { TimerManager.pause(); TimerManager.broadcastRunState("pause"); }
+                else                           { TimerManager.start(); TimerManager.broadcastRunState("start"); }
                 return;
             }
         }
@@ -253,6 +254,7 @@ void select_button_pressed_long()
             if (ts == TimerState::Finished)
             {
                 TimerManager.start();
+                TimerManager.broadcastRunState("start");
                 return;
             }
             if (CURRENT_APP == "Timer" && ts == TimerState::Idle)
@@ -263,6 +265,7 @@ void select_button_pressed_long()
             if (CURRENT_APP == "Timer")
             {
                 TimerManager.reset();
+                TimerManager.broadcastRunState("reset");
                 return;
             }
         }

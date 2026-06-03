@@ -4,12 +4,16 @@
 #include "DisplayManager.h"
 #include "MQTTManager.h"
 #include "MenuManager.h"
+#include "ServerManager.h"
 #include <Preferences.h>
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 
 namespace {
-    constexpr uint16_t kTimerCmdJsonSize     = 512;
+    // Sized to hold the full config snapshot (~18 keys) plus the _sync envelope on
+    // the propagation surface, with headroom for ArduinoJson's larger 64-bit slots
+    // (host tests). The HTTP/MQTT control surfaces never approach it.
+    constexpr uint16_t kTimerCmdJsonSize     = 2048;
     constexpr uint8_t  kIconNameMaxLen       = 32;
     constexpr uint32_t kConfigHHMax          = 99UL * 3600UL;
     constexpr unsigned long kBtnLongPressMs  = 500;
@@ -17,6 +21,33 @@ namespace {
 
     const char *FALLBACK_END_RTTTL  = "timer:d=4,o=5,b=120:c,8p,c,8p,c";
     const char *FALLBACK_TICK_RTTTL = "tick:d=16,o=6,b=200:c";
+
+    // sync_targets accepts "" (off), "all", or a comma list of device-id tokens
+    // ([A-Za-z0-9_-], 1..32 each). Same atomic-reject discipline as the other keys.
+    bool isValidSyncTargets(const String &s)
+    {
+        String t = s; t.trim();
+        if (t.length() == 0 || t == "all") return true;
+        int start = 0;
+        const int n = t.length();
+        while (start <= n)
+        {
+            int comma = t.indexOf(',', start);
+            if (comma < 0) comma = n;
+            String tok = t.substring(start, comma); tok.trim();
+            if (tok.length() == 0 || tok.length() > 32) return false;
+            for (size_t i = 0; i < tok.length(); ++i)
+            {
+                char c = tok[i];
+                bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') ||
+                          (c >= 'A' && c <= 'Z') || c == '_' || c == '-';
+                if (!ok) return false;
+            }
+            if (comma == n) break;
+            start = comma + 1;
+        }
+        return true;
+    }
 }
 
 static Preferences timerPrefs;
@@ -361,6 +392,7 @@ void TimerManager_::exitConfigMode()
     inConfig = false;
     setDuration(total);
     DisplayManager.drainDeferredNotifications();
+    broadcastRunState(nullptr);   // duration is run-state; propagate the new length
 }
 
 void TimerManager_::configCycleField()
@@ -798,6 +830,27 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
         }
     }
 
+    // sync_follow: strict bool. sync_targets: "", "all", or comma list of device ids.
+    // These configure this clock's own role on the propagation surface (local identity)
+    // and are deliberately NOT propagated — excluded from the config snapshot.
+    bool haveSyncFollow  = doc.containsKey("sync_follow");
+    bool haveSyncTargets = doc.containsKey("sync_targets");
+    bool   syncFollow    = TIMER_SYNC_FOLLOW;
+    String syncTargets   = TIMER_SYNC_TARGETS;
+    if (haveSyncFollow)
+    {
+        JsonVariant v = doc["sync_follow"];
+        if (!v.is<bool>()) return TimerCmdResult::BadField;
+        syncFollow = v.as<bool>();
+    }
+    if (haveSyncTargets)
+    {
+        JsonVariant v = doc["sync_targets"];
+        if (!(v.is<const char*>() || v.is<String>())) return TimerCmdResult::BadField;
+        syncTargets = v.as<String>();
+        if (!isValidSyncTargets(syncTargets)) return TimerCmdResult::BadField;
+    }
+
     bool haveAction = doc.containsKey("action");
     if (haveAction && !isValidAction(doc["action"].as<String>())) return TimerCmdResult::BadField;
 
@@ -845,6 +898,8 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     if (haveBarEnabled)       { TIMER_BAR_ENABLED       = barEnabled;       persistedKeyChanged = true; }
     if (haveIconEnabled)      { TIMER_ICON_ENABLED      = iconEnabled;      persistedKeyChanged = true; }
     if (haveBarColor)         { TIMER_BAR_COLOR         = barColor;         persistedKeyChanged = true; }
+    if (haveSyncFollow)       { TIMER_SYNC_FOLLOW       = syncFollow;       persistedKeyChanged = true; }
+    if (haveSyncTargets)      { TIMER_SYNC_TARGETS      = syncTargets;      persistedKeyChanged = true; }
 
     bool melodyChanged = false;
     if (doc.containsKey("melody_tick"))
@@ -882,6 +937,38 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
         else if (a == "reset") reset();
     }
 
+    // Propagation surface (one-hop): mirror this locally-accepted command to peers.
+    // The broadcast* methods no-op when _remoteApply is set (inbound packet) or sync
+    // is off. Run-state (action/duration) and config travel on separate packets; a
+    // command touching both classes emits one of each. sync_follow/sync_targets are
+    // local identity and intentionally trigger neither.
+    if (!_remoteApply)
+    {
+        bool runStateChanged = haveAction || haveDuration;
+        bool configChanged =
+            haveBuzzer || haveFinished || haveFinishedHold || haveRealertInterval ||
+            haveCountdownSeconds || haveMaxDuration || haveButtonStep || havePublishInterval ||
+            haveAppConfigTimeout || haveBarEnabled || haveIconEnabled || haveBarColor ||
+            doc.containsKey("icon_idle") || doc.containsKey("icon_running") ||
+            doc.containsKey("icon_paused") || doc.containsKey("icon_finished") ||
+            doc.containsKey("melody_tick") || doc.containsKey("melody_end");
+
+        if (configChanged) broadcastConfig();
+        if (runStateChanged)
+        {
+            if (haveAction)
+            {
+                String a = doc["action"].as<String>();
+                a.toLowerCase();
+                broadcastRunState(a.c_str());
+            }
+            else
+            {
+                broadcastRunState(nullptr);   // duration-only edit
+            }
+        }
+    }
+
     return TimerCmdResult::Ok;
 }
 
@@ -895,3 +982,139 @@ void TimerManager_::publishRemaining()    { MQTTManager.publishTimerRemaining(re
 void TimerManager_::publishDuration()     { MQTTManager.publishTimerDuration(durationSec); }
 void TimerManager_::publishBuzzerMode()   { MQTTManager.publishTimerBuzzer((uint8_t)buzzerMode); }
 void TimerManager_::publishFinishedMode() { MQTTManager.publishTimerFinished((uint8_t)finishedMode); }
+
+// ---------------------------------------------------------------------------
+// Propagation surface (device-to-device timer sync). See CONTEXT.md and
+// docs/adr/0006-timer-multi-device-sync.md.
+// ---------------------------------------------------------------------------
+
+void TimerManager_::addSyncEnvelope(JsonObject &sync)
+{
+    sync["src"] = uniqueID;
+    sync["seq"] = ++_syncSeq;
+    String t = TIMER_SYNC_TARGETS; t.trim();
+    if (t == "all") { sync["tgt"] = "all"; return; }
+    JsonArray arr = sync.createNestedArray("tgt");
+    int start = 0;
+    const int n = t.length();
+    while (start < n)
+    {
+        int comma = t.indexOf(',', start);
+        if (comma < 0) comma = n;
+        String id = t.substring(start, comma); id.trim();
+        if (id.length() > 0) arr.add(id);
+        start = comma + 1;
+    }
+}
+
+void TimerManager_::buildConfigSnapshot(JsonDocument &doc) const
+{
+    // Config block only — never action/duration (run-state) or sync_* (local identity).
+    doc["buzzer"]                     = buzzerModeString();
+    doc["finished"]                   = finishedModeString();
+    doc["finished_hold"]              = TIMER_FINISHED_HOLD;
+    doc["realert_interval"]           = TIMER_REALERT_INTERVAL;
+    doc["countdown_seconds"]          = TIMER_COUNTDOWN_SECONDS;
+    doc["max_duration"]               = TIMER_MAX_DURATION;
+    doc["button_step"]                = TIMER_STEP;
+    doc["remaining_publish_interval"] = TIMER_PUBLISH_INTERVAL;
+    doc["app_config_timeout"]         = TIMER_CONFIG_TIMEOUT;
+    doc["melody_tick"]                = TIMER_MELODY_TICK;
+    doc["melody_end"]                 = TIMER_MELODY_END;
+    doc["bar_enabled"]                = TIMER_BAR_ENABLED;
+    doc["bar_color"]                  = TIMER_BAR_COLOR;
+    doc["icon_enabled"]               = TIMER_ICON_ENABLED;
+    doc["icon_idle"]                  = iconIdle;
+    doc["icon_running"]               = iconRunning;
+    doc["icon_paused"]                = iconPaused;
+    doc["icon_finished"]              = iconFinished;
+}
+
+void TimerManager_::broadcastRunState(const char *action)
+{
+    if (_remoteApply) return;                       // one-hop: never re-emit an applied remote command
+    if (TIMER_SYNC_TARGETS.length() == 0) return;   // sync off
+
+    StaticJsonDocument<256> doc;
+    JsonObject sync = doc.createNestedObject("_sync");
+    addSyncEnvelope(sync);
+    if (action) doc["action"] = action;
+    // duration is run-state: it rides with a start (defines the countdown) and with a
+    // bare duration edit (action == nullptr). pause/reset need only the action.
+    bool withDuration = (action == nullptr) || (strcasecmp(action, "start") == 0);
+    if (withDuration) doc["duration"] = durationSec;
+
+    String out; serializeJson(doc, out);
+    ServerManager.sendTimerSync(out);
+}
+
+void TimerManager_::broadcastConfig()
+{
+    if (_remoteApply) return;
+    if (TIMER_SYNC_TARGETS.length() == 0) return;
+
+    DynamicJsonDocument doc(kTimerCmdJsonSize);
+    JsonObject sync = doc.createNestedObject("_sync");
+    addSyncEnvelope(sync);
+    buildConfigSnapshot(doc);
+
+    String out; serializeJson(doc, out);
+    ServerManager.sendTimerSync(out);
+}
+
+bool TimerManager_::syncTargetsMe(JsonVariantConst tgt) const
+{
+    if (tgt.is<const char *>())
+    {
+        String s = tgt.as<String>(); s.trim();
+        return s == "all";
+    }
+    if (tgt.is<JsonArrayConst>())
+    {
+        for (JsonVariantConst v : tgt.as<JsonArrayConst>())
+        {
+            String id = v.as<String>(); id.trim();
+            if (id == uniqueID) return true;
+        }
+    }
+    return false;
+}
+
+bool TimerManager_::syncSeenRecently(const String &src, uint32_t seq, unsigned long nowMs)
+{
+    const unsigned long kTtlMs = 2000;
+    for (uint8_t i = 0; i < kSyncSeenMax; ++i)
+    {
+        if (_syncSeen[i].atMs != 0 && (nowMs - _syncSeen[i].atMs) <= kTtlMs
+            && _syncSeen[i].seq == seq && _syncSeen[i].src == src)
+            return true;
+    }
+    _syncSeen[_syncSeenIdx].src  = src;
+    _syncSeen[_syncSeenIdx].seq  = seq;
+    _syncSeen[_syncSeenIdx].atMs = (nowMs == 0) ? 1 : nowMs;   // 0 doubles as "empty slot"
+    _syncSeenIdx = (uint8_t)((_syncSeenIdx + 1) % kSyncSeenMax);
+    return false;
+}
+
+void TimerManager_::applySyncCommand(const char *json)
+{
+    if (json == nullptr || json[0] == '\0') return;
+
+    DynamicJsonDocument doc(kTimerCmdJsonSize);
+    if (deserializeJson(doc, json)) return;
+
+    JsonVariantConst sync = doc["_sync"];
+    if (sync.isNull()) return;                       // not a sync packet
+
+    String src = sync["src"].as<String>();
+    if (src.length() == 0 || src == uniqueID) return; // malformed / own echo
+    if (!TIMER_SYNC_FOLLOW) return;                   // consent gate
+    if (!syncTargetsMe(sync["tgt"])) return;          // not addressed to this clock
+    if (syncSeenRecently(src, sync["seq"].as<uint32_t>(), millis())) return; // redundant copy
+
+    // Re-enter the local control surface. The send-path _remoteApply guard prevents
+    // this from re-broadcasting (one-hop). parseCommand ignores the _sync envelope.
+    _remoteApply = true;
+    parseCommand(json);
+    _remoteApply = false;
+}

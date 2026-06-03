@@ -28,6 +28,7 @@
 #include "DisplayManager.h"
 #include "MQTTManager.h"
 #include "MenuManager.h"
+#include "ServerManager.h"
 
 #endif  // __cplusplus
 

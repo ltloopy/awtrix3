@@ -67,3 +67,59 @@ Two distinct kinds of Timer interface; do not conflate them.
 - **Observation surface** — *reads* timer state without mutating it. Today: the Home Assistant MQTT discovery sensors (`{id}_timer_state` / `{id}_timer_rem`, etc.) and `GET /api/timer`. Their obligation is **parity of reported values**: every observation surface reports the same live values (same `state` vocabulary, same remaining-seconds basis) the others do. They carry *none* of the validation contract — there is no input to validate.
 
 _Avoid_: calling `GET /api/timer` a "control surface" or implying it participates in atomic-reject. It observes; it never writes.
+
+### Propagation surface
+
+A third kind of Timer interface, distinct from both control and observation. The
+**propagation surface** is the device-to-device sync channel: when a clock takes a
+local control-surface action, it relays that action to other clocks over the network,
+and a receiving clock re-applies it locally.
+
+It is **not** a fourth control surface. The "three control surfaces that must stay in
+parity" (ADR-0001) are the *user-facing* write paths. The propagation surface carries a
+clock's already-formed command to a peer, where it **re-enters the local control
+surface** (via the same `parseCommand` path) and is subject to the identical
+atomic-reject contract. So a propagated command is validated exactly as a local one;
+the propagation surface adds no new validation contract of its own — it is the *output*
+of one clock's control surface becoming the *input* to another's.
+
+_Avoid_: counting the propagation surface among "the three" parity surfaces, or
+implying it bypasses atomic-reject. It rides on top of the control surface; it does not
+join or weaken it.
+
+What the propagation surface carries splits into two classes that move on different
+triggers and must not be conflated:
+
+- **Run-state propagation** — carries `action` (start / pause / reset) and/or
+  `duration`. Fired by a start, pause, reset, or duration edit. Carries the `action`
+  only — never the live `remaining`: receivers snapshot their own remaining, so a
+  propagated pause aligns to within network latency, and a *missed* run-state packet
+  self-corrects on the next start or reset (which re-establishes a shared duration).
+  `duration` is **run-state, not config**: it defines "the same countdown," so it
+  travels with the run-state, never inside the config block. A bare start never clobbers
+  a peer's config.
+- **Config propagation** — carries a **full snapshot** of the Timer config block
+  (buzzer mode, finished mode, the per-mode timing knobs, the behavior parameters, the
+  display-element toggles, icon images, melodies, bar color) with **no** `action` and
+  **no** `duration`. Fired only by a deliberate config edit. Last-config-writer-wins for
+  the whole block: after a config edit propagates, the group is configured identically.
+
+_Avoid_: putting `duration` in the config snapshot, or letting a start/reset re-push
+config — those reintroduce the "starting a timer rewrote my settings" surprise this
+split exists to prevent.
+
+### Sync roles
+
+A clock's participation on the propagation surface is set by two independent axes, not a
+single on/off. Use these role names:
+
+- **Target list** — whom this clock *commands* when it takes a local action (its send
+  axis). A peer-id list, or the literal `all`. Empty = this clock sends nothing.
+- **Follow** — whether this clock *obeys* inbound propagation it is targeted by (its
+  receive-consent axis). A clock never acts on sync it did not opt into via follow.
+
+The axes compose into roles: **leader** (target list set, follow off — commands, never
+obeys), **follower** (follow on, no targets — obeys, never commands), **peer/mirror**
+(both — commands and obeys), **standalone** (neither — sync off). There is no symmetric
+"group" primitive; membership is always expressed as one side's target list plus the
+other side's consent.

@@ -263,6 +263,8 @@ void loadDevSettings()
         if (doc.containsKey("timer_bar_enabled")) TIMER_BAR_ENABLED = doc["timer_bar_enabled"].as<bool>();
         if (doc.containsKey("timer_icon_enabled")) TIMER_ICON_ENABLED = doc["timer_icon_enabled"].as<bool>();
         if (doc.containsKey("timer_bar_color"))   TIMER_BAR_COLOR   = doc["timer_bar_color"].as<uint32_t>();
+        if (doc.containsKey("timer_sync_follow"))  TIMER_SYNC_FOLLOW  = doc["timer_sync_follow"].as<bool>();
+        if (doc.containsKey("timer_sync_targets")) TIMER_SYNC_TARGETS = doc["timer_sync_targets"].as<String>();
 
         if (doc.containsKey("color_correction"))
         {
@@ -355,6 +357,8 @@ void loadSettings()
     TIMER_BAR_ENABLED       = Settings.getBool("TBAREN", true);
     TIMER_ICON_ENABLED      = Settings.getBool("TICONEN", true);
     TIMER_BAR_COLOR         = Settings.getUInt("TBARC", 0);
+    TIMER_SYNC_FOLLOW       = Settings.getBool("TSYNF", false);
+    TIMER_SYNC_TARGETS      = Settings.getString("TSYNT", "");
     MATRIX_LAYOUT = Settings.getUInt("MAT", 0);
     SCROLL_SPEED = Settings.getUInt("SSPEED", 100);
 #ifdef ULANZI
@@ -419,6 +423,8 @@ void saveSettings()
     Settings.putBool("TBAREN", TIMER_BAR_ENABLED);
     Settings.putBool("TICONEN", TIMER_ICON_ENABLED);
     Settings.putUInt("TBARC", TIMER_BAR_COLOR);
+    Settings.putBool("TSYNF", TIMER_SYNC_FOLLOW);
+    Settings.putString("TSYNT", TIMER_SYNC_TARGETS);
     Settings.putUInt("SSPEED", SCROLL_SPEED);
 #ifdef ULANZI
     Settings.putBool("BAT", SHOW_BAT);
@@ -551,6 +557,8 @@ String TIMER_MELODY_END = "timer_end";
 bool TIMER_BAR_ENABLED = true;
 bool TIMER_ICON_ENABLED = true;
 uint32_t TIMER_BAR_COLOR = 0;
+bool TIMER_SYNC_FOLLOW = false;
+String TIMER_SYNC_TARGETS = "";
 uint8_t MAX_BRIGHTNESS = 160;
 double movementFactor = 0.5;
 int8_t TRANS_EFFECT = 1;

@@ -8,6 +8,7 @@
 #include "MQTTManager.h"
 #include "PeripheryManager.h"
 #include "DisplayManager.h"
+#include "ServerManager.h"
 #include "Globals.h"
 #include "../../src/TimerManager.h"
 
@@ -36,6 +37,7 @@ inline void reset_all() {
     MQTTManager.__test_reset();
     PeripheryManager.__test_reset();
     DisplayManager.__test_reset();
+    ServerManager.__test_reset();
     Preferences::__test_reset();
     notifications.clear();
     saveSettings_calls = 0;
@@ -64,6 +66,17 @@ inline void reset_all() {
     TIMER_BAR_ENABLED       = true;
     TIMER_ICON_ENABLED      = true;
     TIMER_BAR_COLOR         = 0;
+    TIMER_SYNC_FOLLOW       = false;
+    TIMER_SYNC_TARGETS      = "";
+    uniqueID                = "awtrix_self";
+}
+
+// Parse the last broadcast packet's _sync envelope + a probe key. Returns false
+// if nothing was sent. Helpers for the propagation-surface tests.
+inline int sync_packet_count() { return (int)ServerManager.sent.size(); }
+
+inline String last_sync_payload() {
+    return ServerManager.sent.empty() ? String() : ServerManager.sent.back();
 }
 
 inline int count_publish(PublishCall::Kind k) {

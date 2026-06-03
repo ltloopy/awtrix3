@@ -1417,6 +1417,163 @@ void test_U49_getStateJson_enum_canonical_spellings(void) {
     TEST_ASSERT_EQUAL_STRING("auto-clear", doc["finished"]);
 }
 
+// ============================================================================
+// Propagation surface (device-to-device timer sync). See CONTEXT.md and
+// docs/adr/0006-timer-multi-device-sync.md. Helpers parse the recorded UDP
+// payload(s) emitted via the ServerManager stub.
+// ============================================================================
+
+// S1 — sync_follow is a strict bool and sync_targets is a validated string, both
+// under the ADR-0001 atomic-reject contract: a bad shape leaves BOTH globals
+// untouched. Setting either never itself broadcasts (local identity, not config).
+void test_S1_sync_settings_validation_atomic_reject(void) {
+    SHOW_TIMER = true;
+
+    TIMER_SYNC_FOLLOW = true;   // held true so a sloppy coercion to false shows
+    const char *follow_rejected[] = {
+        "{\"sync_follow\":1}", "{\"sync_follow\":0}", "{\"sync_follow\":\"yes\"}",
+        "{\"sync_follow\":null}", "{\"sync_follow\":{}}", "{\"sync_follow\":[]}",
+    };
+    for (const char *cmd : follow_rejected) {
+        TEST_ASSERT_EQUAL_MESSAGE(static_cast<int>(TimerCmdResult::BadField),
+                                  static_cast<int>(TimerManager.parseCommand(cmd)), cmd);
+        TEST_ASSERT_TRUE_MESSAGE(TIMER_SYNC_FOLLOW, cmd);  // unchanged
+    }
+
+    TIMER_SYNC_TARGETS = "keepme";
+    const char *targets_rejected[] = {
+        "{\"sync_targets\":5}",                 // not a string
+        "{\"sync_targets\":\"a b\"}",          // space inside token
+        "{\"sync_targets\":\"ok,\"}",          // empty trailing token
+        "{\"sync_targets\":\"good,bad!\"}",    // invalid char
+    };
+    for (const char *cmd : targets_rejected) {
+        TEST_ASSERT_EQUAL_MESSAGE(static_cast<int>(TimerCmdResult::BadField),
+                                  static_cast<int>(TimerManager.parseCommand(cmd)), cmd);
+        TEST_ASSERT_EQUAL_STRING_MESSAGE("keepme", TIMER_SYNC_TARGETS.c_str(), cmd);
+    }
+
+    // Valid forms apply and persist; none of them broadcast.
+    ServerManager.__test_reset();
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.parseCommand("{\"sync_follow\":false,\"sync_targets\":\"all\"}")));
+    TEST_ASSERT_FALSE(TIMER_SYNC_FOLLOW);
+    TEST_ASSERT_EQUAL_STRING("all", TIMER_SYNC_TARGETS.c_str());
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.parseCommand("{\"sync_targets\":\"awtrix_ab12,awtrix_cd34\"}")));
+    TEST_ASSERT_EQUAL_STRING("awtrix_ab12,awtrix_cd34", TIMER_SYNC_TARGETS.c_str());
+    TEST_ASSERT_EQUAL_INT(0, fixture::sync_packet_count());  // sync_* never propagates
+}
+
+// S2 — a local start emits exactly one run-state packet carrying action+duration
+// and NO config keys (the duration-is-run-state invariant; a start never clobbers
+// a peer's config).
+void test_S2_local_start_emits_runstate_only(void) {
+    SHOW_TIMER = true;
+    TIMER_SYNC_TARGETS = "all";
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.parseCommand("{\"duration\":300,\"action\":\"start\"}")));
+    TEST_ASSERT_EQUAL_INT(1, fixture::sync_packet_count());
+
+    StaticJsonDocument<1024> doc;
+    TEST_ASSERT_FALSE(deserializeJson(doc, fixture::last_sync_payload()));
+    TEST_ASSERT_EQUAL_STRING("awtrix_self", doc["_sync"]["src"]);
+    TEST_ASSERT_EQUAL_STRING("all", doc["_sync"]["tgt"]);
+    TEST_ASSERT_EQUAL_STRING("start", doc["action"]);
+    TEST_ASSERT_EQUAL_UINT32(300, doc["duration"].as<uint32_t>());
+    TEST_ASSERT_FALSE(doc.containsKey("buzzer"));     // no config rides with run-state
+    TEST_ASSERT_FALSE(doc.containsKey("bar_color"));
+}
+
+// S3 — a local config edit emits one full-snapshot config packet with NO action,
+// NO duration, and NO sync_* (local identity is never propagated).
+void test_S3_local_config_emits_snapshot_only(void) {
+    SHOW_TIMER = true;
+    TIMER_SYNC_TARGETS = "awtrix_peer";
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.parseCommand("{\"buzzer\":\"countdown\",\"bar_color\":\"#FF0000\"}")));
+    TEST_ASSERT_EQUAL_INT(1, fixture::sync_packet_count());
+
+    StaticJsonDocument<2048> doc;
+    TEST_ASSERT_FALSE(deserializeJson(doc, fixture::last_sync_payload()));
+    TEST_ASSERT_EQUAL_STRING("awtrix_self", doc["_sync"]["src"]);
+    TEST_ASSERT_EQUAL_STRING("awtrix_peer", doc["_sync"]["tgt"][0]);   // array form
+    TEST_ASSERT_EQUAL_STRING("countdown", doc["buzzer"]);
+    TEST_ASSERT_EQUAL_UINT32(0xFF0000, doc["bar_color"].as<uint32_t>());
+    TEST_ASSERT_FALSE(doc.containsKey("action"));
+    TEST_ASSERT_FALSE(doc.containsKey("duration"));
+    TEST_ASSERT_FALSE(doc.containsKey("sync_follow"));
+    TEST_ASSERT_FALSE(doc.containsKey("sync_targets"));
+}
+
+// S4 — applySyncCommand gating: own-src echo ignored; follow consent required;
+// targeting honored (all / member / non-member); duplicate (src,seq) dropped.
+void test_S4_applySyncCommand_gating(void) {
+    SHOW_TIMER = true;
+    fixture::advance(1000);   // millis() > 0 so the dedup TTL math is well-defined
+
+    // Own echo: a packet from this clock's own uniqueID is ignored.
+    TIMER_SYNC_FOLLOW = true;
+    TimerManager.applySyncCommand(
+        "{\"_sync\":{\"src\":\"awtrix_self\",\"seq\":1,\"tgt\":\"all\"},\"action\":\"start\",\"duration\":300}");
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle), static_cast<int>(TimerManager.getState()));
+
+    // Follow gate off: targeted packet from a peer is ignored.
+    TIMER_SYNC_FOLLOW = false;
+    TimerManager.applySyncCommand(
+        "{\"_sync\":{\"src\":\"awtrix_o\",\"seq\":2,\"tgt\":\"all\"},\"action\":\"start\",\"duration\":300}");
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle), static_cast<int>(TimerManager.getState()));
+
+    // Follow on but not targeted: ignored.
+    TIMER_SYNC_FOLLOW = true;
+    TimerManager.applySyncCommand(
+        "{\"_sync\":{\"src\":\"awtrix_o\",\"seq\":3,\"tgt\":[\"awtrix_other\"]},\"action\":\"start\",\"duration\":300}");
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle), static_cast<int>(TimerManager.getState()));
+
+    // Targeted by member list: applies.
+    TimerManager.applySyncCommand(
+        "{\"_sync\":{\"src\":\"awtrix_o\",\"seq\":4,\"tgt\":[\"awtrix_self\"]},\"action\":\"start\",\"duration\":300}");
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Running), static_cast<int>(TimerManager.getState()));
+
+    // Dedup: re-deliver seq 4 (the 3x redundant send) — dropped, no re-application.
+    TimerManager.reset();
+    TimerManager.applySyncCommand(
+        "{\"_sync\":{\"src\":\"awtrix_o\",\"seq\":4,\"tgt\":[\"awtrix_self\"]},\"action\":\"start\",\"duration\":300}");
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle), static_cast<int>(TimerManager.getState()));
+
+    // A new seq from the same src is accepted.
+    TimerManager.applySyncCommand(
+        "{\"_sync\":{\"src\":\"awtrix_o\",\"seq\":5,\"tgt\":\"all\"},\"action\":\"start\",\"duration\":300}");
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Running), static_cast<int>(TimerManager.getState()));
+}
+
+// S5 — one-hop guard: an inbound command is applied but NEVER re-broadcast, even
+// when this clock is itself configured to command peers.
+void test_S5_remote_apply_does_not_rebroadcast(void) {
+    SHOW_TIMER = true;
+    TIMER_SYNC_FOLLOW  = true;
+    TIMER_SYNC_TARGETS = "all";   // this clock would broadcast its own local actions
+
+    TimerManager.applySyncCommand(
+        "{\"_sync\":{\"src\":\"awtrix_o\",\"seq\":9,\"tgt\":\"all\"},\"action\":\"start\",\"duration\":120}");
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Running), static_cast<int>(TimerManager.getState()));
+    TEST_ASSERT_EQUAL_INT(0, fixture::sync_packet_count());  // applied, not relayed
+}
+
+// S6 — sync off (empty target list) suppresses all broadcasting.
+void test_S6_sync_off_never_broadcasts(void) {
+    SHOW_TIMER = true;
+    TIMER_SYNC_TARGETS = "";   // default
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.parseCommand("{\"duration\":300,\"action\":\"start\"}")));
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.parseCommand("{\"buzzer\":\"end\"}")));
+    TEST_ASSERT_EQUAL_INT(0, fixture::sync_packet_count());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
@@ -1476,5 +1633,11 @@ int main(int, char **) {
     RUN_TEST(test_U47_getStateJson_finished_zero);
     RUN_TEST(test_U48_getStateJson_disabled_still_200_shape);
     RUN_TEST(test_U49_getStateJson_enum_canonical_spellings);
+    RUN_TEST(test_S1_sync_settings_validation_atomic_reject);
+    RUN_TEST(test_S2_local_start_emits_runstate_only);
+    RUN_TEST(test_S3_local_config_emits_snapshot_only);
+    RUN_TEST(test_S4_applySyncCommand_gating);
+    RUN_TEST(test_S5_remote_apply_does_not_rebroadcast);
+    RUN_TEST(test_S6_sync_off_never_broadcasts);
     return UNITY_END();
 }

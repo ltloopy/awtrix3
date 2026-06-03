@@ -13,6 +13,7 @@
 #include "PeripheryManager.h"
 #include "DisplayManager.h"
 #include "MenuManager.h"
+#include "ServerManager.h"
 #include "Globals.h"
 
 std::map<String, uint32_t> Preferences::u32_;
@@ -28,6 +29,7 @@ MQTTManager_      MQTTManager;
 PeripheryManager_ PeripheryManager;
 DisplayManager_   DisplayManager;
 MenuManager_      MenuManager;
+ServerManager_    ServerManager;
 
 String   CURRENT_APP       = "Time";
 bool     SOUND_ACTIVE      = true;
@@ -54,6 +56,9 @@ String   TIMER_MELODY_END       = "timer_end";
 bool     TIMER_BAR_ENABLED      = true;
 bool     TIMER_ICON_ENABLED     = true;
 uint32_t TIMER_BAR_COLOR        = 0;
+bool        TIMER_SYNC_FOLLOW   = false;
+String      TIMER_SYNC_TARGETS  = "";
+const char *uniqueID            = "awtrix_self";
 
 uint32_t TEXTCOLOR_888 = 0xFFFFFF;
 

@@ -22,6 +22,13 @@ WiFiUDP udp;
 unsigned int localUdpPort = 4210;
 char incomingPacket[255];
 
+// Propagation surface: dedicated UDP socket for device-to-device timer sync. A
+// separate port (and buffer) from discovery so a full config snapshot fits and the
+// FIND_AWTRIX traffic is never parsed as JSON. See docs/adr/0006.
+WiFiUDP syncUdp;
+const uint16_t kTimerSyncPort = 4212;
+char syncBuffer[1024];
+
 // Pufferdefinition
 #define BUFFER_SIZE 64
 char dataBuffer[BUFFER_SIZE];
@@ -265,6 +272,7 @@ void ServerManager_::setup()
         mws.addHandler("/save", HTTP_POST, saveHandler);
         addHandler();
         udp.begin(localUdpPort);
+        syncUdp.begin(kTimerSyncPort);
         if (DEBUG_MODE)
             DEBUG_PRINTLN(F("Webserver loaded"));
     }
@@ -323,6 +331,19 @@ void ServerManager_::tick()
                 udp.endPacket();
             }
         }
+
+        // Propagation surface: inbound timer-sync packets (echo/follow/target/dedup
+        // gating happens inside applySyncCommand).
+        int syncSize = syncUdp.parsePacket();
+        if (syncSize > 0)
+        {
+            int len = syncUdp.read(syncBuffer, sizeof(syncBuffer) - 1);
+            if (len > 0)
+            {
+                syncBuffer[len] = 0;
+                TimerManager.applySyncCommand(syncBuffer);
+            }
+        }
     }
 
     if (!currentClient || !currentClient.connected()) {
@@ -360,6 +381,22 @@ void ServerManager_::sendTCP(String message)
 {
     if (currentClient && currentClient.connected()) {
         currentClient.print(message);
+    }
+}
+
+void ServerManager_::sendTimerSync(const String &payload)
+{
+    if (AP_MODE) return;
+    IPAddress bcast = WiFi.broadcastIP();
+    if ((uint32_t)bcast == 0) bcast = IPAddress(255, 255, 255, 255);
+    // Redundant best-effort send; receivers dedup by (src,seq). Spacing rides out
+    // transient congestion without acks/per-target state (ADR-0006).
+    for (uint8_t i = 0; i < 3; ++i)
+    {
+        syncUdp.beginPacket(bcast, kTimerSyncPort);
+        syncUdp.write((const uint8_t *)payload.c_str(), payload.length());
+        syncUdp.endPacket();
+        if (i < 2) delay(15);
     }
 }
 
