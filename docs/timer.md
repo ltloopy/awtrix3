@@ -24,7 +24,7 @@ timer in one publish.
 
 | Key | Type | Values | Effect |
 | --- | --- | --- | --- |
-| `duration` | string or int | A clock string `"HH:MM:SS"` / `"MM:SS"`, **or** a bare integer of seconds. Must be 1 .. `TIMER_MAX_DURATION` (default 86400 = 24 h); **out-of-range is rejected, not clamped**. | Sets the timer duration. Persists to NVS. See "Duration format" below. |
+| `duration` | string or int | A clock string `"HH:MM:SS"` / `"MM:SS"`, **or** a bare integer of seconds. Must be 1 .. `TIMER_MAX_DURATION` (default 86400 = 24 h); **out-of-range is rejected, not clamped**. | Sets the timer duration. Persists to NVS. While **Paused**, also resets the timer to `Idle` with the new duration. See "Duration format" below. |
 | `buzzer`   | string | `"off"`, `"end"`, `"countdown"` (case-insensitive) | Sets the buzzer mode. Persists to NVS. |
 | `finished` | string | `"auto-clear"` (or `"autoclear"`), `"hold"`, `"re-alert"` (or `"realert"`) | Sets the finished-mode. Persists to NVS. |
 | `icon_idle`     | string | Bare icon name resolved against `/ICONS/<name>.{jpg,gif}`; empty string clears the slot; capped at 32 chars | Icon shown in the **Idle** state and used as fallback for any other state whose slot is empty. Persists to NVS. |
@@ -161,6 +161,11 @@ Published on MQTT connect and on every change made through the
 
 `start` from `Finished` clears the finished screen and re-arms with the
 configured duration. `reset` is always a hard return to `Idle`.
+
+Updating the `duration` while the timer is **Paused** resets it to `Idle` with
+the new duration (remaining is re-armed to the full new value); a subsequent
+`start` then counts the full new duration. Updating the duration while `Running`
+does **not** restart the in-progress countdown.
 
 ---
 

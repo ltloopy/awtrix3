@@ -522,6 +522,10 @@ void TimerManager_::setDuration(uint32_t seconds)
         remainingSec = durationSec;
         publishRemaining();
     }
+    else if (state == TimerState::Paused)
+    {
+        reset();   // editing duration while paused resets to Idle with the new duration
+    }
     persistIfDirty();
     publishDuration();
 }

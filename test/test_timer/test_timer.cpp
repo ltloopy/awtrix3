@@ -1574,6 +1574,35 @@ void test_S6_sync_off_never_broadcasts(void) {
     TEST_ASSERT_EQUAL_INT(0, fixture::sync_packet_count());
 }
 
+// ============================================================================
+// U51 — Editing duration while Paused resets the timer to Idle with the new
+// duration (remaining follows the new full duration; state publish == "idle").
+// ============================================================================
+void test_U51_setDuration_while_paused_resets_to_idle(void) {
+    TimerManager.setDuration(300);
+    TimerManager.start();
+    fixture::advance(60000);            // 60s elapsed -> 240 remaining
+    TimerManager.tick();
+    TimerManager.pause();
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Paused),
+                      static_cast<int>(TimerManager.getState()));
+    TEST_ASSERT_EQUAL_UINT32(240, TimerManager.getRemaining());
+
+    // Update duration while paused -> reset to Idle with the new full duration.
+    TimerManager.setDuration(600);
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle),
+                      static_cast<int>(TimerManager.getState()));
+    TEST_ASSERT_EQUAL_UINT32(600, TimerManager.getRemaining());
+    TEST_ASSERT_EQUAL_UINT32(600, TimerManager.getDuration());
+
+    const PublishCall *st = fixture::last_publish(PublishCall::State);
+    TEST_ASSERT_NOT_NULL(st);
+    TEST_ASSERT_EQUAL_STRING("idle", st->state_str.c_str());
+    const PublishCall *rem = fixture::last_publish(PublishCall::Remaining);
+    TEST_ASSERT_NOT_NULL(rem);
+    TEST_ASSERT_EQUAL_UINT32(600, rem->value);
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
@@ -1616,6 +1645,7 @@ int main(int, char **) {
     RUN_TEST(test_U42_parseCommand_multi_key_validation_ordering);
     RUN_TEST(test_U43_parseCommand_bar_enabled_strict_bool);
     RUN_TEST(test_U50_parseCommand_icon_enabled_strict_bool);
+    RUN_TEST(test_U51_setDuration_while_paused_resets_to_idle);
     RUN_TEST(test_U32_descriptor_table_well_formed);
     RUN_TEST(test_U33_descriptor_ids_unique);
     RUN_TEST(test_U34_descriptor_type_specific_fields);
