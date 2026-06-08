@@ -5,12 +5,6 @@
 
 namespace
 {
-    // Enum-slot labels, indexed by the enum's value. Order must match the enums in
-    // TimerManager.h (BuzzerMode { Off, End, Countdown }, FinishedMode { AutoClear,
-    // Hold, ReAlert }).
-    const char *const kBuzzerLabels[]   = {"BZR OFF", "BZR END", "BZR CDN"};
-    const char *const kFinishedLabels[] = {"FIN AUTO", "FIN HOLD", "FIN RALT"};
-
     // Enum hooks. The setters defer the NVS write (persist=false): the TIMER menu
     // applies + publishes live during scroll and persists on the long-press commit
     // via TimerManager::persistConfig() (ADR-0008). Non-capturing lambdas decay to
@@ -22,15 +16,17 @@ namespace
 }
 
 // idx order is the on-screen slot order (selectButton cycles through it).
-//   kind, cmdKey, prefix, step, labels, labelCount, getEnum, setEnum
+//   kind, cmdKey, prefix, step, codec, labelCount, getEnum, setEnum
+// The two EnumCycle slots read their labels from the per-enum codec table's menu
+// column (ADR-0010) -- no private label copy to drift from it.
 const TimerMenuSlot TIMER_MENU_SLOTS[] = {
-    {TimerMenuKind::EnumCycle,    nullptr,             nullptr,  0, kBuzzerLabels,   3, getBuzzer,   setBuzzer},
-    {TimerMenuKind::SteppedRange, "countdown_seconds", "CDOWN ", 1, nullptr,         0, nullptr,     nullptr},
-    {TimerMenuKind::EnumCycle,    nullptr,             nullptr,  0, kFinishedLabels, 3, getFinished, setFinished},
-    {TimerMenuKind::SteppedRange, "finished_hold",     "CLEAR ", 5, nullptr,         0, nullptr,     nullptr},
-    {TimerMenuKind::SteppedRange, "realert_interval",  "ALERT ", 5, nullptr,         0, nullptr,     nullptr},
-    {TimerMenuKind::BoolToggle,   "icon_enabled",      "ICON ",  0, nullptr,         0, nullptr,     nullptr},
-    {TimerMenuKind::BoolToggle,   "bar_enabled",       "BAR ",   0, nullptr,         0, nullptr,     nullptr},
+    {TimerMenuKind::EnumCycle,    nullptr,             nullptr,  0, TIMER_BUZZER_CODEC,   (uint8_t)BuzzerMode::COUNT,   getBuzzer,   setBuzzer},
+    {TimerMenuKind::SteppedRange, "countdown_seconds", "CDOWN ", 1, nullptr,              0, nullptr,     nullptr},
+    {TimerMenuKind::EnumCycle,    nullptr,             nullptr,  0, TIMER_FINISHED_CODEC, (uint8_t)FinishedMode::COUNT, getFinished, setFinished},
+    {TimerMenuKind::SteppedRange, "finished_hold",     "CLEAR ", 5, nullptr,              0, nullptr,     nullptr},
+    {TimerMenuKind::SteppedRange, "realert_interval",  "ALERT ", 5, nullptr,              0, nullptr,     nullptr},
+    {TimerMenuKind::BoolToggle,   "icon_enabled",      "ICON ",  0, nullptr,              0, nullptr,     nullptr},
+    {TimerMenuKind::BoolToggle,   "bar_enabled",       "BAR ",   0, nullptr,              0, nullptr,     nullptr},
 };
 
 const size_t TIMER_MENU_SLOT_COUNT = sizeof(TIMER_MENU_SLOTS) / sizeof(TIMER_MENU_SLOTS[0]);
@@ -42,7 +38,7 @@ String timerMenuLabel(uint8_t slot)
     switch (s.kind)
     {
         case TimerMenuKind::EnumCycle:
-            return String(s.labels[s.getEnum()]);
+            return String(s.codec[s.getEnum()].menu);
         case TimerMenuKind::SteppedRange:
         {
             const TimerSettingDesc *d = timerSettingByCmdKey(s.cmdKey);

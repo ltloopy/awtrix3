@@ -3,6 +3,8 @@
 
 #include <Arduino.h>
 
+#include "TimerEnums.h"
+
 // TIMER menu slot table: the data model behind the on-device TIMER global menu's
 // seven slots (the third member of the Timer descriptor-table family, alongside
 // TIMER_SETTINGS_DESCS and TIMER_HA_DESCRIPTORS). One row per slot; MenuManager
@@ -25,7 +27,7 @@ struct TimerMenuSlot
     const char        *cmdKey;       // SteppedRange/BoolToggle: -> TIMER_SETTINGS_DESCS (storage + lo/hi)
     const char        *prefix;       // SteppedRange/BoolToggle label prefix ("CLEAR ", "ICON ")
     uint16_t           step;         // SteppedRange step
-    const char *const *labels;       // EnumCycle: labels indexed by current value
+    const TimerEnumCodec *codec;     // EnumCycle: codec table; .menu column is the label
     uint8_t            labelCount;   // EnumCycle modulus
     uint8_t          (*getEnum)();   // EnumCycle only
     void             (*setEnum)(uint8_t);  // EnumCycle only (routes via TimerManager setter)

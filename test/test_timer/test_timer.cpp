@@ -1855,7 +1855,7 @@ void test_M1_slot_table_well_formed(void) {
         const TimerMenuSlot &s = TIMER_MENU_SLOTS[i];
         switch (s.kind) {
             case TimerMenuKind::EnumCycle:
-                TEST_ASSERT_NOT_NULL(s.labels);
+                TEST_ASSERT_NOT_NULL(s.codec);
                 TEST_ASSERT_TRUE(s.labelCount > 0);
                 TEST_ASSERT_NOT_NULL((void *)s.getEnum);
                 TEST_ASSERT_NOT_NULL((void *)s.setEnum);
@@ -1985,6 +1985,21 @@ void test_M7_enum_adjust_defers_persist_until_commit(void) {
 
     TimerManager.persistConfig();
     TEST_ASSERT_TRUE(Preferences::begin_calls > before);       // commit flushed it
+}
+
+// M8 — the two enum slots source their on-screen label from the codec table's
+// menu column (single source of truth, #19), proven through the public
+// timerMenuLabel() for every enum value. Guards against the menu re-growing a
+// private label copy that could drift from the codec table.
+void test_M8_enum_labels_source_from_codec(void) {
+    for (uint8_t i = 0; i < (uint8_t)BuzzerMode::COUNT; ++i) {
+        TimerManager.setBuzzerMode((BuzzerMode)i);
+        TEST_ASSERT_EQUAL_STRING(TIMER_BUZZER_CODEC[i].menu, timerMenuLabel(0).c_str());
+    }
+    for (uint8_t i = 0; i < (uint8_t)FinishedMode::COUNT; ++i) {
+        TimerManager.setFinishedMode((FinishedMode)i);
+        TEST_ASSERT_EQUAL_STRING(TIMER_FINISHED_CODEC[i].menu, timerMenuLabel(2).c_str());
+    }
 }
 
 // ============================================================================
@@ -2161,6 +2176,7 @@ int main(int, char **) {
     RUN_TEST(test_M5_stepped_clamps_to_descriptor_bounds);
     RUN_TEST(test_M6_label_formatting);
     RUN_TEST(test_M7_enum_adjust_defers_persist_until_commit);
+    RUN_TEST(test_M8_enum_labels_source_from_codec);
     RUN_TEST(test_T9_codec_tables_well_formed);
     RUN_TEST(test_T10_codec_roundtrip_aliases_and_case);
     return UNITY_END();
