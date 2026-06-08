@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "fixture.h"
+#include "../../src/TimerEnums.h"
 #include "../../src/TimerHa.h"
 #include "../../src/TimerView.h"
 #include "../../src/TimerSettings.h"
@@ -1986,6 +1987,98 @@ void test_M7_enum_adjust_defers_persist_until_commit(void) {
     TEST_ASSERT_TRUE(Preferences::begin_calls > before);       // commit flushed it
 }
 
+// ============================================================================
+// TIMER per-enum codec table (src/TimerEnums.cpp). The fifth descriptor-table
+// family member: one row per enum value, indexed by the enum's numeric value,
+// carrying {wire, menu, ha, aliases}. The wire column is the MQTT/HTTP/sync
+// contract consumed by parse*/toString in TimerManager; menu/ha columns are
+// rewired by the two follow-up issues. See docs/adr/0010.
+// ============================================================================
+
+// T9 — both codec tables are well-formed: exactly COUNT rows (also a static_assert
+// in TimerEnums.cpp, checked here at runtime too), and every row carries a
+// non-empty wire / menu / ha string. Aliases are optional (nullptr allowed).
+void test_T9_codec_tables_well_formed(void) {
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)BuzzerMode::COUNT,
+                             (uint32_t)TIMER_BUZZER_CODEC_COUNT);
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)FinishedMode::COUNT,
+                             (uint32_t)TIMER_FINISHED_CODEC_COUNT);
+
+    for (size_t i = 0; i < TIMER_BUZZER_CODEC_COUNT; ++i) {
+        const TimerEnumCodec &r = TIMER_BUZZER_CODEC[i];
+        TEST_ASSERT_NOT_NULL(r.wire); TEST_ASSERT_TRUE(strlen(r.wire) > 0);
+        TEST_ASSERT_NOT_NULL(r.menu); TEST_ASSERT_TRUE(strlen(r.menu) > 0);
+        TEST_ASSERT_NOT_NULL(r.ha);   TEST_ASSERT_TRUE(strlen(r.ha)   > 0);
+    }
+    for (size_t i = 0; i < TIMER_FINISHED_CODEC_COUNT; ++i) {
+        const TimerEnumCodec &r = TIMER_FINISHED_CODEC[i];
+        TEST_ASSERT_NOT_NULL(r.wire); TEST_ASSERT_TRUE(strlen(r.wire) > 0);
+        TEST_ASSERT_NOT_NULL(r.menu); TEST_ASSERT_TRUE(strlen(r.menu) > 0);
+        TEST_ASSERT_NOT_NULL(r.ha);   TEST_ASSERT_TRUE(strlen(r.ha)   > 0);
+    }
+}
+
+// T10 — the wire-string contract round-trips through the table-backed parse/
+// toString, for EVERY enum value: parse(toString(v)) == v, and toString(v) is the
+// row's canonical wire spelling. Plus every alias the current parser accepts still
+// parses, and parsing is case-insensitive (arbitrary case round-trips).
+void test_T10_codec_roundtrip_aliases_and_case(void) {
+    // buzzer: parse(toString(v)) == v for all values; toString == table wire.
+    for (uint8_t i = 0; i < (uint8_t)BuzzerMode::COUNT; ++i) {
+        BuzzerMode v = (BuzzerMode)i;
+        TimerManager.setBuzzerMode(v);
+        const char *s = TimerManager.buzzerModeString();
+        TEST_ASSERT_EQUAL_STRING(TIMER_BUZZER_CODEC[i].wire, s);
+        BuzzerMode back;
+        TEST_ASSERT_TRUE(TimerManager_::parseBuzzerMode(String(s), back));
+        TEST_ASSERT_EQUAL_UINT8(i, (uint8_t)back);
+    }
+    // finished: same.
+    for (uint8_t i = 0; i < (uint8_t)FinishedMode::COUNT; ++i) {
+        FinishedMode v = (FinishedMode)i;
+        TimerManager.setFinishedMode(v);
+        const char *s = TimerManager.finishedModeString();
+        TEST_ASSERT_EQUAL_STRING(TIMER_FINISHED_CODEC[i].wire, s);
+        FinishedMode back;
+        TEST_ASSERT_TRUE(TimerManager_::parseFinishedMode(String(s), back));
+        TEST_ASSERT_EQUAL_UINT8(i, (uint8_t)back);
+    }
+
+    // Every alias declared in the tables still parses to its row's enum value.
+    for (uint8_t i = 0; i < (uint8_t)BuzzerMode::COUNT; ++i) {
+        if (!TIMER_BUZZER_CODEC[i].aliases) continue;
+        BuzzerMode back;
+        TEST_ASSERT_TRUE(TimerManager_::parseBuzzerMode(String(TIMER_BUZZER_CODEC[i].aliases), back));
+        TEST_ASSERT_EQUAL_UINT8(i, (uint8_t)back);
+    }
+    for (uint8_t i = 0; i < (uint8_t)FinishedMode::COUNT; ++i) {
+        if (!TIMER_FINISHED_CODEC[i].aliases) continue;
+        FinishedMode back;
+        TEST_ASSERT_TRUE(TimerManager_::parseFinishedMode(String(TIMER_FINISHED_CODEC[i].aliases), back));
+        TEST_ASSERT_EQUAL_UINT8(i, (uint8_t)back);
+    }
+
+    // The specific legacy aliases the old parser accepted, spelled out explicitly.
+    FinishedMode f;
+    TEST_ASSERT_TRUE(TimerManager_::parseFinishedMode("autoclear", f));
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)FinishedMode::AutoClear, (uint8_t)f);
+    TEST_ASSERT_TRUE(TimerManager_::parseFinishedMode("realert", f));
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)FinishedMode::ReAlert, (uint8_t)f);
+
+    // Case-insensitive: arbitrary case parses for canonical, hyphenated, and aliases.
+    BuzzerMode b;
+    TEST_ASSERT_TRUE(TimerManager_::parseBuzzerMode("COUNTDOWN", b));
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)BuzzerMode::Countdown, (uint8_t)b);
+    TEST_ASSERT_TRUE(TimerManager_::parseFinishedMode("Auto-Clear", f));
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)FinishedMode::AutoClear, (uint8_t)f);
+    TEST_ASSERT_TRUE(TimerManager_::parseFinishedMode("ReAlert", f));
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)FinishedMode::ReAlert, (uint8_t)f);
+
+    // Junk is still rejected.
+    TEST_ASSERT_FALSE(TimerManager_::parseBuzzerMode("nope", b));
+    TEST_ASSERT_FALSE(TimerManager_::parseFinishedMode("nope", f));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
@@ -2068,5 +2161,7 @@ int main(int, char **) {
     RUN_TEST(test_M5_stepped_clamps_to_descriptor_bounds);
     RUN_TEST(test_M6_label_formatting);
     RUN_TEST(test_M7_enum_adjust_defers_persist_until_commit);
+    RUN_TEST(test_T9_codec_tables_well_formed);
+    RUN_TEST(test_T10_codec_roundtrip_aliases_and_case);
     return UNITY_END();
 }

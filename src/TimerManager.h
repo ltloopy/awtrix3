@@ -4,9 +4,9 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
+#include "TimerEnums.h"   // BuzzerMode / FinishedMode + their codec tables (ADR-0010)
+
 enum class TimerState : uint8_t { Idle = 0, Running = 1, Paused = 2, Finished = 3 };
-enum class BuzzerMode : uint8_t { Off = 0, End = 1, Countdown = 2 };
-enum class FinishedMode : uint8_t { AutoClear = 0, Hold = 1, ReAlert = 2 };
 
 // Result of parseCommand. All control surfaces share one validation policy
 // (reject invalid input atomically); only the HTTP API surfaces this as a

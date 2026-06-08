@@ -203,26 +203,16 @@ const char *TimerManager_::getStateString() const
     return "idle";
 }
 
+// Canonical wire spellings are a single row read from the per-enum codec table
+// (src/TimerEnums.cpp) -- the enum value is the row index. See docs/adr/0010.
 const char *TimerManager_::buzzerModeString() const
 {
-    switch (buzzerMode)
-    {
-        case BuzzerMode::Off:       return "off";
-        case BuzzerMode::End:       return "end";
-        case BuzzerMode::Countdown: return "countdown";
-    }
-    return "end";
+    return buzzerCodec(buzzerMode).wire;
 }
 
 const char *TimerManager_::finishedModeString() const
 {
-    switch (finishedMode)
-    {
-        case FinishedMode::AutoClear: return "auto-clear";
-        case FinishedMode::Hold:      return "hold";
-        case FinishedMode::ReAlert:   return "re-alert";
-    }
-    return "auto-clear";
+    return finishedCodec(finishedMode).wire;
 }
 
 String TimerManager_::getStateJson() const
@@ -314,23 +304,21 @@ bool TimerManager_::isValidDuration(uint32_t seconds)
     return true;
 }
 
+// String->enum is a case-insensitive scan of the codec table (canonical wire
+// spelling or any alias). The matched row index is the enum value. ADR-0010.
 bool TimerManager_::parseBuzzerMode(const String &s, BuzzerMode &out)
 {
-    String b = s; b.toLowerCase();
-    if      (b == "off")       out = BuzzerMode::Off;
-    else if (b == "end")       out = BuzzerMode::End;
-    else if (b == "countdown") out = BuzzerMode::Countdown;
-    else return false;
+    uint8_t idx;
+    if (!timerEnumParse(TIMER_BUZZER_CODEC, TIMER_BUZZER_CODEC_COUNT, s, idx)) return false;
+    out = (BuzzerMode)idx;
     return true;
 }
 
 bool TimerManager_::parseFinishedMode(const String &s, FinishedMode &out)
 {
-    String f = s; f.toLowerCase();
-    if      (f == "auto-clear" || f == "autoclear") out = FinishedMode::AutoClear;
-    else if (f == "hold")                           out = FinishedMode::Hold;
-    else if (f == "re-alert"   || f == "realert")   out = FinishedMode::ReAlert;
-    else return false;
+    uint8_t idx;
+    if (!timerEnumParse(TIMER_FINISHED_CODEC, TIMER_FINISHED_CODEC_COUNT, s, idx)) return false;
+    out = (FinishedMode)idx;
     return true;
 }
 
