@@ -190,7 +190,7 @@ depends on `finishedMode`:
 | `hold` | The Finished screen persists indefinitely, blinking at 500 ms. Cleared by a `start`/`reset` command (MQTT/HTTP or the HA Start/Reset buttons) or the physical middle button. |
 | `re-alert` | The Finished screen persists; every `TIMER_REALERT_INTERVAL` seconds (default 15) the end-melody re-plays until cleared (`start`/`reset`). |
 
-Also editable on-device via the `FINISH` slot of the `TIMER` top menu (see [`onscreen.md`](onscreen.md)) — each press cycles modes and immediately persists + publishes (same path as MQTT/HA).
+Also editable on-device via the `FINISH` slot of the `TIMER` top menu (see [`onscreen.md`](onscreen.md)) — each press cycles modes and publishes live (same path as MQTT/HA), but the NVS write is deferred to the menu's long-press save, in line with every other `TIMER`-menu slot (ADR-0008).
 
 ---
 
@@ -209,7 +209,7 @@ are configurable per ADR-0004 (`melody_tick` and `melody_end` keys on
 defaults. If the resolved file is missing, a small built-in fallback RTTTL
 is used instead.
 
-Also editable on-device via the `BUZZER` slot of the `TIMER` top menu (see [`onscreen.md`](onscreen.md)) — each press cycles modes and immediately persists + publishes (same path as MQTT/HA).
+Also editable on-device via the `BUZZER` slot of the `TIMER` top menu (see [`onscreen.md`](onscreen.md)) — each press cycles modes and publishes live (same path as MQTT/HA), but the NVS write is deferred to the menu's long-press save, in line with every other `TIMER`-menu slot (ADR-0008).
 
 ---
 

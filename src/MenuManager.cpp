@@ -6,19 +6,10 @@
 #include <PeripheryManager.h>
 #include "timer.h"
 #include "TimerManager.h"
-#include "TimerSettings.h"
+#include "TimerMenu.h"
 #include "MQTTManager.h"
 #include <icons.h>
 #include <UpdateManager.h>
-
-namespace
-{
-    // The on-device TIMER menu reuses each knob's range from the single
-    // TIMER_SETTINGS_DESCS table, so the menu clamp and parseCommand validation share
-    // one definition (the menu keeps its own step sizes). See ADR-0007.
-    uint32_t timerKnobHi(const char *cmdKey) { const TimerSettingDesc *d = timerSettingByCmdKey(cmdKey); return d ? d->hi : 0; }
-    uint32_t timerKnobLo(const char *cmdKey) { const TimerSettingDesc *d = timerSettingByCmdKey(cmdKey); return d ? d->lo : 0; }
-}
 
 enum MenuState
 {
@@ -94,7 +85,7 @@ uint8_t appsCount = 5;
 #endif
 
 int8_t timerConfigIndex;
-uint8_t timerConfigCount = 7;
+uint8_t timerConfigCount = TIMER_MENU_SLOT_COUNT;
 
 MenuState currentState = MainMenu;
 
@@ -234,36 +225,7 @@ String MenuManager_::menutext()
         }
     case TimerConfigMenu:
         DisplayManager.drawMenuIndicator(timerConfigIndex, timerConfigCount, 0xFBC000);
-        switch (timerConfigIndex)
-        {
-        case 0:
-            switch (TimerManager.getBuzzerMode())
-            {
-            case BuzzerMode::Off:       return "BZR OFF";
-            case BuzzerMode::End:       return "BZR END";
-            case BuzzerMode::Countdown: return "BZR CDN";
-            }
-            break;
-        case 1:
-            return "CDOWN " + String(TIMER_COUNTDOWN_SECONDS);
-        case 2:
-            switch (TimerManager.getFinishedMode())
-            {
-            case FinishedMode::AutoClear: return "FIN AUTO";
-            case FinishedMode::Hold:      return "FIN HOLD";
-            case FinishedMode::ReAlert:   return "FIN RALT";
-            }
-            break;
-        case 3:
-            return "CLEAR " + String(TIMER_FINISHED_HOLD);
-        case 4:
-            return "ALERT " + String(TIMER_REALERT_INTERVAL);
-        case 5:
-            return TIMER_ICON_ENABLED ? "ICON ON" : "ICON OFF";
-        case 6:
-            return TIMER_BAR_ENABLED ? "BAR ON" : "BAR OFF";
-        }
-        break;
+        return timerMenuLabel(timerConfigIndex);
     default:
         break;
     }
@@ -326,36 +288,7 @@ void MenuManager_::rightButton()
             SOUND_VOLUME++;
         break;
     case TimerConfigMenu:
-        switch (timerConfigIndex)
-        {
-        case 0:
-            TimerManager.setBuzzerMode((BuzzerMode)(((uint8_t)TimerManager.getBuzzerMode() + 1) % 3));
-            break;
-        case 1:
-            if (TIMER_COUNTDOWN_SECONDS < timerKnobHi("countdown_seconds")) TIMER_COUNTDOWN_SECONDS++;
-            break;
-        case 2:
-            TimerManager.setFinishedMode((FinishedMode)(((uint8_t)TimerManager.getFinishedMode() + 1) % 3));
-            break;
-        case 3:
-        {
-            uint32_t hi = timerKnobHi("finished_hold");
-            TIMER_FINISHED_HOLD = (TIMER_FINISHED_HOLD + 5 <= hi) ? TIMER_FINISHED_HOLD + 5 : hi;
-            break;
-        }
-        case 4:
-        {
-            uint32_t hi = timerKnobHi("realert_interval");
-            TIMER_REALERT_INTERVAL = (TIMER_REALERT_INTERVAL + 5 <= hi) ? TIMER_REALERT_INTERVAL + 5 : hi;
-            break;
-        }
-        case 5:
-            TIMER_ICON_ENABLED = !TIMER_ICON_ENABLED;
-            break;
-        case 6:
-            TIMER_BAR_ENABLED = !TIMER_BAR_ENABLED;
-            break;
-        }
+        timerMenuAdjust(timerConfigIndex, +1);
         break;
     default:
         break;
@@ -420,36 +353,7 @@ void MenuManager_::leftButton()
             SOUND_VOLUME--;
         break;
     case TimerConfigMenu:
-        switch (timerConfigIndex)
-        {
-        case 0:
-            TimerManager.setBuzzerMode((BuzzerMode)(((uint8_t)TimerManager.getBuzzerMode() + 2) % 3));
-            break;
-        case 1:
-            if (TIMER_COUNTDOWN_SECONDS > timerKnobLo("countdown_seconds")) TIMER_COUNTDOWN_SECONDS--;
-            break;
-        case 2:
-            TimerManager.setFinishedMode((FinishedMode)(((uint8_t)TimerManager.getFinishedMode() + 2) % 3));
-            break;
-        case 3:
-        {
-            uint32_t lo = timerKnobLo("finished_hold");
-            TIMER_FINISHED_HOLD = (TIMER_FINISHED_HOLD >= lo + 5) ? TIMER_FINISHED_HOLD - 5 : lo;
-            break;
-        }
-        case 4:
-        {
-            uint32_t lo = timerKnobLo("realert_interval");
-            TIMER_REALERT_INTERVAL = (TIMER_REALERT_INTERVAL >= lo + 5) ? TIMER_REALERT_INTERVAL - 5 : lo;
-            break;
-        }
-        case 5:
-            TIMER_ICON_ENABLED = !TIMER_ICON_ENABLED;
-            break;
-        case 6:
-            TIMER_BAR_ENABLED = !TIMER_BAR_ENABLED;
-            break;
-        }
+        timerMenuAdjust(timerConfigIndex, -1);
         break;
     default:
         break;
@@ -595,7 +499,8 @@ void MenuManager_::selectButtonLong()
             saveSettings();
             break;
         case TimerConfigMenu:
-            saveSettings();
+            TimerManager.persistConfig();     // flush enum edits deferred during scroll ("timer" ns, ADR-0008)
+            saveSettings();                   // table-backed knob/toggle keys ("awtrix" ns)
             TimerManager.broadcastConfig();   // propagate the committed timer config to peers
             break;
         default:

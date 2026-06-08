@@ -209,3 +209,76 @@ const TimerSettingDesc *timerSettingByCmdKey(const char *cmdKey)
             return &TIMER_SETTINGS_DESCS[i];
     return nullptr;
 }
+
+// ===========================================================================
+// Member-backed config half (B1) -- the second table of the config block.
+// Each hook routes through TimerManager's existing public setters/getters; the
+// enum rows stage the enum cast in TcValue::num, the icon rows stage the name in
+// TcValue::str (validate is pure -- no global is touched until apply).
+// ===========================================================================
+namespace
+{
+    // -- buzzer --
+    bool memValidateBuzzer(JsonVariantConst v, TcValue &out)
+    {
+        BuzzerMode m;
+        if (!TimerManager_::parseBuzzerMode(v.as<String>(), m)) return false;
+        out.num = (uint32_t)m;
+        return true;
+    }
+    void memApplyBuzzer(const TcValue &v) { TimerManager.setBuzzerMode((BuzzerMode)v.num); }
+    void memEmitBuzzer (JsonDocument &doc) { doc["buzzer"] = TimerManager.buzzerModeString(); }
+
+    // -- finished --
+    bool memValidateFinished(JsonVariantConst v, TcValue &out)
+    {
+        FinishedMode m;
+        if (!TimerManager_::parseFinishedMode(v.as<String>(), m)) return false;
+        out.num = (uint32_t)m;
+        return true;
+    }
+    void memApplyFinished(const TcValue &v) { TimerManager.setFinishedMode((FinishedMode)v.num); }
+    void memEmitFinished (JsonDocument &doc) { doc["finished"] = TimerManager.finishedModeString(); }
+
+    // -- icon_<state> (shared validate; per-state apply/emit) --
+    bool memValidateIcon(JsonVariantConst v, TcValue &out)
+    {
+        String s = v.as<String>();
+        if (!TimerManager_::isValidIconName(s)) return false;
+        out.str = s;
+        return true;
+    }
+    void memApplyIconIdle    (const TcValue &v) { TimerManager.setIconIdle    (v.str); }
+    void memApplyIconRunning (const TcValue &v) { TimerManager.setIconRunning (v.str); }
+    void memApplyIconPaused  (const TcValue &v) { TimerManager.setIconPaused  (v.str); }
+    void memApplyIconFinished(const TcValue &v) { TimerManager.setIconFinished(v.str); }
+    void memEmitIconIdle    (JsonDocument &doc) { doc["icon_idle"]     = TimerManager.getIconIdle(); }
+    void memEmitIconRunning (JsonDocument &doc) { doc["icon_running"]  = TimerManager.getIconRunning(); }
+    void memEmitIconPaused  (JsonDocument &doc) { doc["icon_paused"]   = TimerManager.getIconPaused(); }
+    void memEmitIconFinished(JsonDocument &doc) { doc["icon_finished"] = TimerManager.getIconFinished(); }
+}
+
+const TimerMemberConfigDesc TIMER_MEMBER_CONFIG_DESCS[] = {
+    {"buzzer",        memValidateBuzzer,   memApplyBuzzer,        memEmitBuzzer},
+    {"finished",      memValidateFinished, memApplyFinished,      memEmitFinished},
+    {"icon_idle",     memValidateIcon,     memApplyIconIdle,      memEmitIconIdle},
+    {"icon_running",  memValidateIcon,     memApplyIconRunning,   memEmitIconRunning},
+    {"icon_paused",   memValidateIcon,     memApplyIconPaused,    memEmitIconPaused},
+    {"icon_finished", memValidateIcon,     memApplyIconFinished,  memEmitIconFinished},
+};
+
+const size_t TIMER_MEMBER_CONFIG_DESC_COUNT =
+    sizeof(TIMER_MEMBER_CONFIG_DESCS) / sizeof(TIMER_MEMBER_CONFIG_DESCS[0]);
+
+void timerMemberConfigBuildSnapshot(JsonDocument &doc)
+{
+    for (size_t i = 0; i < TIMER_MEMBER_CONFIG_DESC_COUNT; ++i)
+        TIMER_MEMBER_CONFIG_DESCS[i].emit(doc);
+}
+
+bool timerDocTouchesMemberConfig(const JsonDocument &doc)
+{
+    for (size_t i = 0; i < TIMER_MEMBER_CONFIG_DESC_COUNT; ++i)
+        if (doc.containsKey(TIMER_MEMBER_CONFIG_DESCS[i].cmdKey)) return true;
+    return false;
+}

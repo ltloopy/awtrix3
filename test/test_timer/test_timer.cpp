@@ -12,6 +12,7 @@
 #include "../../src/TimerHa.h"
 #include "../../src/TimerView.h"
 #include "../../src/TimerSettings.h"
+#include "../../src/TimerMenu.h"
 #include "Preferences.h"
 
 void setUp(void) {
@@ -1762,6 +1763,229 @@ void test_T6_snapshot_excludes_local_identity(void) {
     TEST_ASSERT_FALSE(doc.containsKey("sync_targets"));
 }
 
+// ============================================================================
+// Member-backed config table (TIMER_MEMBER_CONFIG_DESCS) — the config block's
+// SECOND table (B1). One hook row per member-backed key, routing through
+// TimerManager's deep setters. See docs/adr/0009.
+// ============================================================================
+
+// T7 — the member-config table is well-formed: exactly the six B1 keys, every hook
+// present, and disjoint from TIMER_SETTINGS_DESCS (the two halves never share a
+// cmdKey). This pins the membership the old kMemberConfigKeys list guaranteed.
+void test_T7_member_config_table_well_formed(void) {
+    TEST_ASSERT_EQUAL_UINT32(6, (uint32_t)TIMER_MEMBER_CONFIG_DESC_COUNT);
+
+    const char *expected[] = {"buzzer", "finished", "icon_idle",
+                              "icon_running", "icon_paused", "icon_finished"};
+    for (size_t e = 0; e < 6; ++e) {
+        int hits = 0;
+        for (size_t i = 0; i < TIMER_MEMBER_CONFIG_DESC_COUNT; ++i)
+            if (strcmp(TIMER_MEMBER_CONFIG_DESCS[i].cmdKey, expected[e]) == 0) ++hits;
+        TEST_ASSERT_EQUAL_INT_MESSAGE(1, hits, expected[e]);   // present exactly once
+    }
+
+    for (size_t i = 0; i < TIMER_MEMBER_CONFIG_DESC_COUNT; ++i) {
+        const TimerMemberConfigDesc &d = TIMER_MEMBER_CONFIG_DESCS[i];
+        TEST_ASSERT_NOT_NULL(d.cmdKey);
+        TEST_ASSERT_NOT_NULL((void *)d.validate);
+        TEST_ASSERT_NOT_NULL((void *)d.apply);
+        TEST_ASSERT_NOT_NULL((void *)d.emit);
+        TEST_ASSERT_NULL(timerSettingByCmdKey(d.cmdKey));   // not also a declarative row
+    }
+}
+
+// T8 — member rows validate (accept good / reject bad) and round-trip through the
+// snapshot: after a config command the member snapshot emits the live values, and
+// the table half (timerSettingsBuildSnapshot) does NOT carry them.
+void test_T8_member_config_validate_and_snapshot_roundtrip(void) {
+    SHOW_TIMER = true;
+
+    const TimerMemberConfigDesc *buz = nullptr, *icon = nullptr;
+    for (size_t i = 0; i < TIMER_MEMBER_CONFIG_DESC_COUNT; ++i) {
+        if (strcmp(TIMER_MEMBER_CONFIG_DESCS[i].cmdKey, "buzzer")    == 0) buz  = &TIMER_MEMBER_CONFIG_DESCS[i];
+        if (strcmp(TIMER_MEMBER_CONFIG_DESCS[i].cmdKey, "icon_idle") == 0) icon = &TIMER_MEMBER_CONFIG_DESCS[i];
+    }
+    TEST_ASSERT_NOT_NULL(buz);
+    TEST_ASSERT_NOT_NULL(icon);
+
+    // validate: pure (no global touched). Enum accepts canonical, rejects junk; icon
+    // rejects an over-long name (> 32 chars).
+    StaticJsonDocument<256> in;
+    in["buzzer"]   = "countdown";
+    in["bad"]      = "nope";
+    in["longicon"] = "this_icon_name_is_far_too_long_to_be_valid_xx";
+    TcValue v;
+    TEST_ASSERT_TRUE (buz->validate(in["buzzer"], v));
+    TEST_ASSERT_FALSE(buz->validate(in["bad"], v));
+    TEST_ASSERT_FALSE(icon->validate(in["longicon"], v));
+
+    // round-trip: a config command sets the live values; the member snapshot emits them.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.parseCommand(
+            "{\"buzzer\":\"countdown\",\"finished\":\"re-alert\",\"icon_idle\":\"idle\"}")));
+
+    StaticJsonDocument<512> snap;
+    timerMemberConfigBuildSnapshot(snap);
+    TEST_ASSERT_EQUAL_STRING("countdown", snap["buzzer"]);
+    TEST_ASSERT_EQUAL_STRING("re-alert",  snap["finished"]);
+    TEST_ASSERT_EQUAL_STRING("idle",      snap["icon_idle"]);
+
+    // disjoint in the snapshot too: the declarative table half omits the member keys.
+    StaticJsonDocument<512> tbl;
+    timerSettingsBuildSnapshot(tbl);
+    TEST_ASSERT_FALSE(tbl.containsKey("buzzer"));
+    TEST_ASSERT_FALSE(tbl.containsKey("icon_idle"));
+}
+
+// ============================================================================
+// TIMER menu slot table (src/TimerMenu.cpp). The on-device menu's label/adjust
+// logic, host-testable for the first time (MenuManager itself isn't host-built).
+// Slot order: 0 buzzer, 1 countdown, 2 finished, 3 clear(hold), 4 alert(realert),
+// 5 icon, 6 bar. See docs/adr/0008.
+// ============================================================================
+
+// M1 — table is well-formed: 7 slots, every slot labels, and each table-backed
+// slot's cmdKey resolves to a descriptor whose type matches the slot kind (so the
+// menu can't reference a key the settings table doesn't back, ADR-0007).
+void test_M1_slot_table_well_formed(void) {
+    TEST_ASSERT_EQUAL_UINT32(7, (uint32_t)TIMER_MENU_SLOT_COUNT);
+    for (uint8_t i = 0; i < TIMER_MENU_SLOT_COUNT; ++i) {
+        TEST_ASSERT_TRUE(timerMenuLabel(i).length() > 0);
+        const TimerMenuSlot &s = TIMER_MENU_SLOTS[i];
+        switch (s.kind) {
+            case TimerMenuKind::EnumCycle:
+                TEST_ASSERT_NOT_NULL(s.labels);
+                TEST_ASSERT_TRUE(s.labelCount > 0);
+                TEST_ASSERT_NOT_NULL((void *)s.getEnum);
+                TEST_ASSERT_NOT_NULL((void *)s.setEnum);
+                break;
+            case TimerMenuKind::SteppedRange: {
+                const TimerSettingDesc *d = timerSettingByCmdKey(s.cmdKey);
+                TEST_ASSERT_NOT_NULL(d);
+                TEST_ASSERT_TRUE(d->type == TcType::U16);
+                TEST_ASSERT_TRUE(s.step > 0);
+                break;
+            }
+            case TimerMenuKind::BoolToggle: {
+                const TimerSettingDesc *d = timerSettingByCmdKey(s.cmdKey);
+                TEST_ASSERT_NOT_NULL(d);
+                TEST_ASSERT_TRUE(d->type == TcType::Bool);
+                break;
+            }
+        }
+    }
+}
+
+// M2 — enum slots cycle both ways and route through the real TimerManager setter
+// (proven by the recorded MQTT publish), not a raw member poke.
+void test_M2_enum_cycle_wraps_and_routes_via_setter(void) {
+    TimerManager.setBuzzerMode(BuzzerMode::Off);
+    MQTTManager.__test_reset();
+
+    timerMenuAdjust(0, +1);   // Off -> End
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)BuzzerMode::End, (uint8_t)TimerManager.getBuzzerMode());
+    TEST_ASSERT_NOT_NULL(fixture::last_publish(PublishCall::Buzzer));
+
+    timerMenuAdjust(0, +1);   // End -> Countdown
+    timerMenuAdjust(0, +1);   // Countdown -> Off (wrap)
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)BuzzerMode::Off, (uint8_t)TimerManager.getBuzzerMode());
+
+    timerMenuAdjust(0, -1);   // Off -> Countdown (wrap backward)
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)BuzzerMode::Countdown, (uint8_t)TimerManager.getBuzzerMode());
+
+    // finished slot routes through its setter too.
+    TimerManager.setFinishedMode(FinishedMode::AutoClear);
+    MQTTManager.__test_reset();
+    timerMenuAdjust(2, +1);   // AutoClear -> Hold
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)FinishedMode::Hold, (uint8_t)TimerManager.getFinishedMode());
+    TEST_ASSERT_NOT_NULL(fixture::last_publish(PublishCall::Finished));
+}
+
+// M3 — stepped ranges saturate at the descriptor bounds (no overshoot/underflow).
+void test_M3_stepped_range_saturates(void) {
+    // finished_hold (slot 3): step 5, lo 1, hi 300.
+    TIMER_FINISHED_HOLD = 298;
+    timerMenuAdjust(3, +1);                                  // 298 (+5 -> 303 > 300) -> cap
+    TEST_ASSERT_EQUAL_UINT16(300, TIMER_FINISHED_HOLD);
+    timerMenuAdjust(3, +1);
+    TEST_ASSERT_EQUAL_UINT16(300, TIMER_FINISHED_HOLD);
+    TIMER_FINISHED_HOLD = 4;
+    timerMenuAdjust(3, -1);                                  // 4 (>=1+5? no) -> lo
+    TEST_ASSERT_EQUAL_UINT16(1, TIMER_FINISHED_HOLD);
+
+    // countdown_seconds (slot 1): step 1, lo 0, hi 30.
+    TIMER_COUNTDOWN_SECONDS = 30;
+    timerMenuAdjust(1, +1);
+    TEST_ASSERT_EQUAL_UINT16(30, TIMER_COUNTDOWN_SECONDS);
+    TIMER_COUNTDOWN_SECONDS = 0;
+    timerMenuAdjust(1, -1);
+    TEST_ASSERT_EQUAL_UINT16(0, TIMER_COUNTDOWN_SECONDS);
+    timerMenuAdjust(1, +1);
+    TEST_ASSERT_EQUAL_UINT16(1, TIMER_COUNTDOWN_SECONDS);
+}
+
+// M4 — bool toggles flip on either button.
+void test_M4_bool_toggle_flips_both_directions(void) {
+    TIMER_ICON_ENABLED = true;
+    timerMenuAdjust(5, +1);
+    TEST_ASSERT_FALSE(TIMER_ICON_ENABLED);
+    timerMenuAdjust(5, -1);
+    TEST_ASSERT_TRUE(TIMER_ICON_ENABLED);
+
+    TIMER_BAR_ENABLED = false;
+    timerMenuAdjust(6, +1);
+    TEST_ASSERT_TRUE(TIMER_BAR_ENABLED);
+    timerMenuAdjust(6, -1);
+    TEST_ASSERT_FALSE(TIMER_BAR_ENABLED);
+}
+
+// M5 — the stepped clamp bounds ARE the descriptor's lo/hi (single source, ADR-0007):
+// for every SteppedRange slot, saturate up == hi and down == lo.
+void test_M5_stepped_clamps_to_descriptor_bounds(void) {
+    for (uint8_t i = 0; i < TIMER_MENU_SLOT_COUNT; ++i) {
+        const TimerMenuSlot &s = TIMER_MENU_SLOTS[i];
+        if (s.kind != TimerMenuKind::SteppedRange) continue;
+        const TimerSettingDesc *d = timerSettingByCmdKey(s.cmdKey);
+        TEST_ASSERT_NOT_NULL(d);
+        uint16_t &v = *static_cast<uint16_t *>(d->storage);
+
+        v = (uint16_t)d->hi;
+        timerMenuAdjust(i, +1);
+        TEST_ASSERT_EQUAL_UINT16((uint16_t)d->hi, v);   // cannot exceed hi
+
+        v = (uint16_t)d->lo;
+        timerMenuAdjust(i, -1);
+        TEST_ASSERT_EQUAL_UINT16((uint16_t)d->lo, v);   // cannot drop below lo
+    }
+}
+
+// M6 — label formatting matches the on-screen strings.
+void test_M6_label_formatting(void) {
+    TIMER_FINISHED_HOLD = 10;
+    TEST_ASSERT_EQUAL_STRING("CLEAR 10", timerMenuLabel(3).c_str());
+    TimerManager.setBuzzerMode(BuzzerMode::End);
+    TEST_ASSERT_EQUAL_STRING("BZR END", timerMenuLabel(0).c_str());
+    TIMER_ICON_ENABLED = true;
+    TEST_ASSERT_EQUAL_STRING("ICON ON", timerMenuLabel(5).c_str());
+    TIMER_COUNTDOWN_SECONDS = 3;
+    TEST_ASSERT_EQUAL_STRING("CDOWN 3", timerMenuLabel(1).c_str());
+}
+
+// M7 — an enum adjust applies + publishes live but DEFERS the NVS write; the write
+// happens only on the commit (persistConfig). Proven via Preferences::begin_calls
+// (persist() brackets a begin("timer")). See ADR-0008.
+void test_M7_enum_adjust_defers_persist_until_commit(void) {
+    TimerManager.setBuzzerMode(BuzzerMode::End);   // known starting point (default persist)
+    int before = Preferences::begin_calls;
+
+    timerMenuAdjust(0, +1);   // End -> Countdown, persist deferred
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)BuzzerMode::Countdown, (uint8_t)TimerManager.getBuzzerMode());
+    TEST_ASSERT_EQUAL_INT(before, Preferences::begin_calls);   // no "timer"-ns write yet
+
+    TimerManager.persistConfig();
+    TEST_ASSERT_TRUE(Preferences::begin_calls > before);       // commit flushed it
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
@@ -1835,5 +2059,14 @@ int main(int, char **) {
     RUN_TEST(test_T4_table_nvs_roundtrip);
     RUN_TEST(test_T5_devjson_best_effort);
     RUN_TEST(test_T6_snapshot_excludes_local_identity);
+    RUN_TEST(test_T7_member_config_table_well_formed);
+    RUN_TEST(test_T8_member_config_validate_and_snapshot_roundtrip);
+    RUN_TEST(test_M1_slot_table_well_formed);
+    RUN_TEST(test_M2_enum_cycle_wraps_and_routes_via_setter);
+    RUN_TEST(test_M3_stepped_range_saturates);
+    RUN_TEST(test_M4_bool_toggle_flips_both_directions);
+    RUN_TEST(test_M5_stepped_clamps_to_descriptor_bounds);
+    RUN_TEST(test_M6_label_formatting);
+    RUN_TEST(test_M7_enum_adjust_defers_persist_until_commit);
     return UNITY_END();
 }

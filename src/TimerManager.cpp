@@ -23,21 +23,10 @@ namespace {
     const char *FALLBACK_END_RTTTL  = "timer:d=4,o=5,b=120:c,8p,c,8p,c";
     const char *FALLBACK_TICK_RTTTL = "tick:d=16,o=6,b=200:c";
 
-    // The config-block keys that stay member-backed (B1 boundary, ADR-0007) rather
-    // than living in TIMER_SETTINGS_DESCS: their values are owned by TimerManager's
-    // publish-aware setters. This single list governs their snapshot/broadcast
-    // membership so buildConfigSnapshot and the parseCommand broadcast trigger cannot
-    // drift apart. (Value handling still lives in the setters; this is membership only.)
-    const char *const kMemberConfigKeys[] = {
-        "buzzer", "finished", "icon_idle", "icon_running", "icon_paused", "icon_finished"};
-    constexpr size_t kMemberConfigKeyCount = sizeof(kMemberConfigKeys) / sizeof(kMemberConfigKeys[0]);
-
-    bool docTouchesMemberConfig(const JsonDocument &doc)
-    {
-        for (size_t i = 0; i < kMemberConfigKeyCount; ++i)
-            if (doc.containsKey(kMemberConfigKeys[i])) return true;
-        return false;
-    }
+    // The config-block keys that stay member-backed (B1 boundary, ADR-0007/0009) now
+    // live in TIMER_MEMBER_CONFIG_DESCS (TimerSettings.cpp), the config block's second
+    // table. Validation, apply, snapshot-emit and the broadcast trigger all loop that
+    // one table, so they cannot drift apart.
 }
 
 static Preferences timerPrefs;
@@ -520,20 +509,25 @@ void TimerManager_::setDuration(uint32_t seconds)
     publishDuration();
 }
 
-void TimerManager_::setBuzzerMode(BuzzerMode m)
+void TimerManager_::setBuzzerMode(BuzzerMode m, bool persist)
 {
     if (buzzerMode == m) return;
     buzzerMode = m;
-    persistIfDirty();
+    if (persist) persistIfDirty();
     publishBuzzerMode();
 }
 
-void TimerManager_::setFinishedMode(FinishedMode m)
+void TimerManager_::setFinishedMode(FinishedMode m, bool persist)
 {
     if (finishedMode == m) return;
     finishedMode = m;
-    persistIfDirty();
+    if (persist) persistIfDirty();
     publishFinishedMode();
+}
+
+void TimerManager_::persistConfig()
+{
+    persist();
 }
 
 void TimerManager_::tick()
@@ -698,17 +692,18 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
         if (durSecs < 1 || (effectiveMaxDuration > 0 && durSecs > effectiveMaxDuration)) return TimerCmdResult::BadField;
     }
 
-    BuzzerMode   buzzer   = buzzerMode;
-    FinishedMode finished = finishedMode;
-    bool haveBuzzer   = doc.containsKey("buzzer");
-    bool haveFinished = doc.containsKey("finished");
-    if (haveBuzzer   && !parseBuzzerMode  (doc["buzzer"].as<String>(),   buzzer))   return TimerCmdResult::BadField;
-    if (haveFinished && !parseFinishedMode(doc["finished"].as<String>(), finished)) return TimerCmdResult::BadField;
-
-    if (doc.containsKey("icon_idle")     && !isValidIconName(doc["icon_idle"].as<String>()))     return TimerCmdResult::BadField;
-    if (doc.containsKey("icon_running")  && !isValidIconName(doc["icon_running"].as<String>()))  return TimerCmdResult::BadField;
-    if (doc.containsKey("icon_paused")   && !isValidIconName(doc["icon_paused"].as<String>()))   return TimerCmdResult::BadField;
-    if (doc.containsKey("icon_finished") && !isValidIconName(doc["icon_finished"].as<String>())) return TimerCmdResult::BadField;
+    // Member-backed config half (B1): validate + coerce each present row into a staging
+    // array via its hook. Pure -- no global written until the apply pass below, so a bad
+    // member field rejects the whole command atomically (ADR-0001), same as the table half.
+    TcValue memberStaged[TIMER_MEMBER_CONFIG_DESC_COUNT];
+    bool    memberPresent[TIMER_MEMBER_CONFIG_DESC_COUNT];
+    for (size_t i = 0; i < TIMER_MEMBER_CONFIG_DESC_COUNT; ++i)
+    {
+        const TimerMemberConfigDesc &d = TIMER_MEMBER_CONFIG_DESCS[i];
+        memberPresent[i] = doc.containsKey(d.cmdKey);
+        if (!memberPresent[i]) continue;
+        if (!d.validate(doc[d.cmdKey], memberStaged[i])) return TimerCmdResult::BadField;
+    }
 
     bool haveAction = doc.containsKey("action");
     if (haveAction && !isValidAction(doc["action"].as<String>())) return TimerCmdResult::BadField;
@@ -740,17 +735,15 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
         if (strcmp(d.cmdKey, "melody_tick") == 0 || strcmp(d.cmdKey, "melody_end") == 0) melodyChanged = true;
     }
 
-    // Member-backed applies via publish-aware setters; their "timer"-namespace NVS
-    // writes are batched under _suspendPersist into a single persist().
+    // Member-backed applies via publish-aware setters (routed through the member table's
+    // apply hooks); their "timer"-namespace NVS writes are batched under _suspendPersist
+    // into a single persist(). duration stays its own call (run-state, B1; applied first
+    // so it lands before any member-config side effects).
     _suspendPersist = true;
     _dirty = false;
-    if (haveDuration)               setDuration(durSecs);   // pre-validated in range
-    if (doc.containsKey("icon_idle"))     setIconIdle    (doc["icon_idle"].as<String>());
-    if (doc.containsKey("icon_running"))  setIconRunning (doc["icon_running"].as<String>());
-    if (doc.containsKey("icon_paused"))   setIconPaused  (doc["icon_paused"].as<String>());
-    if (doc.containsKey("icon_finished")) setIconFinished(doc["icon_finished"].as<String>());
-    if (haveBuzzer)                 setBuzzerMode(buzzer);
-    if (haveFinished)               setFinishedMode(finished);
+    if (haveDuration) setDuration(durSecs);   // pre-validated in range
+    for (size_t i = 0; i < TIMER_MEMBER_CONFIG_DESC_COUNT; ++i)
+        if (memberPresent[i]) TIMER_MEMBER_CONFIG_DESCS[i].apply(memberStaged[i]);
     _suspendPersist = false;
     if (_dirty)
     {
@@ -789,8 +782,8 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
         bool runStateChanged = haveAction || haveDuration;
         // configChanged = any config-block key edited. Snapshot membership IS the
         // broadcast trigger (one flag, ADR-0006): the table half via inSnapshot, the
-        // member-backed half via the shared kMemberConfigKeys list.
-        bool configChanged = snapshotChanged || docTouchesMemberConfig(doc);
+        // member-backed half via the TIMER_MEMBER_CONFIG_DESCS table.
+        bool configChanged = snapshotChanged || timerDocTouchesMemberConfig(doc);
 
         if (configChanged) broadcastConfig();
         if (runStateChanged)
@@ -846,30 +839,15 @@ void TimerManager_::addSyncEnvelope(JsonObject &sync)
     }
 }
 
-void TimerManager_::addMemberConfigToSnapshot(JsonDocument &doc) const
-{
-    // The member-backed half of the config block (B1, ADR-0007). Membership is the
-    // single shared kMemberConfigKeys list; values come from the live members here.
-    for (size_t i = 0; i < kMemberConfigKeyCount; ++i)
-    {
-        const char *k = kMemberConfigKeys[i];
-        if      (strcmp(k, "buzzer")        == 0) doc[k] = buzzerModeString();
-        else if (strcmp(k, "finished")      == 0) doc[k] = finishedModeString();
-        else if (strcmp(k, "icon_idle")     == 0) doc[k] = iconIdle;
-        else if (strcmp(k, "icon_running")  == 0) doc[k] = iconRunning;
-        else if (strcmp(k, "icon_paused")   == 0) doc[k] = iconPaused;
-        else if (strcmp(k, "icon_finished") == 0) doc[k] = iconFinished;
-    }
-}
-
 void TimerManager_::buildConfigSnapshot(JsonDocument &doc) const
 {
     // Config block only — never action/duration (run-state) or sync_* (local identity,
-    // inSnapshot=false). Two halves: the table (inSnapshot rows) and the member-backed
-    // fields (B1, ADR-0007). Both source their membership from one definition, so the
-    // snapshot can't drift from the parseCommand broadcast trigger.
+    // inSnapshot=false). Two tables, one config block: TIMER_SETTINGS_DESCS' inSnapshot
+    // rows and TIMER_MEMBER_CONFIG_DESCS (the member-backed half, B1, ADR-0007/0009).
+    // Each table also feeds the parseCommand broadcast trigger, so the snapshot can't
+    // drift from what fires a broadcast.
     timerSettingsBuildSnapshot(doc);
-    addMemberConfigToSnapshot(doc);
+    timerMemberConfigBuildSnapshot(doc);
 }
 
 void TimerManager_::broadcastRunState(const char *action)

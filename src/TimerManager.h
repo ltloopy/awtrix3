@@ -65,7 +65,6 @@ private:
     bool syncSeenRecently(const String &src, uint32_t seq, unsigned long nowMs);
 
     void buildConfigSnapshot(JsonDocument &doc) const;   // config keys only; no action/duration/sync_*
-    void addMemberConfigToSnapshot(JsonDocument &doc) const;  // member-backed config block half (B1, ADR-0007)
     void addSyncEnvelope(JsonObject &sync);              // src/seq/tgt
     bool syncTargetsMe(JsonVariantConst tgt) const;      // does _sync.tgt cover this clock's uniqueID?
 
@@ -83,12 +82,6 @@ private:
 
     static String validateIconName(const String &name);
 
-    // Canonical output spellings for the timer enums, co-located with
-    // getStateString() so the one true spelling of each enum lives in one place.
-    // (The command parser additionally tolerates non-hyphen aliases on input.)
-    const char *buzzerModeString() const;
-    const char *finishedModeString() const;
-
 public:
     static TimerManager_ &getInstance();
     void setup();
@@ -99,8 +92,15 @@ public:
     void reset();
 
     void setDuration(uint32_t seconds);
-    void setBuzzerMode(BuzzerMode m);
-    void setFinishedMode(FinishedMode m);
+    // persist=false applies + publishes live but defers the NVS write (the TIMER
+    // menu's deferred-to-commit path; mirrors setIcon*'s publish flag). Every other
+    // caller uses the default and persists immediately. See docs/adr/0008.
+    void setBuzzerMode(BuzzerMode m, bool persist = true);
+    void setFinishedMode(FinishedMode m, bool persist = true);
+
+    // Flush the member-backed config block ("timer" NVS namespace) to storage. Used
+    // by the TIMER menu commit to write enum edits deferred during scroll (ADR-0008).
+    void persistConfig();
 
     // Time <-> seconds helpers shared by the MQTT/HA string path and the
     // on-device config editor. parseHMS/formatHMS are the external string
@@ -164,6 +164,14 @@ public:
     const String &getIconForState(TimerState s) const;
 
     const char *getStateString() const;
+
+    // Canonical output spellings for the timer enums, co-located with
+    // getStateString() so the one true spelling of each enum lives in one place.
+    // (The command parser additionally tolerates non-hyphen aliases on input.)
+    // Public so the member-config table's emit hooks (TimerSettings.cpp) can read
+    // them when building the propagated config snapshot. See docs/adr/0009.
+    const char *buzzerModeString() const;
+    const char *finishedModeString() const;
 
     // Live read-only snapshot for the GET /api/timer observation surface.
     // Reports computeCurrentRemaining() (wall-clock fresh), not the throttled

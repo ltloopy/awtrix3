@@ -72,4 +72,36 @@ void timerSettingsBuildSnapshot(JsonDocument &doc);
 // Lookup by command key (used by MenuManager to reuse a row's range bounds).
 const TimerSettingDesc *timerSettingByCmdKey(const char *cmdKey);
 
+// ---------------------------------------------------------------------------
+// The config block's SECOND table: the member-backed half (B1, ADR-0007/0009).
+//
+// One row per member-backed config key (buzzer / finished / the four icon_<state>).
+// Unlike TIMER_SETTINGS_DESCS' DECLARATIVE rows, these carry function-pointer hooks
+// -- exactly like TIMER_MENU_SLOTS' enum slots -- because their values are owned by
+// TimerManager's publish-aware setters (equality-skip, _suspendPersist batching, MQTT
+// publish), not by a typed storage pointer. This is NOT ADR-0007's rejected "B2 / fold
+// into the declarative table"; it is a separate hook table, the fourth member of the
+// descriptor-table family (TIMER_SETTINGS_DESCS, TIMER_HA_DESCRIPTORS, TIMER_MENU_SLOTS).
+//
+// Together the two tables ARE the config block. `duration` is member-backed too but is
+// deliberately EXCLUDED: it is run-state, not config (CONTEXT.md), and its validation
+// depends on the cross-field effectiveMaxDuration staged from the table half.
+struct TimerMemberConfigDesc
+{
+    const char *cmdKey;                                  // POST/MQTT + snapshot key
+    bool (*validate)(JsonVariantConst, TcValue &out);    // pure: validate + coerce, no mutation
+    void (*apply)(const TcValue &);                      // routes via TimerManager's deep setter
+    void (*emit)(JsonDocument &doc);                     // writes the live value into the snapshot
+};
+
+extern const TimerMemberConfigDesc TIMER_MEMBER_CONFIG_DESCS[];
+extern const size_t                TIMER_MEMBER_CONFIG_DESC_COUNT;
+
+// Emit each member-config key's live value into `doc` (the B1 half of the config snapshot).
+void timerMemberConfigBuildSnapshot(JsonDocument &doc);
+
+// True iff `doc` carries any member-config key -- the broadcast trigger for the B1 half
+// (snapshot membership IS the broadcast trigger, ADR-0006).
+bool timerDocTouchesMemberConfig(const JsonDocument &doc);
+
 #endif

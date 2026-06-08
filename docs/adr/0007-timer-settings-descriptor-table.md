@@ -72,6 +72,12 @@ trigger, the member-backed half is governed by a single shared membership list
 (`kMemberConfigKeys` in TimerManager.cpp), used by both `addMemberConfigToSnapshot` and
 the `parseCommand` broadcast trigger.
 
+> _Superseded for the member-backed half by [ADR-0009](0009-member-config-hook-table.md):
+> the `kMemberConfigKeys` list and the hand-written validate/apply/`addMemberConfigToSnapshot`
+> blocks were replaced by `TIMER_MEMBER_CONFIG_DESCS`, a **hook table** (the config block's
+> second table) — not the rejected "B2 / fold into the declarative table". The B1 boundary
+> stands; only its enumeration moved into one row per key._
+
 ### Validators shared across surfaces; atomicity is per-surface
 
 `parseCommand` (control surface) stays **atomic-reject** (one bad field rejects all).
@@ -85,6 +91,8 @@ are now defined once, and the previously-unvalidated keys (`bar_color`, melodies
 
 - **No on-device menu / HA entity changes.** The `TIMER` menu keeps its own step sizes;
   it now reads each knob's range from the row instead of an inline literal.
+  _(Superseded for the menu by [ADR-0008](0008-timer-menu-slot-table.md): the menu was
+  later given its own descriptor table and its commit model unified.)_
 - **No NVS format change.** Keys, types and defaults are unchanged; only their
   enumeration moved into the table.
 
@@ -92,7 +100,8 @@ are now defined once, and the previously-unvalidated keys (`bar_color`, melodies
 
 - Adding a new **plain value-config key** is now a single table row (validation, apply,
   NVS, dev.json and snapshot follow automatically). A new **publish-aware** key still
-  needs its setter plus an entry in `kMemberConfigKeys`.
+  needs its setter plus a row in `TIMER_MEMBER_CONFIG_DESCS` (per [ADR-0009](0009-member-config-hook-table.md);
+  originally an entry in the `kMemberConfigKeys` list).
 - The numeric ranges and the validate/apply duality are eliminated; CONTEXT.md's
   config-block / sync-roles split is codified as the `inSnapshot` column.
 - The Timer NVS round-trip became host-testable for the first time (it had lived in the

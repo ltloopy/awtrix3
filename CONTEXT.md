@@ -58,6 +58,32 @@ There are two physically distinct on-device places to configure the Timer; use t
 
 ADR-0001 originally named "the on-device config buttons" as the timer's single on-device control surface — that referred to the Timer-app config mode. With the global `TIMER` menu added, on-device timer configuration now spans both surfaces; ADR-0003 documents the addition.
 
+### TIMER menu slot table
+
+The data model behind the **TIMER global menu**'s seven slots: the table `TIMER_MENU_SLOTS`
+([src/TimerMenu.h](src/TimerMenu.h)), a member of the Timer descriptor-table family
+alongside `TIMER_SETTINGS_DESCS`, `TIMER_MEMBER_CONFIG_DESCS` and `TIMER_HA_DESCRIPTORS`.
+`MenuManager` walks it for
+label and adjust (`timerMenuLabel` / `timerMenuAdjust`) and keeps only the drawing; the
+module is display-free, so the label/clamp/wrap/cycle logic is host-tested. Three slot
+kinds:
+
+- **Table-backed slots** (`SteppedRange`, `BoolToggle`) carry only a `cmdKey`; the dispatch
+  reads both *storage* and *range* (`lo`/`hi`) from the matching `TIMER_SETTINGS_DESCS` row.
+  The menu reuses the settings table's pointer and bounds, so it cannot drift from it.
+- **Enum slots** (buzzer, finished) are member-backed (the B1 boundary, ADR-0007): they
+  carry bespoke `getEnum`/`setEnum` hooks, like the settings table's `bespoke` validators.
+
+All seven slots share one commit model (ADR-0008, superseding ADR-0003's split): each slot
+**applies to RAM live** while scrolling — and enum slots also **publish** live, so HA
+reflects them — but the **NVS write and the peer broadcast happen only on the long-press
+commit** (`TimerManager::persistConfig()` for the enum half, `saveSettings()` for the table
+half, then `broadcastConfig()`). Enum slots defer their NVS write via the `persist=false`
+argument on `setBuzzerMode`/`setFinishedMode` (sibling to `setIcon*`'s `publish` flag).
+
+_Avoid_: calling this the "Timer-app config mode" (that is the separate HH/MM/SS duration
+editor) or implying enum edits persist per-press (they no longer do, per ADR-0008).
+
 ### Control surface vs. observation surface
 
 Two distinct kinds of Timer interface; do not conflate them.
@@ -102,10 +128,11 @@ triggers and must not be conflated:
   display-element toggles, icon images, melodies, bar color) with **no** `action` and
   **no** `duration`. Fired only by a deliberate config edit. Last-config-writer-wins for
   the whole block: after a config edit propagates, the group is configured identically.
-  Concretely, the config block is the `inSnapshot == true` rows of `TIMER_SETTINGS_DESCS`
-  plus the member-backed keys (`buzzer`/`finished`/icons); both halves source their
-  snapshot membership from one definition, so the snapshot can't drift from the broadcast
-  trigger (ADR-0007).
+  Concretely, the config block is **two tables**: the `inSnapshot == true` rows of
+  `TIMER_SETTINGS_DESCS` (the declarative half) and `TIMER_MEMBER_CONFIG_DESCS` (the
+  member-backed half — `buzzer`/`finished`/icons, B1). Each table feeds both the snapshot
+  build and the `parseCommand` broadcast trigger, so the snapshot can't drift from the
+  trigger (ADR-0007, ADR-0009).
 
 _Avoid_: putting `duration` in the config snapshot, or letting a start/reset re-push
 config — those reintroduce the "starting a timer rewrote my settings" surprise this
