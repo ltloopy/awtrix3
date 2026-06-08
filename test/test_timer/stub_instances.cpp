@@ -19,6 +19,7 @@
 std::map<String, uint32_t> Preferences::u32_;
 std::map<String, uint8_t>  Preferences::u8_;
 std::map<String, String>   Preferences::str_;
+std::map<String, bool>     Preferences::b_;
 int Preferences::begin_calls = 0;
 
 LittleFS_Stub LittleFS;

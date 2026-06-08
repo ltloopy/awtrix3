@@ -31,10 +31,22 @@ public:
         return value.length();
     }
 
-    static void __test_reset() { u32_.clear(); u8_.clear(); str_.clear(); begin_calls = 0; }
+    bool getBool(const char *key, bool def = false) {
+        auto it = b_.find(String(key));
+        return it == b_.end() ? def : it->second;
+    }
+    void putBool(const char *key, bool value) { b_[String(key)] = value; }
+
+    void remove(const char *key) {
+        String k(key);
+        u32_.erase(k); u8_.erase(k); str_.erase(k); b_.erase(k);
+    }
+
+    static void __test_reset() { u32_.clear(); u8_.clear(); str_.clear(); b_.clear(); begin_calls = 0; }
 
 private:
     static std::map<String, uint32_t> u32_;
     static std::map<String, uint8_t>  u8_;
     static std::map<String, String>   str_;
+    static std::map<String, bool>     b_;
 };

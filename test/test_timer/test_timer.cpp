@@ -11,6 +11,8 @@
 #include "fixture.h"
 #include "../../src/TimerHa.h"
 #include "../../src/TimerView.h"
+#include "../../src/TimerSettings.h"
+#include "Preferences.h"
 
 void setUp(void) {
     fixture::reset_all();
@@ -1628,6 +1630,138 @@ void test_U51_setDuration_while_paused_resets_to_idle(void) {
     TEST_ASSERT_EQUAL_UINT32(600, rem->value);
 }
 
+// ============================================================================
+// T1 — TIMER_SETTINGS_DESCS: UIntRange validators reject/accept at the exact
+// boundaries, reached directly (not through the 300-line parseCommand).
+// ============================================================================
+void test_T1_table_uintrange_boundaries(void) {
+    StaticJsonDocument<64> j;
+    TcValue out;
+
+    const TimerSettingDesc *fh = timerSettingByCmdKey("finished_hold");  // 1..300
+    TEST_ASSERT_NOT_NULL(fh);
+    j["v"] = 0;   TEST_ASSERT_FALSE(timerSettingParse(*fh, j["v"], out));
+    j["v"] = 1;   TEST_ASSERT_TRUE (timerSettingParse(*fh, j["v"], out)); TEST_ASSERT_EQUAL_UINT32(1,   out.num);
+    j["v"] = 300; TEST_ASSERT_TRUE (timerSettingParse(*fh, j["v"], out)); TEST_ASSERT_EQUAL_UINT32(300, out.num);
+    j["v"] = 301; TEST_ASSERT_FALSE(timerSettingParse(*fh, j["v"], out));
+
+    const TimerSettingDesc *cd = timerSettingByCmdKey("countdown_seconds");  // 0..30
+    TEST_ASSERT_NOT_NULL(cd);
+    j["v"] = 0;  TEST_ASSERT_TRUE (timerSettingParse(*cd, j["v"], out)); TEST_ASSERT_EQUAL_UINT32(0, out.num);
+    j["v"] = 30; TEST_ASSERT_TRUE (timerSettingParse(*cd, j["v"], out));
+    j["v"] = 31; TEST_ASSERT_FALSE(timerSettingParse(*cd, j["v"], out));
+}
+
+// ============================================================================
+// T2 — Strict JSON types per check kind: Bool rows demand a real bool; numeric
+// rows reject bool/string. (Same contract the legacy parseCommand enforced.)
+// ============================================================================
+void test_T2_table_strict_types(void) {
+    StaticJsonDocument<64> j;
+    TcValue out;
+
+    const TimerSettingDesc *ie = timerSettingByCmdKey("icon_enabled");  // Bool
+    j["v"] = true;   TEST_ASSERT_TRUE (timerSettingParse(*ie, j["v"], out)); TEST_ASSERT_TRUE(out.b);
+    j["v"] = 1;      TEST_ASSERT_FALSE(timerSettingParse(*ie, j["v"], out));  // int is not bool
+    j["v"] = "true"; TEST_ASSERT_FALSE(timerSettingParse(*ie, j["v"], out));
+
+    const TimerSettingDesc *fh = timerSettingByCmdKey("finished_hold");  // numeric
+    j["v"] = true;  TEST_ASSERT_FALSE(timerSettingParse(*fh, j["v"], out));   // bool is not number
+    j["v"] = "50";  TEST_ASSERT_FALSE(timerSettingParse(*fh, j["v"], out));   // string is not number
+}
+
+// ============================================================================
+// T3 — Bespoke validators: bar_color (int or #RRGGBB) and sync_targets (""/all/
+// comma-list) live in the table via fn pointers.
+// ============================================================================
+void test_T3_table_bespoke_validators(void) {
+    StaticJsonDocument<64> j;
+    TcValue out;
+
+    const TimerSettingDesc *bc = timerSettingByCmdKey("bar_color");
+    j["v"] = 0xABCDEF;  TEST_ASSERT_TRUE (timerSettingParse(*bc, j["v"], out)); TEST_ASSERT_EQUAL_UINT32(0xABCDEF, out.num);
+    j["v"] = 0x1000000; TEST_ASSERT_FALSE(timerSettingParse(*bc, j["v"], out));  // > 0xFFFFFF
+    j["v"] = "#FF8800"; TEST_ASSERT_TRUE (timerSettingParse(*bc, j["v"], out)); TEST_ASSERT_EQUAL_UINT32(0xFF8800, out.num);
+    j["v"] = "00aa55";  TEST_ASSERT_TRUE (timerSettingParse(*bc, j["v"], out)); TEST_ASSERT_EQUAL_UINT32(0x00AA55, out.num);
+    j["v"] = "GGGGGG";  TEST_ASSERT_FALSE(timerSettingParse(*bc, j["v"], out));  // non-hex
+    j["v"] = "12345";   TEST_ASSERT_FALSE(timerSettingParse(*bc, j["v"], out));  // wrong length
+
+    const TimerSettingDesc *st = timerSettingByCmdKey("sync_targets");
+    j["v"] = "";                       TEST_ASSERT_TRUE (timerSettingParse(*st, j["v"], out));
+    j["v"] = "all";                    TEST_ASSERT_TRUE (timerSettingParse(*st, j["v"], out)); TEST_ASSERT_EQUAL_STRING("all", out.str.c_str());
+    j["v"] = "awtrix_ab12,awtrix_cd";  TEST_ASSERT_TRUE (timerSettingParse(*st, j["v"], out));
+    j["v"] = "bad token!";             TEST_ASSERT_FALSE(timerSettingParse(*st, j["v"], out));
+    j["v"] = 5;                        TEST_ASSERT_FALSE(timerSettingParse(*st, j["v"], out));  // not a string
+}
+
+// ============================================================================
+// T4 — NVS round-trip across the whole table (newly testable: was uncovered in
+// Globals.cpp). Save -> clobber globals -> load restores every type.
+// ============================================================================
+void test_T4_table_nvs_roundtrip(void) {
+    Preferences p;
+
+    TIMER_FINISHED_HOLD = 123;
+    TIMER_MAX_DURATION  = 4242;
+    TIMER_BAR_ENABLED   = false;
+    TIMER_BAR_COLOR     = 0x112233;
+    TIMER_MELODY_TICK   = "mytick";
+    TIMER_SYNC_FOLLOW   = true;
+    TIMER_SYNC_TARGETS  = "all";
+    timerSettingsSaveNvs(p);
+
+    TIMER_FINISHED_HOLD = 1;
+    TIMER_MAX_DURATION  = 1;
+    TIMER_BAR_ENABLED   = true;
+    TIMER_BAR_COLOR     = 0;
+    TIMER_MELODY_TICK   = "x";
+    TIMER_SYNC_FOLLOW   = false;
+    TIMER_SYNC_TARGETS  = "";
+    timerSettingsLoadNvs(p);
+
+    TEST_ASSERT_EQUAL_UINT16(123,      TIMER_FINISHED_HOLD);
+    TEST_ASSERT_EQUAL_UINT32(4242,     TIMER_MAX_DURATION);
+    TEST_ASSERT_FALSE(TIMER_BAR_ENABLED);
+    TEST_ASSERT_EQUAL_UINT32(0x112233, TIMER_BAR_COLOR);
+    TEST_ASSERT_EQUAL_STRING("mytick", TIMER_MELODY_TICK.c_str());
+    TEST_ASSERT_TRUE(TIMER_SYNC_FOLLOW);
+    TEST_ASSERT_EQUAL_STRING("all",    TIMER_SYNC_TARGETS.c_str());
+}
+
+// ============================================================================
+// T5 — dev.json is per-key best-effort: a valid key applies, an out-of-range
+// sibling is skipped (not atomic-rejected), and other keys still land.
+// ============================================================================
+void test_T5_devjson_best_effort(void) {
+    // Defaults after reset_all(): finished_hold=10, realert_interval=15.
+    StaticJsonDocument<256> doc;
+    doc["timer_finished_hold"]   = 50;        // valid -> applied
+    doc["timer_realert_interval"] = 9999;     // out of range -> skipped
+    doc["timer_bar_color"]       = "#0000FF"; // valid hex string -> applied
+    timerSettingsLoadDevJson(doc.as<JsonObjectConst>());
+
+    TEST_ASSERT_EQUAL_UINT16(50,       TIMER_FINISHED_HOLD);
+    TEST_ASSERT_EQUAL_UINT16(15,       TIMER_REALERT_INTERVAL);  // unchanged (best-effort skip)
+    TEST_ASSERT_EQUAL_UINT32(0x0000FF, TIMER_BAR_COLOR);
+}
+
+// ============================================================================
+// T6 — Snapshot membership = inSnapshot column: config-block table keys are
+// emitted; the local-identity sync keys are excluded (ADR-0006).
+// ============================================================================
+void test_T6_snapshot_excludes_local_identity(void) {
+    StaticJsonDocument<512> doc;
+    timerSettingsBuildSnapshot(doc);
+
+    TEST_ASSERT_TRUE(doc.containsKey("finished_hold"));
+    TEST_ASSERT_TRUE(doc.containsKey("bar_color"));
+    TEST_ASSERT_TRUE(doc.containsKey("melody_tick"));
+    TEST_ASSERT_TRUE(doc.containsKey("max_duration"));
+
+    TEST_ASSERT_FALSE(doc.containsKey("sync_follow"));
+    TEST_ASSERT_FALSE(doc.containsKey("sync_targets"));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
@@ -1695,5 +1829,11 @@ int main(int, char **) {
     RUN_TEST(test_S4_applySyncCommand_gating);
     RUN_TEST(test_S5_remote_apply_does_not_rebroadcast);
     RUN_TEST(test_S6_sync_off_never_broadcasts);
+    RUN_TEST(test_T1_table_uintrange_boundaries);
+    RUN_TEST(test_T2_table_strict_types);
+    RUN_TEST(test_T3_table_bespoke_validators);
+    RUN_TEST(test_T4_table_nvs_roundtrip);
+    RUN_TEST(test_T5_devjson_best_effort);
+    RUN_TEST(test_T6_snapshot_excludes_local_identity);
     return UNITY_END();
 }

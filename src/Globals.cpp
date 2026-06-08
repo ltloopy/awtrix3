@@ -1,5 +1,6 @@
 #include "Globals.h"
 #include "Preferences.h"
+#include "TimerSettings.h"
 #include <WiFi.h>
 #include <ArduinoJson.h>
 #include <LittleFS.h>
@@ -211,54 +212,17 @@ void loadDevSettings()
             SHOW_TIMER = doc["show_timer"].as<bool>();
         }
 
-        if (doc.containsKey("timer_max_duration"))
-        {
-            uint32_t v = doc["timer_max_duration"].as<uint32_t>();
-            if (v >= 1 && v <= 604800) TIMER_MAX_DURATION = v;
-        }
+        // Timer value-config keys: validated + applied per-key best-effort from the
+        // single TIMER_SETTINGS_DESCS table (ranges live there, once). dev.json is a
+        // boot override layer, so an invalid key is skipped, not atomic-rejected.
+        timerSettingsLoadDevJson(doc.as<JsonObjectConst>());
 
-        if (doc.containsKey("timer_remaining_publish_interval"))
-        {
-            uint16_t v = doc["timer_remaining_publish_interval"].as<uint16_t>();
-            if (v >= 1 && v <= 60) TIMER_PUBLISH_INTERVAL = v;
-        }
-
-        if (doc.containsKey("timer_finished_hold"))
-        {
-            uint16_t v = doc["timer_finished_hold"].as<uint16_t>();
-            if (v >= 1 && v <= 300) TIMER_FINISHED_HOLD = v;
-        }
-
-        if (doc.containsKey("timer_realert_interval"))
-        {
-            uint16_t v = doc["timer_realert_interval"].as<uint16_t>();
-            if (v >= 5 && v <= 300) TIMER_REALERT_INTERVAL = v;
-        }
-
-        if (doc.containsKey("timer_countdown_seconds"))
-        {
-            uint16_t v = doc["timer_countdown_seconds"].as<uint16_t>();
-            if (v <= 30) TIMER_COUNTDOWN_SECONDS = v;
-        }
-
-        if (doc.containsKey("timer_app_config_timeout"))
-        {
-            uint16_t v = doc["timer_app_config_timeout"].as<uint16_t>();
-            if (v >= 5 && v <= 300) TIMER_CONFIG_TIMEOUT = v;
-        }
-
+        // Timer state icons stay member-backed (B1, ADR-0007); their dev.json shadows
+        // seed the TimerManager members at setup().
         if (doc.containsKey("timer_icon_idle"))     TIMER_ICON_IDLE     = doc["timer_icon_idle"].as<String>();
         if (doc.containsKey("timer_icon_running"))  TIMER_ICON_RUNNING  = doc["timer_icon_running"].as<String>();
         if (doc.containsKey("timer_icon_paused"))   TIMER_ICON_PAUSED   = doc["timer_icon_paused"].as<String>();
         if (doc.containsKey("timer_icon_finished")) TIMER_ICON_FINISHED = doc["timer_icon_finished"].as<String>();
-
-        if (doc.containsKey("timer_melody_tick")) TIMER_MELODY_TICK = doc["timer_melody_tick"].as<String>();
-        if (doc.containsKey("timer_melody_end"))  TIMER_MELODY_END  = doc["timer_melody_end"].as<String>();
-        if (doc.containsKey("timer_bar_enabled")) TIMER_BAR_ENABLED = doc["timer_bar_enabled"].as<bool>();
-        if (doc.containsKey("timer_icon_enabled")) TIMER_ICON_ENABLED = doc["timer_icon_enabled"].as<bool>();
-        if (doc.containsKey("timer_bar_color"))   TIMER_BAR_COLOR   = doc["timer_bar_color"].as<uint32_t>();
-        if (doc.containsKey("timer_sync_follow"))  TIMER_SYNC_FOLLOW  = doc["timer_sync_follow"].as<bool>();
-        if (doc.containsKey("timer_sync_targets")) TIMER_SYNC_TARGETS = doc["timer_sync_targets"].as<String>();
 
         if (doc.containsKey("color_correction"))
         {
@@ -339,20 +303,8 @@ void loadSettings()
     SHOW_HUM = Settings.getBool("HUM", true);
     SHOW_TIMER = Settings.getBool("TIMER", true);
     SHOW_TIMER_HA_PREV = Settings.getBool("TIMERPREV", true);
-    TIMER_FINISHED_HOLD     = Settings.getUInt("TFHOLD", 10);
-    TIMER_REALERT_INTERVAL  = Settings.getUInt("TRALERT", 15);
-    TIMER_COUNTDOWN_SECONDS = Settings.getUInt("TCDOWN", 3);
-    TIMER_MAX_DURATION      = Settings.getUInt("TMAXD", 86400);
     Settings.remove("TSTEP");   // removed timer_step feature; clean orphaned NVS key
-    TIMER_PUBLISH_INTERVAL  = Settings.getUInt("TPUBI", 1);
-    TIMER_CONFIG_TIMEOUT    = Settings.getUInt("TCFGT", 30);
-    TIMER_MELODY_TICK       = Settings.getString("TMTICK", "timer_tick");
-    TIMER_MELODY_END        = Settings.getString("TMEND",  "timer_end");
-    TIMER_BAR_ENABLED       = Settings.getBool("TBAREN", true);
-    TIMER_ICON_ENABLED      = Settings.getBool("TICONEN", true);
-    TIMER_BAR_COLOR         = Settings.getUInt("TBARC", 0);
-    TIMER_SYNC_FOLLOW       = Settings.getBool("TSYNF", false);
-    TIMER_SYNC_TARGETS      = Settings.getString("TSYNT", "");
+    timerSettingsLoadNvs(Settings);   // value-config table keys (TFHOLD..TSYNT); defaults live in TIMER_SETTINGS_DESCS
     MATRIX_LAYOUT = Settings.getUInt("MAT", 0);
     SCROLL_SPEED = Settings.getUInt("SSPEED", 100);
 #ifdef ULANZI
@@ -405,19 +357,7 @@ void saveSettings()
     Settings.putBool("HUM", SHOW_HUM);
     Settings.putBool("TIMER", SHOW_TIMER);
     Settings.putBool("TIMERPREV", SHOW_TIMER_HA_PREV);
-    Settings.putUInt("TFHOLD", TIMER_FINISHED_HOLD);
-    Settings.putUInt("TRALERT", TIMER_REALERT_INTERVAL);
-    Settings.putUInt("TCDOWN", TIMER_COUNTDOWN_SECONDS);
-    Settings.putUInt("TMAXD", TIMER_MAX_DURATION);
-    Settings.putUInt("TPUBI", TIMER_PUBLISH_INTERVAL);
-    Settings.putUInt("TCFGT", TIMER_CONFIG_TIMEOUT);
-    Settings.putString("TMTICK", TIMER_MELODY_TICK);
-    Settings.putString("TMEND",  TIMER_MELODY_END);
-    Settings.putBool("TBAREN", TIMER_BAR_ENABLED);
-    Settings.putBool("TICONEN", TIMER_ICON_ENABLED);
-    Settings.putUInt("TBARC", TIMER_BAR_COLOR);
-    Settings.putBool("TSYNF", TIMER_SYNC_FOLLOW);
-    Settings.putString("TSYNT", TIMER_SYNC_TARGETS);
+    timerSettingsSaveNvs(Settings);   // value-config table keys (TFHOLD..TSYNT)
     Settings.putUInt("SSPEED", SCROLL_SPEED);
 #ifdef ULANZI
     Settings.putBool("BAT", SHOW_BAT);

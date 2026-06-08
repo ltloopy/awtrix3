@@ -6,9 +6,19 @@
 #include <PeripheryManager.h>
 #include "timer.h"
 #include "TimerManager.h"
+#include "TimerSettings.h"
 #include "MQTTManager.h"
 #include <icons.h>
 #include <UpdateManager.h>
+
+namespace
+{
+    // The on-device TIMER menu reuses each knob's range from the single
+    // TIMER_SETTINGS_DESCS table, so the menu clamp and parseCommand validation share
+    // one definition (the menu keeps its own step sizes). See ADR-0007.
+    uint32_t timerKnobHi(const char *cmdKey) { const TimerSettingDesc *d = timerSettingByCmdKey(cmdKey); return d ? d->hi : 0; }
+    uint32_t timerKnobLo(const char *cmdKey) { const TimerSettingDesc *d = timerSettingByCmdKey(cmdKey); return d ? d->lo : 0; }
+}
 
 enum MenuState
 {
@@ -322,17 +332,23 @@ void MenuManager_::rightButton()
             TimerManager.setBuzzerMode((BuzzerMode)(((uint8_t)TimerManager.getBuzzerMode() + 1) % 3));
             break;
         case 1:
-            if (TIMER_COUNTDOWN_SECONDS < 30) TIMER_COUNTDOWN_SECONDS++;
+            if (TIMER_COUNTDOWN_SECONDS < timerKnobHi("countdown_seconds")) TIMER_COUNTDOWN_SECONDS++;
             break;
         case 2:
             TimerManager.setFinishedMode((FinishedMode)(((uint8_t)TimerManager.getFinishedMode() + 1) % 3));
             break;
         case 3:
-            TIMER_FINISHED_HOLD = (TIMER_FINISHED_HOLD + 5 <= 300) ? TIMER_FINISHED_HOLD + 5 : 300;
+        {
+            uint32_t hi = timerKnobHi("finished_hold");
+            TIMER_FINISHED_HOLD = (TIMER_FINISHED_HOLD + 5 <= hi) ? TIMER_FINISHED_HOLD + 5 : hi;
             break;
+        }
         case 4:
-            TIMER_REALERT_INTERVAL = (TIMER_REALERT_INTERVAL + 5 <= 300) ? TIMER_REALERT_INTERVAL + 5 : 300;
+        {
+            uint32_t hi = timerKnobHi("realert_interval");
+            TIMER_REALERT_INTERVAL = (TIMER_REALERT_INTERVAL + 5 <= hi) ? TIMER_REALERT_INTERVAL + 5 : hi;
             break;
+        }
         case 5:
             TIMER_ICON_ENABLED = !TIMER_ICON_ENABLED;
             break;
@@ -410,17 +426,23 @@ void MenuManager_::leftButton()
             TimerManager.setBuzzerMode((BuzzerMode)(((uint8_t)TimerManager.getBuzzerMode() + 2) % 3));
             break;
         case 1:
-            if (TIMER_COUNTDOWN_SECONDS > 0) TIMER_COUNTDOWN_SECONDS--;
+            if (TIMER_COUNTDOWN_SECONDS > timerKnobLo("countdown_seconds")) TIMER_COUNTDOWN_SECONDS--;
             break;
         case 2:
             TimerManager.setFinishedMode((FinishedMode)(((uint8_t)TimerManager.getFinishedMode() + 2) % 3));
             break;
         case 3:
-            TIMER_FINISHED_HOLD = (TIMER_FINISHED_HOLD >= 1 + 5) ? TIMER_FINISHED_HOLD - 5 : 1;
+        {
+            uint32_t lo = timerKnobLo("finished_hold");
+            TIMER_FINISHED_HOLD = (TIMER_FINISHED_HOLD >= lo + 5) ? TIMER_FINISHED_HOLD - 5 : lo;
             break;
+        }
         case 4:
-            TIMER_REALERT_INTERVAL = (TIMER_REALERT_INTERVAL >= 5 + 5) ? TIMER_REALERT_INTERVAL - 5 : 5;
+        {
+            uint32_t lo = timerKnobLo("realert_interval");
+            TIMER_REALERT_INTERVAL = (TIMER_REALERT_INTERVAL >= lo + 5) ? TIMER_REALERT_INTERVAL - 5 : lo;
             break;
+        }
         case 5:
             TIMER_ICON_ENABLED = !TIMER_ICON_ENABLED;
             break;

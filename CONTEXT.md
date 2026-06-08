@@ -24,7 +24,7 @@ Three numeric tunings, each only meaningful in one specific mode:
 | Re-alert interval | `TIMER_REALERT_INTERVAL` | `finished mode = re-alert` | `dev.json` (`timer_realert_interval`), MQTT/HTTP `{prefix}/timer` (`realert_interval`), `TIMER` top menu (`ALERT` slot) |
 | Countdown beep window | `TIMER_COUNTDOWN_SECONDS` | `buzzer mode = countdown` | `dev.json` (`timer_countdown_seconds`), MQTT/HTTP `{prefix}/timer` (`countdown_seconds`), `TIMER` top menu (`CDOWN` slot) |
 
-Persisted in NVS namespace `"awtrix"` (keys `TFHOLD` / `TRALERT` / `TCDOWN`). `dev.json` overrides NVS on every boot.
+Persisted in NVS namespace `"awtrix"` (keys `TFHOLD` / `TRALERT` / `TCDOWN`). `dev.json` overrides NVS on every boot. The accepted ranges and persistence for these — and for every value-config key below — are defined once in the persisted-settings table `TIMER_SETTINGS_DESCS` ([src/TimerSettings.h](src/TimerSettings.h)); each surface (`POST /api/timer` / `{prefix}/timer`, `dev.json`, NVS, the `TIMER` menu's clamp, the sync snapshot) is driven from that one table (ADR-0007).
 
 ### Timer behavior parameters
 
@@ -102,6 +102,10 @@ triggers and must not be conflated:
   display-element toggles, icon images, melodies, bar color) with **no** `action` and
   **no** `duration`. Fired only by a deliberate config edit. Last-config-writer-wins for
   the whole block: after a config edit propagates, the group is configured identically.
+  Concretely, the config block is the `inSnapshot == true` rows of `TIMER_SETTINGS_DESCS`
+  plus the member-backed keys (`buzzer`/`finished`/icons); both halves source their
+  snapshot membership from one definition, so the snapshot can't drift from the broadcast
+  trigger (ADR-0007).
 
 _Avoid_: putting `duration` in the config snapshot, or letting a start/reset re-push
 config — those reintroduce the "starting a timer rewrote my settings" surprise this
@@ -122,3 +126,8 @@ obeys), **follower** (follow on, no targets — obeys, never commands), **peer/m
 (both — commands and obeys), **standalone** (neither — sync off). There is no symmetric
 "group" primitive; membership is always expressed as one side's target list plus the
 other side's consent.
+
+Mechanically, `TIMER_SYNC_FOLLOW` / `TIMER_SYNC_TARGETS` are the `inSnapshot == false`
+rows of `TIMER_SETTINGS_DESCS` — persisted and validated like every other table key, but
+deliberately excluded from the config snapshot so peers can't hijack each other's
+targeting (ADR-0006, ADR-0007).

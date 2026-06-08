@@ -65,6 +65,7 @@ private:
     bool syncSeenRecently(const String &src, uint32_t seq, unsigned long nowMs);
 
     void buildConfigSnapshot(JsonDocument &doc) const;   // config keys only; no action/duration/sync_*
+    void addMemberConfigToSnapshot(JsonDocument &doc) const;  // member-backed config block half (B1, ADR-0007)
     void addSyncEnvelope(JsonObject &sync);              // src/seq/tgt
     bool syncTargetsMe(JsonVariantConst tgt) const;      // does _sync.tgt cover this clock's uniqueID?
 

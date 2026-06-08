@@ -1,4 +1,5 @@
 #include "TimerManager.h"
+#include "TimerSettings.h"
 #include "Globals.h"
 #include "PeripheryManager.h"
 #include "DisplayManager.h"
@@ -22,31 +23,20 @@ namespace {
     const char *FALLBACK_END_RTTTL  = "timer:d=4,o=5,b=120:c,8p,c,8p,c";
     const char *FALLBACK_TICK_RTTTL = "tick:d=16,o=6,b=200:c";
 
-    // sync_targets accepts "" (off), "all", or a comma list of device-id tokens
-    // ([A-Za-z0-9_-], 1..32 each). Same atomic-reject discipline as the other keys.
-    bool isValidSyncTargets(const String &s)
+    // The config-block keys that stay member-backed (B1 boundary, ADR-0007) rather
+    // than living in TIMER_SETTINGS_DESCS: their values are owned by TimerManager's
+    // publish-aware setters. This single list governs their snapshot/broadcast
+    // membership so buildConfigSnapshot and the parseCommand broadcast trigger cannot
+    // drift apart. (Value handling still lives in the setters; this is membership only.)
+    const char *const kMemberConfigKeys[] = {
+        "buzzer", "finished", "icon_idle", "icon_running", "icon_paused", "icon_finished"};
+    constexpr size_t kMemberConfigKeyCount = sizeof(kMemberConfigKeys) / sizeof(kMemberConfigKeys[0]);
+
+    bool docTouchesMemberConfig(const JsonDocument &doc)
     {
-        String t = s; t.trim();
-        if (t.length() == 0 || t == "all") return true;
-        int start = 0;
-        const int n = t.length();
-        while (start <= n)
-        {
-            int comma = t.indexOf(',', start);
-            if (comma < 0) comma = n;
-            String tok = t.substring(start, comma); tok.trim();
-            if (tok.length() == 0 || tok.length() > 32) return false;
-            for (size_t i = 0; i < tok.length(); ++i)
-            {
-                char c = tok[i];
-                bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') ||
-                          (c >= 'A' && c <= 'Z') || c == '_' || c == '-';
-                if (!ok) return false;
-            }
-            if (comma == n) break;
-            start = comma + 1;
-        }
-        return true;
+        for (size_t i = 0; i < kMemberConfigKeyCount; ++i)
+            if (doc.containsKey(kMemberConfigKeys[i])) return true;
+        return false;
     }
 }
 
@@ -668,21 +658,26 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     // -- Validation pass: mutate nothing; reject the whole command on the first
     //    invalid field. Out-of-range is rejected here, not clamped (parity). --
 
-    // max_duration is range-defining for duration; validate first so a payload
-    // that raises the ceiling and sets a duration within the new ceiling in the
-    // same call is accepted atomically (ADR-0001 addendum).
-    uint32_t maxDuration = TIMER_MAX_DURATION;
-    bool haveMaxDuration = doc.containsKey("max_duration");
-    if (haveMaxDuration)
+    // Table settings (TIMER_SETTINGS_DESCS): validate + coerce each present row into a
+    // staging array. Nothing is written until every field below has validated too, so a
+    // single bad field rejects the whole command (ADR-0001 atomic-reject). max_duration
+    // is range-defining for duration: capture its staged value so a payload that raises
+    // the ceiling and sets a duration within it in the same call is accepted atomically
+    // (ADR-0001 addendum).
+    TcValue  tableStaged[TIMER_SETTINGS_DESC_COUNT];
+    bool     tablePresent[TIMER_SETTINGS_DESC_COUNT];
+    uint32_t effectiveMaxDuration = TIMER_MAX_DURATION;
+    for (size_t i = 0; i < TIMER_SETTINGS_DESC_COUNT; ++i)
     {
-        JsonVariant v = doc["max_duration"];
-        if (!(v.is<long>() || v.is<float>())) return TimerCmdResult::BadField;
-        uint32_t n = v.as<uint32_t>();
-        if (n < 1 || n > 604800) return TimerCmdResult::BadField;
-        maxDuration = n;
+        const TimerSettingDesc &d = TIMER_SETTINGS_DESCS[i];
+        tablePresent[i] = doc.containsKey(d.cmdKey);
+        if (!tablePresent[i]) continue;
+        if (!timerSettingParse(d, doc[d.cmdKey], tableStaged[i])) return TimerCmdResult::BadField;
+        if (strcmp(d.cmdKey, "max_duration") == 0) effectiveMaxDuration = tableStaged[i].num;
     }
-    const uint32_t effectiveMaxDuration = haveMaxDuration ? maxDuration : TIMER_MAX_DURATION;
 
+    // duration stays member-backed (B1, ADR-0007): validated here against the effective
+    // ceiling staged above.
     uint32_t durSecs = 0;
     bool haveDuration = doc.containsKey("duration");
     if (haveDuration)
@@ -715,136 +710,6 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     if (doc.containsKey("icon_paused")   && !isValidIconName(doc["icon_paused"].as<String>()))   return TimerCmdResult::BadField;
     if (doc.containsKey("icon_finished") && !isValidIconName(doc["icon_finished"].as<String>())) return TimerCmdResult::BadField;
 
-    uint16_t finishedHold     = TIMER_FINISHED_HOLD;
-    uint16_t realertInterval  = TIMER_REALERT_INTERVAL;
-    uint16_t countdownSeconds = TIMER_COUNTDOWN_SECONDS;
-    bool haveFinishedHold     = doc.containsKey("finished_hold");
-    bool haveRealertInterval  = doc.containsKey("realert_interval");
-    bool haveCountdownSeconds = doc.containsKey("countdown_seconds");
-    if (haveFinishedHold)
-    {
-        JsonVariant v = doc["finished_hold"];
-        if (!(v.is<long>() || v.is<float>())) return TimerCmdResult::BadField;
-        uint32_t n = v.as<uint32_t>();
-        if (n < 1 || n > 300) return TimerCmdResult::BadField;
-        finishedHold = (uint16_t)n;
-    }
-    if (haveRealertInterval)
-    {
-        JsonVariant v = doc["realert_interval"];
-        if (!(v.is<long>() || v.is<float>())) return TimerCmdResult::BadField;
-        uint32_t n = v.as<uint32_t>();
-        if (n < 5 || n > 300) return TimerCmdResult::BadField;
-        realertInterval = (uint16_t)n;
-    }
-    if (haveCountdownSeconds)
-    {
-        JsonVariant v = doc["countdown_seconds"];
-        if (!(v.is<long>() || v.is<float>())) return TimerCmdResult::BadField;
-        uint32_t n = v.as<uint32_t>();
-        if (n > 30) return TimerCmdResult::BadField;
-        countdownSeconds = (uint16_t)n;
-    }
-
-    // Behavior parameters (ADR-0004): four distinct categories, atomic-reject validation.
-    // (max_duration is hoisted above to gate duration's effective ceiling — ADR-0001 addendum.)
-    uint16_t publishInterval   = TIMER_PUBLISH_INTERVAL;
-    uint16_t appConfigTimeout  = TIMER_CONFIG_TIMEOUT;
-    bool havePublishInterval   = doc.containsKey("remaining_publish_interval");
-    bool haveAppConfigTimeout  = doc.containsKey("app_config_timeout");
-    if (havePublishInterval)
-    {
-        JsonVariant v = doc["remaining_publish_interval"];
-        if (!(v.is<long>() || v.is<float>())) return TimerCmdResult::BadField;
-        uint32_t n = v.as<uint32_t>();
-        if (n < 1 || n > 60) return TimerCmdResult::BadField;
-        publishInterval = (uint16_t)n;
-    }
-    if (haveAppConfigTimeout)
-    {
-        JsonVariant v = doc["app_config_timeout"];
-        if (!(v.is<long>() || v.is<float>())) return TimerCmdResult::BadField;
-        uint32_t n = v.as<uint32_t>();
-        if (n < 5 || n > 300) return TimerCmdResult::BadField;
-        appConfigTimeout = (uint16_t)n;
-    }
-
-    // Melody filenames (bare names, same validation as icons — alphanumeric + _ + -).
-    // Empty resets to canonical defaults at apply time. (ADR-0004 §melody empty semantics.)
-    if (doc.containsKey("melody_tick") && !isValidIconName(doc["melody_tick"].as<String>())) return TimerCmdResult::BadField;
-    if (doc.containsKey("melody_end")  && !isValidIconName(doc["melody_end"].as<String>()))  return TimerCmdResult::BadField;
-
-    // bar_enabled: strict bool. bar_color: number or "#RRGGBB" hex string (0..0xFFFFFF).
-    bool haveBarEnabled = doc.containsKey("bar_enabled");
-    bool haveBarColor   = doc.containsKey("bar_color");
-    bool barEnabled     = TIMER_BAR_ENABLED;
-    uint32_t barColor   = TIMER_BAR_COLOR;
-    if (haveBarEnabled)
-    {
-        JsonVariant v = doc["bar_enabled"];
-        if (!v.is<bool>()) return TimerCmdResult::BadField;
-        barEnabled = v.as<bool>();
-    }
-
-    // icon_enabled: strict bool (same shape as bar_enabled).
-    bool haveIconEnabled = doc.containsKey("icon_enabled");
-    bool iconEnabled     = TIMER_ICON_ENABLED;
-    if (haveIconEnabled)
-    {
-        JsonVariant v = doc["icon_enabled"];
-        if (!v.is<bool>()) return TimerCmdResult::BadField;
-        iconEnabled = v.as<bool>();
-    }
-    if (haveBarColor)
-    {
-        JsonVariant v = doc["bar_color"];
-        if (v.is<long>() || v.is<float>())
-        {
-            uint32_t n = v.as<uint32_t>();
-            if (n > 0xFFFFFFu) return TimerCmdResult::BadField;
-            barColor = n;
-        }
-        else if (v.is<const char*>() || v.is<String>())
-        {
-            String s = v.as<String>();
-            s.trim();
-            if (s.length() > 0 && s[0] == '#') s = s.substring(1);
-            if (s.length() != 6) return TimerCmdResult::BadField;  // exactly RRGGBB
-            for (size_t i = 0; i < s.length(); ++i)
-            {
-                char c = s[i];
-                bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
-                if (!ok) return TimerCmdResult::BadField;
-            }
-            barColor = (uint32_t)strtoul(s.c_str(), nullptr, 16);
-        }
-        else
-        {
-            return TimerCmdResult::BadField;
-        }
-    }
-
-    // sync_follow: strict bool. sync_targets: "", "all", or comma list of device ids.
-    // These configure this clock's own role on the propagation surface (local identity)
-    // and are deliberately NOT propagated — excluded from the config snapshot.
-    bool haveSyncFollow  = doc.containsKey("sync_follow");
-    bool haveSyncTargets = doc.containsKey("sync_targets");
-    bool   syncFollow    = TIMER_SYNC_FOLLOW;
-    String syncTargets   = TIMER_SYNC_TARGETS;
-    if (haveSyncFollow)
-    {
-        JsonVariant v = doc["sync_follow"];
-        if (!v.is<bool>()) return TimerCmdResult::BadField;
-        syncFollow = v.as<bool>();
-    }
-    if (haveSyncTargets)
-    {
-        JsonVariant v = doc["sync_targets"];
-        if (!(v.is<const char*>() || v.is<String>())) return TimerCmdResult::BadField;
-        syncTargets = v.as<String>();
-        if (!isValidSyncTargets(syncTargets)) return TimerCmdResult::BadField;
-    }
-
     bool haveAction = doc.containsKey("action");
     if (haveAction && !isValidAction(doc["action"].as<String>())) return TimerCmdResult::BadField;
 
@@ -859,13 +724,26 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
         if (DEBUG_MODE) DEBUG_PRINTLN("timer: config aborted by inbound command");
     }
 
+    // -- Command is known-good: apply. Table rows first, so TIMER_MAX_DURATION lands
+    //    before setDuration() sees it (ADR-0001 addendum). The table writes globals
+    //    only; they persist to the "awtrix" namespace via saveSettings() below. --
+    bool tableChanged    = false;   // any table key written -> needs saveSettings()
+    bool snapshotChanged = false;   // any config-block (inSnapshot) table key -> broadcastConfig()
+    bool melodyChanged   = false;
+    for (size_t i = 0; i < TIMER_SETTINGS_DESC_COUNT; ++i)
+    {
+        if (!tablePresent[i]) continue;
+        const TimerSettingDesc &d = TIMER_SETTINGS_DESCS[i];
+        timerSettingStore(d, tableStaged[i]);
+        tableChanged = true;
+        if (d.inSnapshot) snapshotChanged = true;
+        if (strcmp(d.cmdKey, "melody_tick") == 0 || strcmp(d.cmdKey, "melody_end") == 0) melodyChanged = true;
+    }
+
+    // Member-backed applies via publish-aware setters; their "timer"-namespace NVS
+    // writes are batched under _suspendPersist into a single persist().
     _suspendPersist = true;
     _dirty = false;
-
-    // TIMER_MAX_DURATION must land before setDuration() so its internal backstop
-    // clamp sees the in-payload ceiling, not the pre-payload one (ADR-0001 addendum).
-    if (haveMaxDuration)            TIMER_MAX_DURATION = maxDuration;
-
     if (haveDuration)               setDuration(durSecs);   // pre-validated in range
     if (doc.containsKey("icon_idle"))     setIconIdle    (doc["icon_idle"].as<String>());
     if (doc.containsKey("icon_running"))  setIconRunning (doc["icon_running"].as<String>());
@@ -873,7 +751,6 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     if (doc.containsKey("icon_finished")) setIconFinished(doc["icon_finished"].as<String>());
     if (haveBuzzer)                 setBuzzerMode(buzzer);
     if (haveFinished)               setFinishedMode(finished);
-
     _suspendPersist = false;
     if (_dirty)
     {
@@ -881,35 +758,7 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
         persist();
     }
 
-    bool persistedKeyChanged = false;
-    if (haveFinishedHold)     { TIMER_FINISHED_HOLD     = finishedHold;     persistedKeyChanged = true; }
-    if (haveRealertInterval)  { TIMER_REALERT_INTERVAL  = realertInterval;  persistedKeyChanged = true; }
-    if (haveCountdownSeconds) { TIMER_COUNTDOWN_SECONDS = countdownSeconds; persistedKeyChanged = true; }
-    if (haveMaxDuration)      { /* TIMER_MAX_DURATION already assigned above */ persistedKeyChanged = true; }
-    if (havePublishInterval)  { TIMER_PUBLISH_INTERVAL  = publishInterval;  persistedKeyChanged = true; }
-    if (haveAppConfigTimeout) { TIMER_CONFIG_TIMEOUT    = appConfigTimeout; persistedKeyChanged = true; }
-    if (haveBarEnabled)       { TIMER_BAR_ENABLED       = barEnabled;       persistedKeyChanged = true; }
-    if (haveIconEnabled)      { TIMER_ICON_ENABLED      = iconEnabled;      persistedKeyChanged = true; }
-    if (haveBarColor)         { TIMER_BAR_COLOR         = barColor;         persistedKeyChanged = true; }
-    if (haveSyncFollow)       { TIMER_SYNC_FOLLOW       = syncFollow;       persistedKeyChanged = true; }
-    if (haveSyncTargets)      { TIMER_SYNC_TARGETS      = syncTargets;      persistedKeyChanged = true; }
-
-    bool melodyChanged = false;
-    if (doc.containsKey("melody_tick"))
-    {
-        String s = doc["melody_tick"].as<String>();
-        TIMER_MELODY_TICK = (s.length() == 0) ? String("timer_tick") : s;
-        persistedKeyChanged = true;
-        melodyChanged = true;
-    }
-    if (doc.containsKey("melody_end"))
-    {
-        String s = doc["melody_end"].as<String>();
-        TIMER_MELODY_END = (s.length() == 0) ? String("timer_end") : s;
-        persistedKeyChanged = true;
-        melodyChanged = true;
-    }
-    if (persistedKeyChanged) saveSettings();
+    if (tableChanged)  saveSettings();        // persist the "awtrix"-namespace table keys once
     if (melodyChanged) loadMelodiesCached();
 
     if (haveAction)
@@ -934,17 +783,14 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     // The broadcast* methods no-op when _remoteApply is set (inbound packet) or sync
     // is off. Run-state (action/duration) and config travel on separate packets; a
     // command touching both classes emits one of each. sync_follow/sync_targets are
-    // local identity and intentionally trigger neither.
+    // local identity (inSnapshot=false) and intentionally trigger neither.
     if (!_remoteApply)
     {
         bool runStateChanged = haveAction || haveDuration;
-        bool configChanged =
-            haveBuzzer || haveFinished || haveFinishedHold || haveRealertInterval ||
-            haveCountdownSeconds || haveMaxDuration || havePublishInterval ||
-            haveAppConfigTimeout || haveBarEnabled || haveIconEnabled || haveBarColor ||
-            doc.containsKey("icon_idle") || doc.containsKey("icon_running") ||
-            doc.containsKey("icon_paused") || doc.containsKey("icon_finished") ||
-            doc.containsKey("melody_tick") || doc.containsKey("melody_end");
+        // configChanged = any config-block key edited. Snapshot membership IS the
+        // broadcast trigger (one flag, ADR-0006): the table half via inSnapshot, the
+        // member-backed half via the shared kMemberConfigKeys list.
+        bool configChanged = snapshotChanged || docTouchesMemberConfig(doc);
 
         if (configChanged) broadcastConfig();
         if (runStateChanged)
@@ -1000,26 +846,30 @@ void TimerManager_::addSyncEnvelope(JsonObject &sync)
     }
 }
 
+void TimerManager_::addMemberConfigToSnapshot(JsonDocument &doc) const
+{
+    // The member-backed half of the config block (B1, ADR-0007). Membership is the
+    // single shared kMemberConfigKeys list; values come from the live members here.
+    for (size_t i = 0; i < kMemberConfigKeyCount; ++i)
+    {
+        const char *k = kMemberConfigKeys[i];
+        if      (strcmp(k, "buzzer")        == 0) doc[k] = buzzerModeString();
+        else if (strcmp(k, "finished")      == 0) doc[k] = finishedModeString();
+        else if (strcmp(k, "icon_idle")     == 0) doc[k] = iconIdle;
+        else if (strcmp(k, "icon_running")  == 0) doc[k] = iconRunning;
+        else if (strcmp(k, "icon_paused")   == 0) doc[k] = iconPaused;
+        else if (strcmp(k, "icon_finished") == 0) doc[k] = iconFinished;
+    }
+}
+
 void TimerManager_::buildConfigSnapshot(JsonDocument &doc) const
 {
-    // Config block only — never action/duration (run-state) or sync_* (local identity).
-    doc["buzzer"]                     = buzzerModeString();
-    doc["finished"]                   = finishedModeString();
-    doc["finished_hold"]              = TIMER_FINISHED_HOLD;
-    doc["realert_interval"]           = TIMER_REALERT_INTERVAL;
-    doc["countdown_seconds"]          = TIMER_COUNTDOWN_SECONDS;
-    doc["max_duration"]               = TIMER_MAX_DURATION;
-    doc["remaining_publish_interval"] = TIMER_PUBLISH_INTERVAL;
-    doc["app_config_timeout"]         = TIMER_CONFIG_TIMEOUT;
-    doc["melody_tick"]                = TIMER_MELODY_TICK;
-    doc["melody_end"]                 = TIMER_MELODY_END;
-    doc["bar_enabled"]                = TIMER_BAR_ENABLED;
-    doc["bar_color"]                  = TIMER_BAR_COLOR;
-    doc["icon_enabled"]               = TIMER_ICON_ENABLED;
-    doc["icon_idle"]                  = iconIdle;
-    doc["icon_running"]               = iconRunning;
-    doc["icon_paused"]                = iconPaused;
-    doc["icon_finished"]              = iconFinished;
+    // Config block only — never action/duration (run-state) or sync_* (local identity,
+    // inSnapshot=false). Two halves: the table (inSnapshot rows) and the member-backed
+    // fields (B1, ADR-0007). Both source their membership from one definition, so the
+    // snapshot can't drift from the parseCommand broadcast trigger.
+    timerSettingsBuildSnapshot(doc);
+    addMemberConfigToSnapshot(doc);
 }
 
 void TimerManager_::broadcastRunState(const char *action)
