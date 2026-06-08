@@ -2283,6 +2283,10 @@ void DisplayManager_::setNewSettings(const char *json)
   {
     MQTTManager.removeTimerHAEntities();
   }
+  else if (!prevShowTimer && SHOW_TIMER)
+  {
+    MQTTManager.enableTimerHADiscovery();
+  }
   if (prevShowTimer != SHOW_TIMER)
   {
     SHOW_TIMER_HA_PREV = SHOW_TIMER;

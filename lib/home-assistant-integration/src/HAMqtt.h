@@ -228,6 +228,17 @@ public:
     void addDeviceType(HABaseDeviceType *deviceType);
 
     /**
+     * Publishes the discovery configuration (and availability/subscriptions) for a single
+     * already-registered device type. Normally every device type's configuration is
+     * published by onConnectedLogic() on each (re)connect; this lets a device type that
+     * was created after the connection was established publish its configuration without
+     * forcing a full reconnect. No-op if the pointer is null or the broker is disconnected.
+     *
+     * @param deviceType Instance of the device's type to publish.
+     */
+    void publishConfigForDeviceType(HABaseDeviceType *deviceType);
+
+    /**
      * Publishes the MQTT message with given topic and payload.
      * Message won't be published if the connection with the MQTT broker is not established.
      * In this case method returns false.

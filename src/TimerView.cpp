@@ -73,14 +73,20 @@ TimerView TimerViewModel::compute(unsigned long nowMs, bool iconEnabled)
     formatTimerDisplay(remaining, v.text, sizeof(v.text));
     v.showText = true;
 
-    if (ts != TimerState::Idle && duration > 0)
+    // The bar divides by the duration captured when the run began, not the live
+    // configured duration, so editing the duration mid-run leaves the in-progress
+    // bar untouched (it re-arms on the next start/reset). See API-17 in
+    // TIMER_TEST_PLAN.md. Falls back to the configured duration if no snapshot.
+    uint32_t barDuration = TimerManager.getRunDuration();
+    if (barDuration == 0) barDuration = duration;
+    if (ts != TimerState::Idle && barDuration > 0)
     {
         // The bar also reflows when the icon is hidden: it spans the full panel
         // instead of the 23px region right of the icon. Right edge stays anchored
         // at col 31 either way (barX0 + barMaxLen == kScreenW).
         const int16_t barX0     = iconEnabled ? kBarX0     : 0;          // 9  or 0
         const int16_t barMaxLen = iconEnabled ? kBarMaxLen : kScreenW;   // 23 or 32
-        uint32_t len = ((uint32_t)barMaxLen * remaining) / duration;
+        uint32_t len = ((uint32_t)barMaxLen * remaining) / barDuration;
         if (len > (uint32_t)barMaxLen)
             len = (uint32_t)barMaxLen;
         if (len > 0)

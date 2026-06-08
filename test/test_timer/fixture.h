@@ -51,7 +51,6 @@ inline void reset_all() {
 
     SHOW_TIMER              = true;
     TIMER_MAX_DURATION      = 86400;
-    TIMER_STEP              = 1;
     TIMER_PUBLISH_INTERVAL  = 1;
     TIMER_FINISHED_HOLD     = 10;
     TIMER_REALERT_INTERVAL  = 15;

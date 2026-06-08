@@ -62,6 +62,103 @@ void reconcileTimerHAState()
 #define TIMER_HA_ID_BUFFERS \
     { tDurID, tRemID, tStateID, tBuzID, tFinID, tStartID, tPauseID, tResetID }
 
+// Forward declarations: the HA command callbacks are defined further down, but
+// createTimerHAEntities() (placed here, next to removeTimerHAEntities) wires them.
+void onButtonCommand(HAButton *sender);
+void onSelectCommand(int8_t index, HASelect *sender);
+void onTimerDurationMessage(const char *message, uint16_t length, HAText *sender);
+
+// Creates the Timer HA entity objects (and registers them with HAMqtt via their
+// constructors). Idempotent: the objects persist for the device lifetime, so a second
+// call is a no-op. This must run with the Timer entity id buffers already resolved
+// (setup() fills them in the HA_DISCOVERY block, before SHOW_TIMER is consulted).
+void MQTTManager_::createTimerHAEntities()
+{
+    if (timerDuration) return;
+
+    // Each entity's strings come from the descriptor table; the ArduinoHA
+    // object type and the type-specific wiring (callbacks, initial state)
+    // stay here because they're heterogeneous across HA component types.
+    const TimerHaDescriptor &dDur   = timerHaDescriptor(TimerHaEntity::Duration);
+    const TimerHaDescriptor &dRem   = timerHaDescriptor(TimerHaEntity::Remaining);
+    const TimerHaDescriptor &dState = timerHaDescriptor(TimerHaEntity::State);
+    const TimerHaDescriptor &dBuz   = timerHaDescriptor(TimerHaEntity::Buzzer);
+    const TimerHaDescriptor &dFin   = timerHaDescriptor(TimerHaEntity::Finished);
+    const TimerHaDescriptor &dStart = timerHaDescriptor(TimerHaEntity::Start);
+    const TimerHaDescriptor &dPause = timerHaDescriptor(TimerHaEntity::Pause);
+    const TimerHaDescriptor &dReset = timerHaDescriptor(TimerHaEntity::Reset);
+
+    timerDuration = new HAText(tDurID);
+    timerDuration->setIcon(dDur.icon);
+    timerDuration->setName(dDur.name);
+    timerDuration->setRetain(true);
+    timerDuration->onMessage(onTimerDurationMessage);
+    timerDuration->setState(TimerManager_::formatHMS(TimerManager.getDuration()).c_str(), true);
+
+    timerRemaining = new HASensorNumber(tRemID, HASensorNumber::PrecisionP0);
+    timerRemaining->setIcon(dRem.icon);
+    timerRemaining->setName(dRem.name);
+    timerRemaining->setUnitOfMeasurement(dRem.unit);
+    timerRemaining->setDeviceClass(dRem.deviceClass);
+    timerRemaining->setCurrentValue((uint32_t)TimerManager.getRemaining());
+
+    timerStateSensor = new HASensor(tStateID);
+    timerStateSensor->setIcon(dState.icon);
+    timerStateSensor->setName(dState.name);
+
+    timerBuzzer = new HASelect(tBuzID);
+    timerBuzzer->setOptions(dBuz.options);
+    timerBuzzer->onCommand(onSelectCommand);
+    timerBuzzer->setIcon(dBuz.icon);
+    timerBuzzer->setName(dBuz.name);
+    timerBuzzer->setState((uint8_t)TimerManager.getBuzzerMode(), true);
+
+    timerFinishedSel = new HASelect(tFinID);
+    timerFinishedSel->setOptions(dFin.options);
+    timerFinishedSel->onCommand(onSelectCommand);
+    timerFinishedSel->setIcon(dFin.icon);
+    timerFinishedSel->setName(dFin.name);
+    timerFinishedSel->setState((uint8_t)TimerManager.getFinishedMode(), true);
+
+    timerStartBtn = new HAButton(tStartID);
+    timerStartBtn->setIcon(dStart.icon);
+    timerStartBtn->setName(dStart.name);
+    timerStartBtn->onCommand(onButtonCommand);
+
+    timerPauseBtn = new HAButton(tPauseID);
+    timerPauseBtn->setIcon(dPause.icon);
+    timerPauseBtn->setName(dPause.name);
+    timerPauseBtn->onCommand(onButtonCommand);
+
+    timerResetBtn = new HAButton(tResetID);
+    timerResetBtn->setIcon(dReset.icon);
+    timerResetBtn->setName(dReset.name);
+    timerResetBtn->onCommand(onButtonCommand);
+}
+
+// Brings the Timer HA entities online at runtime when SHOW_TIMER flips false->true.
+// Mirror of removeTimerHAEntities(): creates the entities if missing, then publishes
+// their discovery config (so HA adds them without a full reconnect) and current values.
+void MQTTManager_::enableTimerHADiscovery()
+{
+    if (!HA_DISCOVERY) return;
+    createTimerHAEntities();
+    if (!mqtt.isConnected()) return; // discovery will publish at next connect via onConnectedLogic
+
+    HABaseDeviceType *timerTypes[] = {
+        timerDuration, timerRemaining, timerStateSensor, timerBuzzer,
+        timerFinishedSel, timerStartBtn, timerPauseBtn, timerResetBtn};
+    for (HABaseDeviceType *dt : timerTypes)
+        mqtt.publishConfigForDeviceType(dt);
+
+    publishTimerDuration(TimerManager.getDuration());
+    publishTimerRemaining(TimerManager.getRemaining());
+    publishTimerState(TimerManager.getStateString());
+    publishTimerBuzzer((uint8_t)TimerManager.getBuzzerMode());
+    publishTimerFinished((uint8_t)TimerManager.getFinishedMode());
+    TimerManager.publishIcons();
+}
+
 void MQTTManager_::removeTimerHAEntities()
 {
     const char *deviceUniqueId = device.getUniqueId();
@@ -496,6 +593,15 @@ void onMqttConnected()
 
     if (DEBUG_MODE)
         DEBUG_PRINTLN(F("MQTT Connected"));
+
+    // Command topics must never carry a retained payload. A retained
+    // {prefix}/timer command (e.g. {"action":"start"}) is re-delivered by the
+    // broker on every (re)connect and would auto-start the timer on boot, which
+    // breaks the "a reboot returns the device to Idle" contract (docs/timer.md).
+    // PubSubClient doesn't surface the retain flag to the receive callback, so we
+    // purge the retained command at the source: clear it before subscribing.
+    mqtt.publish((MQTT_PREFIX + "/timer").c_str(), "", true);
+
     const char *topics[] PROGMEM = {
         "/brightness",
         "/notify/dismiss",
@@ -872,66 +978,7 @@ void MQTTManager_::setup()
         }
 
         if (SHOW_TIMER)
-        {
-            // Each entity's strings come from the descriptor table; the ArduinoHA
-            // object type and the type-specific wiring (callbacks, initial state)
-            // stay here because they're heterogeneous across HA component types.
-            const TimerHaDescriptor &dDur   = timerHaDescriptor(TimerHaEntity::Duration);
-            const TimerHaDescriptor &dRem   = timerHaDescriptor(TimerHaEntity::Remaining);
-            const TimerHaDescriptor &dState = timerHaDescriptor(TimerHaEntity::State);
-            const TimerHaDescriptor &dBuz   = timerHaDescriptor(TimerHaEntity::Buzzer);
-            const TimerHaDescriptor &dFin   = timerHaDescriptor(TimerHaEntity::Finished);
-            const TimerHaDescriptor &dStart = timerHaDescriptor(TimerHaEntity::Start);
-            const TimerHaDescriptor &dPause = timerHaDescriptor(TimerHaEntity::Pause);
-            const TimerHaDescriptor &dReset = timerHaDescriptor(TimerHaEntity::Reset);
-
-            timerDuration = new HAText(tDurID);
-            timerDuration->setIcon(dDur.icon);
-            timerDuration->setName(dDur.name);
-            timerDuration->setRetain(true);
-            timerDuration->onMessage(onTimerDurationMessage);
-            timerDuration->setState(TimerManager_::formatHMS(TimerManager.getDuration()).c_str(), true);
-
-            timerRemaining = new HASensorNumber(tRemID, HASensorNumber::PrecisionP0);
-            timerRemaining->setIcon(dRem.icon);
-            timerRemaining->setName(dRem.name);
-            timerRemaining->setUnitOfMeasurement(dRem.unit);
-            timerRemaining->setDeviceClass(dRem.deviceClass);
-            timerRemaining->setCurrentValue((uint32_t)TimerManager.getRemaining());
-
-            timerStateSensor = new HASensor(tStateID);
-            timerStateSensor->setIcon(dState.icon);
-            timerStateSensor->setName(dState.name);
-
-            timerBuzzer = new HASelect(tBuzID);
-            timerBuzzer->setOptions(dBuz.options);
-            timerBuzzer->onCommand(onSelectCommand);
-            timerBuzzer->setIcon(dBuz.icon);
-            timerBuzzer->setName(dBuz.name);
-            timerBuzzer->setState((uint8_t)TimerManager.getBuzzerMode(), true);
-
-            timerFinishedSel = new HASelect(tFinID);
-            timerFinishedSel->setOptions(dFin.options);
-            timerFinishedSel->onCommand(onSelectCommand);
-            timerFinishedSel->setIcon(dFin.icon);
-            timerFinishedSel->setName(dFin.name);
-            timerFinishedSel->setState((uint8_t)TimerManager.getFinishedMode(), true);
-
-            timerStartBtn = new HAButton(tStartID);
-            timerStartBtn->setIcon(dStart.icon);
-            timerStartBtn->setName(dStart.name);
-            timerStartBtn->onCommand(onButtonCommand);
-
-            timerPauseBtn = new HAButton(tPauseID);
-            timerPauseBtn->setIcon(dPause.icon);
-            timerPauseBtn->setName(dPause.name);
-            timerPauseBtn->onCommand(onButtonCommand);
-
-            timerResetBtn = new HAButton(tResetID);
-            timerResetBtn->setIcon(dReset.icon);
-            timerResetBtn->setName(dReset.name);
-            timerResetBtn->onCommand(onButtonCommand);
-        }
+            createTimerHAEntities();
     }
     else
     {

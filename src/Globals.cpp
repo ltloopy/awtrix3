@@ -217,12 +217,6 @@ void loadDevSettings()
             if (v >= 1 && v <= 604800) TIMER_MAX_DURATION = v;
         }
 
-        if (doc.containsKey("timer_button_step"))
-        {
-            uint32_t v = doc["timer_button_step"].as<uint32_t>();
-            if (v >= 1 && v <= 99) TIMER_STEP = v;
-        }
-
         if (doc.containsKey("timer_remaining_publish_interval"))
         {
             uint16_t v = doc["timer_remaining_publish_interval"].as<uint16_t>();
@@ -349,7 +343,7 @@ void loadSettings()
     TIMER_REALERT_INTERVAL  = Settings.getUInt("TRALERT", 15);
     TIMER_COUNTDOWN_SECONDS = Settings.getUInt("TCDOWN", 3);
     TIMER_MAX_DURATION      = Settings.getUInt("TMAXD", 86400);
-    TIMER_STEP              = Settings.getUInt("TSTEP", 1);
+    Settings.remove("TSTEP");   // removed timer_step feature; clean orphaned NVS key
     TIMER_PUBLISH_INTERVAL  = Settings.getUInt("TPUBI", 1);
     TIMER_CONFIG_TIMEOUT    = Settings.getUInt("TCFGT", 30);
     TIMER_MELODY_TICK       = Settings.getString("TMTICK", "timer_tick");
@@ -415,7 +409,6 @@ void saveSettings()
     Settings.putUInt("TRALERT", TIMER_REALERT_INTERVAL);
     Settings.putUInt("TCDOWN", TIMER_COUNTDOWN_SECONDS);
     Settings.putUInt("TMAXD", TIMER_MAX_DURATION);
-    Settings.putUInt("TSTEP", TIMER_STEP);
     Settings.putUInt("TPUBI", TIMER_PUBLISH_INTERVAL);
     Settings.putUInt("TCFGT", TIMER_CONFIG_TIMEOUT);
     Settings.putString("TMTICK", TIMER_MELODY_TICK);
@@ -542,7 +535,6 @@ uint8_t MIN_BRIGHTNESS = 2;
 bool SHOW_TIMER = true;
 bool SHOW_TIMER_HA_PREV = true;
 uint32_t TIMER_MAX_DURATION = 86400;
-uint32_t TIMER_STEP = 1;
 uint16_t TIMER_PUBLISH_INTERVAL = 1;
 uint16_t TIMER_FINISHED_HOLD = 10;
 uint16_t TIMER_REALERT_INTERVAL = 15;

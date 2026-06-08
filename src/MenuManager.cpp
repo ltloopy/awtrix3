@@ -6,6 +6,7 @@
 #include <PeripheryManager.h>
 #include "timer.h"
 #include "TimerManager.h"
+#include "MQTTManager.h"
 #include <icons.h>
 #include <UpdateManager.h>
 
@@ -502,6 +503,10 @@ void MenuManager_::selectButton()
             bool prev = SHOW_TIMER;
             SHOW_TIMER = !SHOW_TIMER;
             TimerManager.onShowTimerChange(prev, SHOW_TIMER);
+            if (prev && !SHOW_TIMER)
+                MQTTManager.removeTimerHAEntities();
+            else if (!prev && SHOW_TIMER)
+                MQTTManager.enableTimerHADiscovery();
             break;
         }
         default:

@@ -22,6 +22,14 @@ take effect. Keys are processed in this order: `duration` → `buzzer` →
 `finished` → `icon_*` → `action`, so you can configure icons and start a
 timer in one publish.
 
+> **Do not publish this topic with the MQTT retain flag.** It is a
+> fire-and-forget *command* topic, not a state topic. A retained command (e.g.
+> `{"action":"start"}`) would be re-delivered by the broker on every reconnect
+> and **auto-start the timer on every boot** — contradicting the "a reboot
+> returns the device to Idle" contract (see [Persistence](#persistence)). As a
+> safeguard the device clears any retained payload on this topic on connect
+> (before subscribing), so a stale retained command never replays.
+
 | Key | Type | Values | Effect |
 | --- | --- | --- | --- |
 | `duration` | string or int | A clock string `"HH:MM:SS"` / `"MM:SS"`, **or** a bare integer of seconds. Must be 1 .. `TIMER_MAX_DURATION` (default 86400 = 24 h); **out-of-range is rejected, not clamped**. | Sets the timer duration. Persists to NVS. While **Paused**, also resets the timer to `Idle` with the new duration. See "Duration format" below. |
@@ -35,7 +43,6 @@ timer in one publish.
 | `realert_interval`  | integer | 5–300 (seconds) | Re-alert cadence (only meaningful when `finished = "re-alert"`). Persists to NVS `"awtrix"`. Same value as the `ALERT` slot of the on-device `TIMER` menu. |
 | `countdown_seconds` | integer | 0–30   (seconds) | Pre-expiry beep window (only meaningful when `buzzer = "countdown"`). Persists to NVS `"awtrix"`. Same value as the `CDOWN` slot of the on-device `TIMER` menu. |
 | `max_duration`               | integer | 1–604800 (seconds, 1 s .. 7 days) | Upper bound on accepted `duration` commands. Out-of-range duration is rejected, not clamped (ADR-0001). Persists to NVS `"awtrix"`. See ADR-0004. |
-| `button_step`                | integer | 1–99 | Increment applied per left/right press while editing duration in the **Timer-app config mode**. Persists to NVS `"awtrix"`. See ADR-0004. |
 | `remaining_publish_interval` | integer | 1–60 (seconds) | How often `timer_rem` republishes while Running (drives the HA `{id}_timer_rem` sensor cadence). Persists to NVS `"awtrix"`. See ADR-0004. |
 | `app_config_timeout`         | integer | 5–300 (seconds) | No-input idle window before the **Timer-app config mode** auto-applies and exits to `Idle`. Does **not** affect the TIMER global menu. Persists to NVS `"awtrix"`. See ADR-0004. |
 | `melody_tick` | string | Bare name resolved against `/MELODIES/<name>.txt`; empty resets to default `"timer_tick"`; capped at 32 chars (alphanumeric, `_`, `-` only) | RTTTL melody played for each countdown beep when `buzzer = "countdown"`. Persists to NVS `"awtrix"`. See ADR-0004. |
@@ -156,7 +163,7 @@ Published on MQTT connect and on every change made through the
     │           └── pause ─┴── pause ───► Paused ───────┘
     │                       (toggle)            │
     │                                           │
-    └── reset / AutoClear timeout / dismiss ────┘
+    └── reset / AutoClear timeout ──────────────┘
 ```
 
 `start` from `Finished` clears the finished screen and re-arms with the
@@ -232,7 +239,7 @@ blocking-nav app is on screen), the display auto-switches to the Timer app.
 | --- | --- |
 | Middle long-press (from Idle, Timer app) | Enter config mode. `HH` field highlighted. |
 | Middle short-press (in config) | Cycle field `HH → MM → SS → HH`. |
-| Left / Right (in config) | Decrement / increment current field by `TIMER_STEP`. Hold ≥500 ms to auto-repeat every 250 ms. |
+| Left / Right (in config) | Decrement / increment current field by 1. Hold ≥500 ms to auto-repeat every 250 ms. |
 | 30 s of no input (in config) | Auto-applies HH:MM:SS to duration, exits config. |
 | Middle short-press (Idle, Timer app) | Start the timer with the saved duration. |
 | Middle short-press (Running) | Pause. |
@@ -282,7 +289,7 @@ the existing web UI — nothing about icons is bundled in firmware.
 | --- | --- |
 | `duration`, `buzzer mode`, `finished mode`, per-state icons | Yes (NVS namespace `"timer"`, keys `DUR` / `BUZ` / `FIN` / `ICON_IDLE` / `ICON_RUN` / `ICON_PAUSE` / `ICON_FIN`). Survives reboot, **but** any matching key in `dev.json` overrides NVS on every boot — see [`dev.md`](dev.md). |
 | `TIMER_FINISHED_HOLD`, `TIMER_REALERT_INTERVAL`, `TIMER_COUNTDOWN_SECONDS` | Yes (NVS namespace `"awtrix"`, keys `TFHOLD` / `TRALERT` / `TCDOWN`), written when the `TIMER` top menu's long-press save fires. Same dev.json-overrides-NVS rule applies. |
-| `TIMER_MAX_DURATION`, `TIMER_STEP`, `TIMER_PUBLISH_INTERVAL`, `TIMER_CONFIG_TIMEOUT` (the four ADR-0004 behavior parameters) | Yes (NVS namespace `"awtrix"`, keys `TMAXD` / `TSTEP` / `TPUBI` / `TCFGT`), written by `parseCommand` whenever any of these keys is supplied on `{prefix}/timer`. Same dev.json-overrides-NVS rule applies. |
+| `TIMER_MAX_DURATION`, `TIMER_PUBLISH_INTERVAL`, `TIMER_CONFIG_TIMEOUT` (the three ADR-0004 behavior parameters) | Yes (NVS namespace `"awtrix"`, keys `TMAXD` / `TPUBI` / `TCFGT`), written by `parseCommand` whenever any of these keys is supplied on `{prefix}/timer`. Same dev.json-overrides-NVS rule applies. |
 | `TIMER_MELODY_TICK`, `TIMER_MELODY_END`, `TIMER_BAR_ENABLED`, `TIMER_BAR_COLOR` (the four ADR-0004 new options) | Yes (NVS namespace `"awtrix"`, keys `TMTICK` / `TMEND` / `TBAREN` / `TBARC`). Same dev.json-overrides-NVS rule applies. |
 | `TIMER_ICON_ENABLED` (ADR-0005) | Yes (NVS namespace `"awtrix"`, key `TICONEN`), written by `parseCommand` and by the on-device `TIMER` menu's `ICON` slot long-press save. Same dev.json-overrides-NVS rule applies. |
 | `TIMER_SYNC_FOLLOW`, `TIMER_SYNC_TARGETS` (ADR-0006, multi-device sync) | Yes (NVS namespace `"awtrix"`, keys `TSYNF` / `TSYNT`), written by `parseCommand`. Same dev.json-overrides-NVS rule applies. These are **local identity** and are never propagated to peers. |
@@ -302,7 +309,7 @@ are additionally user-editable via the on-device `TIMER` top menu (see
 [`onscreen.md`](onscreen.md)) — see ADR-0003.
 
 The remaining ADR-0004 behavior parameters (`TIMER_MAX_DURATION`,
-`TIMER_STEP`, `TIMER_PUBLISH_INTERVAL`, `TIMER_CONFIG_TIMEOUT`) and the
+`TIMER_PUBLISH_INTERVAL`, `TIMER_CONFIG_TIMEOUT`) and the
 melody/color options (`TIMER_MELODY_TICK`, `TIMER_MELODY_END`,
 `TIMER_BAR_COLOR`) reach the timer only via the `{prefix}/timer` /
 `POST /api/timer` / dev.json surfaces — no on-device menu, no HA entities.
@@ -316,7 +323,6 @@ key still overrides NVS on every boot.
 | --- | --- | --- |
 | `SHOW_TIMER` | `true` | Master enable. When `false`, the Timer app is hidden from rotation, the 8 Home Assistant entities are not published, `POST /api/timer` and the MQTT `{prefix}/timer` topic are ignored, and any running timer is reset. On the `true → false` transition the firmware publishes empty retained discovery payloads so HA prunes the stale entities on next reconnect. Toggle from `/api/settings` (`TIMER` key), `dev.json` (`show_timer`), or the on-device **APPS** menu (last entry). |
 | `TIMER_MAX_DURATION` | `86400` (24 h) | Upper bound on accepted `duration` (range: 1..604800). |
-| `TIMER_STEP` | `1` | Increment step for left/right adjusts in Timer-app config mode (range: 1..99). |
 | `TIMER_PUBLISH_INTERVAL` | `1` (s) | How often `timer_rem` re-publishes while running (range: 1..60). |
 | `TIMER_FINISHED_HOLD` | `10` (s) | AutoClear notification hold time. |
 | `TIMER_REALERT_INTERVAL` | `15` (s) | Re-alert cadence in re-alert mode. |
@@ -380,24 +386,24 @@ every clock to `sync_targets=all` and `sync_follow=true`.
 
 ---
 
-## Dismiss + reset
+## Clearing the Finished alert
 
-Two ways to clear an active timer notification:
+The finished `0:00` is a pinned native Timer-app screen, **not** a
+notification ([ADR-0002](adr/0002-timer-finished-is-native-app-screen.md)).
+It does **not** participate in the notification queue, so
+`{MQTT_PREFIX}/notify/dismiss` (and HA's `{id}_dismiss` button) clear only
+generic notifications — they have **no** effect on the timer.
 
-```
-{MQTT_PREFIX}/notify/dismiss          # also dismisses any other notification
-```
-
-…or HA's `{id}_dismiss` button, or the physical middle short-press
-(dismiss to Idle) or middle long-press (dismiss + re-arm to Running)
-while state is Finished. Dismissing the notification while in `Hold`
-mode (or between `re-alert` cycles) returns the timer to `Idle`.
-
-To hard-reset state without dismissing other notifications, publish:
+Clearing the finished alert is always an explicit Timer command:
 
 ```
-{MQTT_PREFIX}/timer  →  {"action": "reset"}
+{MQTT_PREFIX}/timer  →  {"action": "reset"}   # hard return to Idle
+{MQTT_PREFIX}/timer  →  {"action": "start"}   # clear + re-arm from configured duration
 ```
+
+…or the equivalent `POST /api/timer`, HA's Reset/Start button entities, or
+the physical buttons while state is Finished: middle short-press → Idle,
+middle long-press → re-arm straight to Running.
 
 To restart the whole device:
 

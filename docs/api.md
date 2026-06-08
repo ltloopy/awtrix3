@@ -387,7 +387,6 @@ All JSON properties are optional. When multiple are sent together, property sett
 | `realert_interval`  | integer | 5–300 (s)            | Re-alert cadence (only meaningful when `finished = "re-alert"`). Persists. |
 | `countdown_seconds` | integer | 0–30   (s)           | Pre-expiry beep window (only meaningful when `buzzer = "countdown"`). Persists. |
 | `max_duration`               | integer | 1–604800 (s, 1 s .. 7 days) | Upper bound on accepted `duration` (ADR-0004). Persists. |
-| `button_step`                | integer | 1–99                 | Increment applied per left/right press in Timer-app config mode (ADR-0004). Persists. |
 | `remaining_publish_interval` | integer | 1–60 (s)             | How often `timer_rem` republishes while Running (ADR-0004). Persists. |
 | `app_config_timeout`         | integer | 5–300 (s)            | Idle window before Timer-app config mode auto-exits (ADR-0004). Persists. |
 | `melody_tick` | string | Bare name resolved against `/MELODIES/<name>.txt`; empty resets to default `"timer_tick"`; ≤32 chars | RTTTL countdown-beep melody (ADR-0004). Persists. |

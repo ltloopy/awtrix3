@@ -828,20 +828,18 @@ void test_U39_parseCommand_behavior_params_accepted_in_range(void) {
 
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
                       static_cast<int>(TimerManager.parseCommand(
-                          "{\"max_duration\":3600,\"button_step\":5,"
+                          "{\"max_duration\":3600,"
                           "\"remaining_publish_interval\":2,\"app_config_timeout\":60}")));
     TEST_ASSERT_EQUAL_UINT32(3600, TIMER_MAX_DURATION);
-    TEST_ASSERT_EQUAL_UINT32(5,    TIMER_STEP);
     TEST_ASSERT_EQUAL_UINT16(2,    TIMER_PUBLISH_INTERVAL);
     TEST_ASSERT_EQUAL_UINT16(60,   TIMER_CONFIG_TIMEOUT);
 
     // Lower bounds.
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
                       static_cast<int>(TimerManager.parseCommand(
-                          "{\"max_duration\":1,\"button_step\":1,"
+                          "{\"max_duration\":1,"
                           "\"remaining_publish_interval\":1,\"app_config_timeout\":5}")));
     TEST_ASSERT_EQUAL_UINT32(1,  TIMER_MAX_DURATION);
-    TEST_ASSERT_EQUAL_UINT32(1,  TIMER_STEP);
     TEST_ASSERT_EQUAL_UINT16(1,  TIMER_PUBLISH_INTERVAL);
     TEST_ASSERT_EQUAL_UINT16(5,  TIMER_CONFIG_TIMEOUT);
 
@@ -851,10 +849,9 @@ void test_U39_parseCommand_behavior_params_accepted_in_range(void) {
     // Upper bounds.
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
                       static_cast<int>(TimerManager.parseCommand(
-                          "{\"max_duration\":604800,\"button_step\":99,"
+                          "{\"max_duration\":604800,"
                           "\"remaining_publish_interval\":60,\"app_config_timeout\":300}")));
     TEST_ASSERT_EQUAL_UINT32(604800, TIMER_MAX_DURATION);
-    TEST_ASSERT_EQUAL_UINT32(99,     TIMER_STEP);
     TEST_ASSERT_EQUAL_UINT16(60,     TIMER_PUBLISH_INTERVAL);
     TEST_ASSERT_EQUAL_UINT16(300,    TIMER_CONFIG_TIMEOUT);
 }
@@ -865,7 +862,6 @@ void test_U39_parseCommand_behavior_params_accepted_in_range(void) {
 void test_U40_parseCommand_behavior_params_atomic_reject(void) {
     SHOW_TIMER = true;
     TIMER_MAX_DURATION     = 86400;
-    TIMER_STEP             = 1;
     TIMER_PUBLISH_INTERVAL = 1;
     TIMER_CONFIG_TIMEOUT   = 30;
 
@@ -878,11 +874,6 @@ void test_U40_parseCommand_behavior_params_atomic_reject(void) {
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
                       static_cast<int>(TimerManager.parseCommand("{\"max_duration\":604801}")));
     TEST_ASSERT_EQUAL_UINT32(86400, TIMER_MAX_DURATION);
-
-    // button_step out of range.
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
-                      static_cast<int>(TimerManager.parseCommand("{\"button_step\":100}")));
-    TEST_ASSERT_EQUAL_UINT32(1, TIMER_STEP);
 
     // remaining_publish_interval out of range.
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
@@ -1340,6 +1331,40 @@ void test_D7_view_icon_disabled_reflows_text_and_bar(void) {
     TEST_ASSERT_EQUAL_INT16(32, off.barStartX + off.barLen);
 }
 
+// D8 — Editing the duration while Running buffers the progress bar (API-17).
+// The bar divides by the duration snapshotted at start, so a mid-run edit leaves
+// the in-progress bar (and countdown) untouched; the new value only re-arms on
+// the next start/reset. Contrast: the buggy live-denominator gave 23*50/600 == 1.
+void test_D8_view_duration_edit_while_running_buffers_bar(void) {
+    TimerManager.setDuration(100);
+    TimerManager.start();
+    fixture::advance(50000);            // 50s elapsed -> 50s remaining
+    TimerManager.tick();
+    TimerView before = TimerViewModel::compute(0);
+    TEST_ASSERT_EQUAL_UINT8(11, before.barLen);   // 23 * 50/100, mirrors D4
+
+    TimerManager.setDuration(600);      // edit duration mid-run
+
+    // Countdown unaffected; config edit applied; run-duration snapshot unchanged.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Running),
+                      static_cast<int>(TimerManager.getState()));
+    TEST_ASSERT_EQUAL_UINT32(50, TimerManager.getRemaining());
+    TEST_ASSERT_EQUAL_UINT32(600, TimerManager.getDuration());
+    TEST_ASSERT_EQUAL_UINT32(100, TimerManager.getRunDuration());
+
+    // Bar buffered to the run snapshot (still 11), not snapped to 23*50/600.
+    TimerView after = TimerViewModel::compute(0);
+    TEST_ASSERT_TRUE(after.showBar);
+    TEST_ASSERT_EQUAL_UINT8(11, after.barLen);
+
+    // The new duration re-arms on the next reset/start.
+    TimerManager.reset();
+    TimerManager.start();
+    TEST_ASSERT_EQUAL_UINT32(600, TimerManager.getRunDuration());
+    TimerView rearmed = TimerViewModel::compute(0);
+    TEST_ASSERT_EQUAL_UINT8(23, rearmed.barLen);  // full bar at the new duration
+}
+
 // ============================================================================
 // U44 — getStateJson() observation snapshot: shape + field values per state
 // Proves: the read-only GET /api/timer surface reports the live timer state,
@@ -1657,6 +1682,7 @@ int main(int, char **) {
     RUN_TEST(test_D5_view_config_screen);
     RUN_TEST(test_D6_formatTimerDisplay_vs_wire_string);
     RUN_TEST(test_D7_view_icon_disabled_reflows_text_and_bar);
+    RUN_TEST(test_D8_view_duration_edit_while_running_buffers_bar);
     RUN_TEST(test_U44_getStateJson_idle_snapshot);
     RUN_TEST(test_U45_getStateJson_running_is_wallclock_fresh);
     RUN_TEST(test_U46_getStateJson_paused_frozen);

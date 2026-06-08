@@ -424,8 +424,7 @@ void TimerManager_::configAdjust(int delta)
 
     uint8_t cur = (configField == 0) ? configHH : (configField == 1 ? configMM : configSS);
     if (cur > maxVal) cur = maxVal;
-    const int step = (TIMER_STEP > 0 && TIMER_STEP <= 99) ? (int)TIMER_STEP : 1;
-    int next = (int)cur + (delta >= 0 ? step : -step);
+    int next = (int)cur + (delta >= 0 ? 1 : -1);
     if (next < 0) next = maxVal;
     else if (next > (int)maxVal) next = 0;
     if      (configField == 0) configHH = (uint8_t)next;
@@ -439,6 +438,7 @@ void TimerManager_::enterRunning()
     state = TimerState::Running;
     runStartMs = millis();
     runStartRemainingSec = remainingSec;
+    runDurationSec = durationSec;   // snapshot so a mid-run duration edit doesn't snap the progress bar
     publishState();
     publishRemaining();
     lastPublishMs = millis();
@@ -748,20 +748,10 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
 
     // Behavior parameters (ADR-0004): four distinct categories, atomic-reject validation.
     // (max_duration is hoisted above to gate duration's effective ceiling — ADR-0001 addendum.)
-    uint32_t buttonStep        = TIMER_STEP;
     uint16_t publishInterval   = TIMER_PUBLISH_INTERVAL;
     uint16_t appConfigTimeout  = TIMER_CONFIG_TIMEOUT;
-    bool haveButtonStep        = doc.containsKey("button_step");
     bool havePublishInterval   = doc.containsKey("remaining_publish_interval");
     bool haveAppConfigTimeout  = doc.containsKey("app_config_timeout");
-    if (haveButtonStep)
-    {
-        JsonVariant v = doc["button_step"];
-        if (!(v.is<long>() || v.is<float>())) return TimerCmdResult::BadField;
-        uint32_t n = v.as<uint32_t>();
-        if (n < 1 || n > 99) return TimerCmdResult::BadField;
-        buttonStep = n;
-    }
     if (havePublishInterval)
     {
         JsonVariant v = doc["remaining_publish_interval"];
@@ -896,7 +886,6 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     if (haveRealertInterval)  { TIMER_REALERT_INTERVAL  = realertInterval;  persistedKeyChanged = true; }
     if (haveCountdownSeconds) { TIMER_COUNTDOWN_SECONDS = countdownSeconds; persistedKeyChanged = true; }
     if (haveMaxDuration)      { /* TIMER_MAX_DURATION already assigned above */ persistedKeyChanged = true; }
-    if (haveButtonStep)       { TIMER_STEP              = buttonStep;       persistedKeyChanged = true; }
     if (havePublishInterval)  { TIMER_PUBLISH_INTERVAL  = publishInterval;  persistedKeyChanged = true; }
     if (haveAppConfigTimeout) { TIMER_CONFIG_TIMEOUT    = appConfigTimeout; persistedKeyChanged = true; }
     if (haveBarEnabled)       { TIMER_BAR_ENABLED       = barEnabled;       persistedKeyChanged = true; }
@@ -951,7 +940,7 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
         bool runStateChanged = haveAction || haveDuration;
         bool configChanged =
             haveBuzzer || haveFinished || haveFinishedHold || haveRealertInterval ||
-            haveCountdownSeconds || haveMaxDuration || haveButtonStep || havePublishInterval ||
+            haveCountdownSeconds || haveMaxDuration || havePublishInterval ||
             haveAppConfigTimeout || haveBarEnabled || haveIconEnabled || haveBarColor ||
             doc.containsKey("icon_idle") || doc.containsKey("icon_running") ||
             doc.containsKey("icon_paused") || doc.containsKey("icon_finished") ||
@@ -1020,7 +1009,6 @@ void TimerManager_::buildConfigSnapshot(JsonDocument &doc) const
     doc["realert_interval"]           = TIMER_REALERT_INTERVAL;
     doc["countdown_seconds"]          = TIMER_COUNTDOWN_SECONDS;
     doc["max_duration"]               = TIMER_MAX_DURATION;
-    doc["button_step"]                = TIMER_STEP;
     doc["remaining_publish_interval"] = TIMER_PUBLISH_INTERVAL;
     doc["app_config_timeout"]         = TIMER_CONFIG_TIMEOUT;
     doc["melody_tick"]                = TIMER_MELODY_TICK;

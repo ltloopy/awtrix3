@@ -41,7 +41,6 @@ uint8_t  BRIGHTNESS        = 100;
 bool     SHOW_TIMER             = true;
 bool     SHOW_TIMER_HA_PREV     = true;
 uint32_t TIMER_MAX_DURATION     = 86400;
-uint32_t TIMER_STEP             = 1;
 uint16_t TIMER_PUBLISH_INTERVAL = 1;
 uint16_t TIMER_FINISHED_HOLD    = 10;
 uint16_t TIMER_REALERT_INTERVAL = 15;

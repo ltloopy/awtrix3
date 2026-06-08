@@ -18,7 +18,6 @@ extern uint8_t BRIGHTNESS;
 extern bool     SHOW_TIMER;
 extern bool     SHOW_TIMER_HA_PREV;
 extern uint32_t TIMER_MAX_DURATION;
-extern uint32_t TIMER_STEP;
 extern uint16_t TIMER_PUBLISH_INTERVAL;
 extern uint16_t TIMER_FINISHED_HOLD;
 extern uint16_t TIMER_REALERT_INTERVAL;

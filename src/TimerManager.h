@@ -34,6 +34,7 @@ private:
 
     unsigned long runStartMs = 0;
     uint32_t runStartRemainingSec = 0;
+    uint32_t runDurationSec = 0;   // duration in force when the current run began; the progress-bar denominator (buffers a mid-run duration edit)
     unsigned long enteredFinishedMs = 0;
     unsigned long lastRealertMs = 0;
     unsigned long lastPublishMs = 0;
@@ -151,6 +152,7 @@ public:
     TimerState   getState()        const { return state; }
     uint32_t     getRemaining()    const { return remainingSec; }
     uint32_t     getDuration()     const { return durationSec; }
+    uint32_t     getRunDuration()  const { return runDurationSec; }
     BuzzerMode   getBuzzerMode()   const { return buzzerMode; }
     FinishedMode getFinishedMode() const { return finishedMode; }
 
