@@ -1,5 +1,7 @@
 #include "TimerHa.h"
 
+#include <stdio.h>
+
 #include "TimerEnums.h"
 
 // PROGMEM is a no-op for const data on the ESP32 (flash is memory-mapped and
@@ -73,3 +75,8 @@ const TimerHaDescriptor TIMER_HA_DESCRIPTORS[TIMER_HA_DESCRIPTOR_COUNT] = {
     {TimerHaEntity::Pause,    "button", HAtimerPauseID, HAtimerPauseIcon, HAtimerPauseName, nullptr,            nullptr,         nullptr},
     {TimerHaEntity::Reset,    "button", HAtimerResetID, HAtimerResetIcon, HAtimerResetName, nullptr,            nullptr,         nullptr},
 };
+
+void formatTimerHaEntityId(const TimerHaDescriptor &d, const char *macSuffix, char *out, size_t outLen)
+{
+    snprintf(out, outLen, d.idFormat, macSuffix);
+}

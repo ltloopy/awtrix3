@@ -1115,6 +1115,26 @@ void test_U35_select_options_match_enums(void) {
     TEST_ASSERT_EQUAL_STRING("Auto-clear;Hold;Re-alert", fin.options);
 }
 
+// U54 — create/teardown id symmetry. Both discovery setup and teardown derive
+// each entity's unique id through the one TimerHa helper, so they cannot drift.
+// For every row, the "create-path" derivation (by slot) and the "teardown-path"
+// derivation (by row) agree with each other and with the row's idFormat applied
+// to the MAC. The helper reads idFormat from the row it is handed, so the id
+// depends only on the row, never its array position — reordering the table moves
+// no entity's topic. (Replaces the old hand-ordered TIMER_HA_ID_BUFFERS macro.)
+void test_U54_timer_ha_ids_create_teardown_symmetric(void) {
+    const char *mac = "a1b2c3";
+    for (size_t i = 0; i < TIMER_HA_DESCRIPTOR_COUNT; ++i) {
+        const TimerHaDescriptor &d = TIMER_HA_DESCRIPTORS[i];
+        char createPath[40], teardownPath[40], expected[40];
+        formatTimerHaEntityId(timerHaDescriptor(d.slot), mac, createPath, sizeof createPath);
+        formatTimerHaEntityId(TIMER_HA_DESCRIPTORS[i], mac, teardownPath, sizeof teardownPath);
+        snprintf(expected, sizeof expected, d.idFormat, mac);
+        TEST_ASSERT_EQUAL_STRING(expected, createPath);
+        TEST_ASSERT_EQUAL_STRING(createPath, teardownPath);
+    }
+}
+
 // ============================================================================
 // D1–D6 — Timer rendering, via the display-free TimerView model (src/TimerView).
 // The renderer's decision logic (per-state text, the compact display format,
@@ -2317,6 +2337,7 @@ int main(int, char **) {
     RUN_TEST(test_U33_descriptor_ids_unique);
     RUN_TEST(test_U34_descriptor_type_specific_fields);
     RUN_TEST(test_U35_select_options_match_enums);
+    RUN_TEST(test_U54_timer_ha_ids_create_teardown_symmetric);
     RUN_TEST(test_D1_view_idle_shows_duration_no_bar);
     RUN_TEST(test_D2_view_running_shows_remaining_with_bar);
     RUN_TEST(test_D3_view_finished_blinks_0_00);

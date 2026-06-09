@@ -38,8 +38,17 @@ HASelect *timerBuzzer = nullptr, *timerFinishedSel = nullptr;
 HAButton *timerStartBtn = nullptr, *timerPauseBtn = nullptr, *timerResetBtn = nullptr;
 bool connected;
 char matID[40], ind1ID[40], ind2ID[40], ind3ID[40], briID[40], btnAID[40], btnBID[40], btnCID[40], appID[40], tempID[40], humID[40], luxID[40], verID[40], ramID[40], upID[40], sigID[40], btnLID[40], btnMID[40], btnRID[40], transID[40], doUpdateID[40], batID[40], myID[40], sSpeed[40], effectID[40], ipAddrID[40];
-char tDurID[40], tRemID[40], tStateID[40], tBuzID[40], tFinID[40], tStartID[40], tPauseID[40], tResetID[40];
+// Each Timer entity's resolved HA discovery unique id ("%s" filled with the MAC),
+// indexed by TimerHaEntity slot (timerHaIds[(size_t)slot]). Filled once in setup()
+// via formatTimerHaEntityId() and read by both createTimerHAEntities() and
+// removeTimerHAEntities() through timerHaId(slot) — never by hand-ordered position,
+// so create and teardown cannot drift. The strings must outlive the entities:
+// ArduinoHA stores the unique-id pointer, not a copy.
+char timerHaIds[TIMER_HA_DESCRIPTOR_COUNT][40];
 bool pendingTimerHADiscoveryCleanup = false;
+
+// The id buffer for a given Timer HA slot. See timerHaIds above.
+static char *timerHaId(TimerHaEntity slot) { return timerHaIds[static_cast<size_t>(slot)]; }
 
 void reconcileTimerHAState()
 {
@@ -53,14 +62,6 @@ void reconcileTimerHAState()
         saveSettings();
     }
 }
-
-// The Timer entity id buffers in TimerHaEntity slot order. The Timer HA Presence
-// table (TIMER_HA_DESCRIPTORS) drives which entities exist and their metadata;
-// these hold each entity's resolved unique id ("%s" filled with the MAC). Both
-// setup (fill + apply) and removeTimerHAEntities (teardown) index this in the
-// same slot order, so the two cannot drift.
-#define TIMER_HA_ID_BUFFERS \
-    { tDurID, tRemID, tStateID, tBuzID, tFinID, tStartID, tPauseID, tResetID }
 
 // Forward declarations: the HA command callbacks are defined further down, but
 // createTimerHAEntities() (placed here, next to removeTimerHAEntities) wires them.
@@ -88,49 +89,49 @@ void MQTTManager_::createTimerHAEntities()
     const TimerHaDescriptor &dPause = timerHaDescriptor(TimerHaEntity::Pause);
     const TimerHaDescriptor &dReset = timerHaDescriptor(TimerHaEntity::Reset);
 
-    timerDuration = new HAText(tDurID);
+    timerDuration = new HAText(timerHaId(TimerHaEntity::Duration));
     timerDuration->setIcon(dDur.icon);
     timerDuration->setName(dDur.name);
     timerDuration->setRetain(true);
     timerDuration->onMessage(onTimerDurationMessage);
     timerDuration->setState(TimerManager_::formatHMS(TimerManager.getDuration()).c_str(), true);
 
-    timerRemaining = new HASensorNumber(tRemID, HASensorNumber::PrecisionP0);
+    timerRemaining = new HASensorNumber(timerHaId(TimerHaEntity::Remaining), HASensorNumber::PrecisionP0);
     timerRemaining->setIcon(dRem.icon);
     timerRemaining->setName(dRem.name);
     timerRemaining->setUnitOfMeasurement(dRem.unit);
     timerRemaining->setDeviceClass(dRem.deviceClass);
     timerRemaining->setCurrentValue((uint32_t)TimerManager.getRemaining());
 
-    timerStateSensor = new HASensor(tStateID);
+    timerStateSensor = new HASensor(timerHaId(TimerHaEntity::State));
     timerStateSensor->setIcon(dState.icon);
     timerStateSensor->setName(dState.name);
 
-    timerBuzzer = new HASelect(tBuzID);
+    timerBuzzer = new HASelect(timerHaId(TimerHaEntity::Buzzer));
     timerBuzzer->setOptions(dBuz.options);
     timerBuzzer->onCommand(onSelectCommand);
     timerBuzzer->setIcon(dBuz.icon);
     timerBuzzer->setName(dBuz.name);
     timerBuzzer->setState((uint8_t)TimerManager.getBuzzerMode(), true);
 
-    timerFinishedSel = new HASelect(tFinID);
+    timerFinishedSel = new HASelect(timerHaId(TimerHaEntity::Finished));
     timerFinishedSel->setOptions(dFin.options);
     timerFinishedSel->onCommand(onSelectCommand);
     timerFinishedSel->setIcon(dFin.icon);
     timerFinishedSel->setName(dFin.name);
     timerFinishedSel->setState((uint8_t)TimerManager.getFinishedMode(), true);
 
-    timerStartBtn = new HAButton(tStartID);
+    timerStartBtn = new HAButton(timerHaId(TimerHaEntity::Start));
     timerStartBtn->setIcon(dStart.icon);
     timerStartBtn->setName(dStart.name);
     timerStartBtn->onCommand(onButtonCommand);
 
-    timerPauseBtn = new HAButton(tPauseID);
+    timerPauseBtn = new HAButton(timerHaId(TimerHaEntity::Pause));
     timerPauseBtn->setIcon(dPause.icon);
     timerPauseBtn->setName(dPause.name);
     timerPauseBtn->onCommand(onButtonCommand);
 
-    timerResetBtn = new HAButton(tResetID);
+    timerResetBtn = new HAButton(timerHaId(TimerHaEntity::Reset));
     timerResetBtn->setIcon(dReset.icon);
     timerResetBtn->setName(dReset.name);
     timerResetBtn->onCommand(onButtonCommand);
@@ -163,12 +164,12 @@ void MQTTManager_::removeTimerHAEntities()
 {
     const char *deviceUniqueId = device.getUniqueId();
     if (!deviceUniqueId) return;
-    char *const idBufs[TIMER_HA_DESCRIPTOR_COUNT] = TIMER_HA_ID_BUFFERS;
     char topic[160];
     for (size_t i = 0; i < TIMER_HA_DESCRIPTOR_COUNT; ++i)
     {
+        const TimerHaDescriptor &d = TIMER_HA_DESCRIPTORS[i];
         snprintf(topic, sizeof(topic), "%s/%s/%s/%s/config",
-                 HA_PREFIX.c_str(), TIMER_HA_DESCRIPTORS[i].component, deviceUniqueId, idBufs[i]);
+                 HA_PREFIX.c_str(), d.component, deviceUniqueId, timerHaId(d.slot));
         mqtt.publish(topic, "", true);
     }
 }
@@ -969,13 +970,12 @@ void MQTTManager_::setup()
         ipAddr->setName(HAipAddrName);
         ipAddr->setIcon(HAipAddrIcon);
 
-        // Resolve every Timer entity's unique id from the Timer HA Presence table,
-        // in slot order, into the shared id buffers (also read by teardown).
-        {
-            char *const idBufs[TIMER_HA_DESCRIPTOR_COUNT] = TIMER_HA_ID_BUFFERS;
-            for (size_t i = 0; i < TIMER_HA_DESCRIPTOR_COUNT; ++i)
-                sprintf(idBufs[i], TIMER_HA_DESCRIPTORS[i].idFormat, macStr);
-        }
+        // Resolve every Timer entity's unique id from the Timer HA Presence table
+        // into the slot-keyed timerHaIds buffers (also read by teardown), each
+        // through the one formatTimerHaEntityId() helper so create and teardown
+        // agree per slot. Row i describes slot i (pinned by test_U32).
+        for (size_t i = 0; i < TIMER_HA_DESCRIPTOR_COUNT; ++i)
+            formatTimerHaEntityId(TIMER_HA_DESCRIPTORS[i], macStr, timerHaIds[i], sizeof(timerHaIds[i]));
 
         if (SHOW_TIMER)
             createTimerHAEntities();

@@ -46,4 +46,11 @@ inline const TimerHaDescriptor &timerHaDescriptor(TimerHaEntity slot)
     return TIMER_HA_DESCRIPTORS[static_cast<size_t>(slot)];
 }
 
+// The single place a descriptor row + device MAC suffix becomes an entity's HA
+// discovery unique id: formats the row's idFormat ("%s" -> macSuffix) into
+// out[outLen]. Discovery setup (fill) and teardown both derive ids through this,
+// keyed by the row they hold, so the two cannot derive different ids for a slot
+// and reordering the table moves no entity's id.
+void formatTimerHaEntityId(const TimerHaDescriptor &d, const char *macSuffix, char *out, size_t outLen);
+
 #endif
