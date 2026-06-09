@@ -81,6 +81,11 @@ an accepted one discards it.
 
 ### The 30 s timeout and hold-to-repeat stay in `TimerManager::tick()`
 
+> **Superseded by [ADR-0012](0012-timer-config-timing-in-editor.md):** the timing below moved into
+> `TimerConfigEditor::tick(nowMs, buttonState)` so the cadence and timeout are testable in isolation.
+> The editor is no longer time-free/button-free; it receives injected time and button state. The
+> original rationale for this slice is retained below for history.
+
 The auto-apply-on-idle timeout and the button auto-repeat read `millis()` and
 `PeripheryManager.buttonL/R` — device/tick-loop concerns. They stay in `TimerManager`
 (`configLastInputMs`, `configRepeatLeftMs/RightMs` remain members; the `tick()` config block is

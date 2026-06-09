@@ -17,8 +17,6 @@ namespace {
     constexpr uint16_t kTimerCmdJsonSize     = 2048;
     constexpr uint8_t  kIconNameMaxLen       = 32;
     constexpr uint32_t kConfigHHMax          = 99UL * 3600UL;
-    constexpr unsigned long kBtnLongPressMs  = 500;
-    constexpr unsigned long kBtnRepeatMs     = 250;
 
     const char *FALLBACK_END_RTTTL  = "timer:d=4,o=5,b=120:c,8p,c,8p,c";
     const char *FALLBACK_TICK_RTTTL = "tick:d=16,o=6,b=200:c";
@@ -335,19 +333,18 @@ bool TimerManager_::isValidAction(const String &s)
     return a == "start" || a == "pause" || a == "reset";
 }
 
-// The config-mode value logic lives in TimerConfigEditor; these methods stay as
-// thin forwarders so TimerView/Apps.cpp/PeripheryManager are unchanged. The
-// run-state mutation (the enter-time 99h clamp, the exit-time setDuration/drain/
-// broadcast) and the 30 s timeout timestamp stay here — the editor is value-only.
-// See docs/adr/0011-timer-config-editor-extraction.md.
+// The config-mode value logic AND timing (hold-to-repeat + 30 s auto-apply) live in
+// TimerConfigEditor; these methods stay as thin forwarders so TimerView/Apps.cpp/
+// PeripheryManager are unchanged. Only the run-state mutation (the enter-time 99h
+// clamp, the exit-time setDuration/drain/broadcast) stays here; each forwarder
+// noteInput()s the editor so any input resets its idle timer. See docs/adr/0011
+// (editor extraction) and docs/adr/0012 (timing moved into editor.tick()).
 void TimerManager_::enterConfigMode()
 {
     if (state != TimerState::Idle) return;
     if (durationSec > kConfigHHMax) durationSec = kConfigHHMax;   // keep HH two-digit-editable (run-state)
     configEditor.enter(durationSec);
-    configLastInputMs = millis();
-    configRepeatLeftMs = 0;
-    configRepeatRightMs = 0;
+    configEditor.noteInput(millis());   // seed the editor's no-input idle clock
 }
 
 void TimerManager_::exitConfigMode()
@@ -362,14 +359,14 @@ void TimerManager_::configCycleField()
 {
     if (!configEditor.isActive()) return;
     configEditor.cycleField();
-    configLastInputMs = millis();
+    configEditor.noteInput(millis());   // any input resets the editor's auto-apply timeout
 }
 
 void TimerManager_::configAdjust(int delta)
 {
     if (!configEditor.isActive()) return;
     configEditor.adjust(delta);
-    configLastInputMs = millis();
+    configEditor.noteInput(millis());   // any input resets the editor's auto-apply timeout
 }
 
 void TimerManager_::enterRunning()
@@ -496,37 +493,15 @@ void TimerManager_::tick()
 
     if (configEditor.isActive())
     {
-        if (now - configLastInputMs >= (unsigned long)TIMER_CONFIG_TIMEOUT * 1000UL)
-        {
-            exitConfigMode();
-            return;
-        }
-
+        // Config-mode timing (hold-to-repeat + 30 s auto-apply) lives in the editor,
+        // which reads injected button state and the current time. We only feed it the
+        // raw button presses and commit on its TimedOut signal. See docs/adr/0012.
         EasyButton *bL = PeripheryManager.buttonL;
         EasyButton *bR = PeripheryManager.buttonR;
-        if (bL && bL->isPressed() && bL->pressedFor(kBtnLongPressMs))
+        TimerConfigEditor::ButtonState buttons{ bL && bL->isPressed(), bR && bR->isPressed() };
+        if (configEditor.tick(now, buttons) == TimerConfigEditor::TickOutcome::TimedOut)
         {
-            if (configRepeatLeftMs == 0 || (now - configRepeatLeftMs) >= kBtnRepeatMs)
-            {
-                configAdjust(-1);
-                configRepeatLeftMs = now;
-            }
-        }
-        else
-        {
-            configRepeatLeftMs = 0;
-        }
-        if (bR && bR->isPressed() && bR->pressedFor(kBtnLongPressMs))
-        {
-            if (configRepeatRightMs == 0 || (now - configRepeatRightMs) >= kBtnRepeatMs)
-            {
-                configAdjust(+1);
-                configRepeatRightMs = now;
-            }
-        }
-        else
-        {
-            configRepeatRightMs = 0;
+            exitConfigMode();   // commit the edited duration through setDuration + drain + broadcast
         }
         return;
     }

@@ -1573,6 +1573,47 @@ void test_U51_setDuration_while_paused_resets_to_idle(void) {
 }
 
 // ============================================================================
+// U52 — tick() delegates config-mode timing to the editor (issue #23): with the
+// editor active, 30 s of no input auto-applies the edit and exits to Idle. Proves
+// the timeout path runs through editor.tick() -> exitConfigMode -> setDuration.
+// ============================================================================
+void test_U52_tick_delegates_config_timeout_autoapplies_and_exits(void) {
+    TimerManager.setDuration(300);      // 00:05:00
+    TimerManager.enterConfigMode();     // millis()==0 seeds the idle clock
+    TEST_ASSERT_TRUE(TimerManager.isInConfig());
+
+    TimerManager.configAdjust(+1);      // HH 0 -> 1 (edit -> 01:05:00 = 3900s)
+    TEST_ASSERT_EQUAL_UINT8(1, TimerManager.getConfigHH());
+
+    // 30 s of no input: tick() must auto-apply through the editor and exit to Idle.
+    fixture::advance(30000);
+    TimerManager.tick();
+
+    TEST_ASSERT_FALSE(TimerManager.isInConfig());
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle),
+                      static_cast<int>(TimerManager.getState()));
+    TEST_ASSERT_EQUAL_UINT32(3900, TimerManager.getDuration());   // committed via setDuration
+}
+
+// ============================================================================
+// U53 — when the editor is NOT active, tick() runs the run-state machine: the
+// config branch never intercepts a Running countdown (issue #23 delegation guard).
+// ============================================================================
+void test_U53_tick_runs_runstate_when_not_in_config(void) {
+    TimerManager.setDuration(10);
+    TimerManager.start();
+    TEST_ASSERT_FALSE(TimerManager.isInConfig());
+    TEST_ASSERT_EQUAL_UINT32(10, TimerManager.getRemaining());
+
+    fixture::advance(4000);
+    TimerManager.tick();                // run-state countdown, not the config branch
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Running),
+                      static_cast<int>(TimerManager.getState()));
+    TEST_ASSERT_EQUAL_UINT32(6, TimerManager.getRemaining());
+}
+
+// ============================================================================
 // T1 — TIMER_SETTINGS_DESCS: UIntRange validators reject/accept at the exact
 // boundaries, reached directly (not through the 300-line parseCommand).
 // ============================================================================
@@ -2142,6 +2183,94 @@ void test_CE7_exit_recomposes_and_deactivates(void) {
     TEST_ASSERT_FALSE(ed.isActive());
 }
 
+// ============================================================================
+// TimerConfigEditor::tick — config-mode timing in isolation (issue #23).
+// These drive the editor's auto-repeat + 30 s no-input timeout with injected
+// time and button state, no TimerManager singleton / PeripheryManager / display.
+// See docs/adr/0012-timer-config-timing-in-editor.md.
+// ============================================================================
+
+// CE8 — 30 s of no input makes tick() report TimedOut so the caller auto-applies.
+// noteInput(0) seeds the idle clock; the window is TIMER_CONFIG_TIMEOUT seconds.
+void test_CE8_tick_times_out_after_no_input(void) {
+    TIMER_CONFIG_TIMEOUT = 30;
+    TimerConfigEditor ed;
+    ed.enter(60);
+    ed.noteInput(0);
+
+    TimerConfigEditor::ButtonState none;
+    TEST_ASSERT_EQUAL(TimerConfigEditor::TickOutcome::Active,
+                      ed.tick(29000, none));   // 29 s < 30 s window
+    TEST_ASSERT_EQUAL(TimerConfigEditor::TickOutcome::TimedOut,
+                      ed.tick(30000, none));   // 30 s elapsed
+}
+
+// CE9 — a held right button auto-repeats +1 on the current field: the hold clock
+// starts at the first tick the button is observed pressed; the first step fires
+// once the 500 ms long-press threshold is crossed, then one step per 250 ms cadence
+// window, and nothing in between. Field is SS (no cap interference).
+void test_CE9_held_button_autorepeats_at_cadence(void) {
+    TIMER_MAX_DURATION = 0;        // disable cap: SS wraps at 59, predictable +1 steps
+    TIMER_CONFIG_TIMEOUT = 30;     // well above the cadence under test
+    TimerConfigEditor ed;
+    ed.enter(0);                   // 00:00:00, field=HH
+    ed.cycleField(); ed.cycleField();   // -> SS
+    ed.noteInput(1000);
+
+    TimerConfigEditor::ButtonState right; right.rightPressed = true;
+
+    ed.tick(1000, right);  TEST_ASSERT_EQUAL_UINT8(0, ed.ss());   // press observed: hold clock starts
+    ed.tick(1499, right);  TEST_ASSERT_EQUAL_UINT8(0, ed.ss());   // 499 ms held < 500: no step
+    ed.tick(1500, right);  TEST_ASSERT_EQUAL_UINT8(1, ed.ss());   // threshold crossed: first step
+    ed.tick(1700, right);  TEST_ASSERT_EQUAL_UINT8(1, ed.ss());   // +200 ms < 250: no step
+    ed.tick(1750, right);  TEST_ASSERT_EQUAL_UINT8(2, ed.ss());   // +250 ms: next step
+    ed.tick(2000, right);  TEST_ASSERT_EQUAL_UINT8(3, ed.ss());   // +250 ms: next step
+}
+
+// CE10 — the left button auto-repeats -1, and releasing the button clears the hold
+// clock so a re-press must wait the full long-press threshold again (no instant step).
+void test_CE10_left_decrements_and_release_rewaits(void) {
+    TIMER_MAX_DURATION = 0;
+    TIMER_CONFIG_TIMEOUT = 30;
+    TimerConfigEditor ed;
+    ed.enter(5);                   // 00:00:05, field=HH
+    ed.cycleField(); ed.cycleField();   // -> SS = 5
+    ed.noteInput(1000);
+
+    TimerConfigEditor::ButtonState left;  left.leftPressed  = true;
+    TimerConfigEditor::ButtonState none;
+
+    ed.tick(1000, left);  TEST_ASSERT_EQUAL_UINT8(5, ed.ss());   // press observed
+    ed.tick(1500, left);  TEST_ASSERT_EQUAL_UINT8(4, ed.ss());   // threshold: first -1 step
+    ed.tick(1750, left);  TEST_ASSERT_EQUAL_UINT8(3, ed.ss());   // +250 ms: next -1 step
+
+    ed.tick(1800, none);  TEST_ASSERT_EQUAL_UINT8(3, ed.ss());   // released: hold clock cleared
+
+    // Re-press: must hold the full threshold again before stepping (no instant step).
+    ed.tick(1900, left);  TEST_ASSERT_EQUAL_UINT8(3, ed.ss());   // press re-observed
+    ed.tick(2399, left);  TEST_ASSERT_EQUAL_UINT8(3, ed.ss());   // 499 ms held < 500: no step
+    ed.tick(2400, left);  TEST_ASSERT_EQUAL_UINT8(2, ed.ss());   // threshold crossed: step
+}
+
+// CE11 — holding a button past the 30 s window never times out: each auto-repeat
+// counts as input and resets the idle clock, so the editor stays Active throughout
+// (matching the on-device "holding to scrub keeps the edit alive" behaviour).
+void test_CE11_hold_suppresses_timeout(void) {
+    TIMER_MAX_DURATION = 0;
+    TIMER_CONFIG_TIMEOUT = 30;
+    TimerConfigEditor ed;
+    ed.enter(0);
+    ed.cycleField(); ed.cycleField();   // -> SS
+    ed.noteInput(1000);
+
+    TimerConfigEditor::ButtonState right; right.rightPressed = true;
+
+    // Tick at a steady on-device-like cadence across well past 30 s of holding.
+    for (unsigned long now = 1000; now <= 40000; now += 200) {
+        TEST_ASSERT_EQUAL(TimerConfigEditor::TickOutcome::Active, ed.tick(now, right));
+    }
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
@@ -2182,6 +2311,8 @@ int main(int, char **) {
     RUN_TEST(test_U43_parseCommand_bar_enabled_strict_bool);
     RUN_TEST(test_U50_parseCommand_icon_enabled_strict_bool);
     RUN_TEST(test_U51_setDuration_while_paused_resets_to_idle);
+    RUN_TEST(test_U52_tick_delegates_config_timeout_autoapplies_and_exits);
+    RUN_TEST(test_U53_tick_runs_runstate_when_not_in_config);
     RUN_TEST(test_U32_descriptor_table_well_formed);
     RUN_TEST(test_U33_descriptor_ids_unique);
     RUN_TEST(test_U34_descriptor_type_specific_fields);
@@ -2231,5 +2362,9 @@ int main(int, char **) {
     RUN_TEST(test_CE5_adjust_decrement_wraps_to_dynamic_max);
     RUN_TEST(test_CE6_cycleField_rotates);
     RUN_TEST(test_CE7_exit_recomposes_and_deactivates);
+    RUN_TEST(test_CE8_tick_times_out_after_no_input);
+    RUN_TEST(test_CE9_held_button_autorepeats_at_cadence);
+    RUN_TEST(test_CE10_left_decrements_and_release_rewaits);
+    RUN_TEST(test_CE11_hold_suppresses_timeout);
     return UNITY_END();
 }

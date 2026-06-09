@@ -39,13 +39,10 @@ private:
     unsigned long lastPublishMs = 0;
 
     // Config-mode working state (field cursor + HH/MM/SS buffers + cap-aware adjust)
-    // lives in the display-free TimerConfigEditor; this class keeps only the
-    // tick-loop bookkeeping for the 30 s no-input timeout and the hold-to-repeat
-    // (millis()/button concerns the editor stays clear of). See docs/adr/0011.
+    // AND timing (30 s no-input timeout + button hold-to-repeat) live in the
+    // display-free TimerConfigEditor; tick() feeds it the current time and injected
+    // button presses. See docs/adr/0011 (extraction) and docs/adr/0012 (timing).
     TimerConfigEditor configEditor;
-    unsigned long configLastInputMs   = 0;
-    unsigned long configRepeatLeftMs  = 0;
-    unsigned long configRepeatRightMs = 0;
 
     bool _suspendPersist = false;
     bool _dirty          = false;
