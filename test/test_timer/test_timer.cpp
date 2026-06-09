@@ -1184,6 +1184,11 @@ void test_U35_select_options_match_enums(void) {
     const TimerHaDescriptor &fin = timerHaDescriptor(TimerHaEntity::Finished);
     TEST_ASSERT_EQUAL_INT((int)BuzzerMode::Countdown + 1, count_ha_options(buz.options));
     TEST_ASSERT_EQUAL_INT((int)FinishedMode::ReAlert + 1, count_ha_options(fin.options));
+    // The "`;`"-joined option strings are derived from the codec table's HA column
+    // (ADR-0010) and MUST stay byte-identical so existing HA automations/dashboards
+    // keep matching the same option labels in the same order.
+    TEST_ASSERT_EQUAL_STRING("Off;End;Countdown", buz.options);
+    TEST_ASSERT_EQUAL_STRING("Auto-clear;Hold;Re-alert", fin.options);
 }
 
 // ============================================================================
