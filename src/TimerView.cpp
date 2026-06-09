@@ -2,8 +2,6 @@
 
 #include <stdio.h>
 
-#include "TimerManager.h"
-
 namespace
 {
     // Display geometry owned by the view (app-local coordinates on the 32x8
@@ -28,48 +26,48 @@ void TimerViewModel::formatTimerDisplay(uint32_t seconds, char *out, size_t outL
         snprintf(out, outLen, "%02u:%02u", (unsigned)(seconds / 3600), (unsigned)((seconds % 3600) / 60));
 }
 
-TimerView TimerViewModel::compute(unsigned long nowMs, bool iconEnabled)
+TimerView TimerViewModel::compute(const TimerSnapshot &s)
 {
     TimerView v = {};
 
     // Config screen: HH:MM:SS centered over the full panel, with a field underline.
-    if (TimerManager.isInConfig())
+    if (s.inConfig)
     {
         v.screen = TimerView::Screen::Config;
         snprintf(v.text, sizeof(v.text), "%02u:%02u:%02u",
-                 (unsigned)TimerManager.getConfigHH(),
-                 (unsigned)TimerManager.getConfigMM(),
-                 (unsigned)TimerManager.getConfigSS());
+                 (unsigned)s.configHH,
+                 (unsigned)s.configMM,
+                 (unsigned)s.configSS);
         v.showText       = true;
         v.textRegionX0   = 0;
         v.textRegionW    = kScreenW;
         v.showUnderline  = true;
-        v.underlineField = TimerManager.getConfigField();
+        v.underlineField = s.configField;
         return v;
     }
 
-    const TimerState ts = TimerManager.getState();
+    const TimerState ts = s.state;
 
     // Non-config screens draw the icon (unless disabled) and center their text in
     // the 24px area right of it. When the icon is hidden, text reflows to the full
     // 32px panel.
-    v.showIcon = iconEnabled;
-    if (iconEnabled) { v.textRegionX0 = kTextX; v.textRegionW = kTextWidth; } // 8 / 24
-    else             { v.textRegionX0 = 0;      v.textRegionW = kScreenW;   } // full 32px
+    v.showIcon = s.iconEnabled;
+    if (s.iconEnabled) { v.textRegionX0 = kTextX; v.textRegionW = kTextWidth; } // 8 / 24
+    else               { v.textRegionX0 = 0;      v.textRegionW = kScreenW;   } // full 32px
 
     // Finished screen: blinking "0:00", no bar.
     if (ts == TimerState::Finished)
     {
         v.screen = TimerView::Screen::Finished;
         snprintf(v.text, sizeof(v.text), "0:00");
-        v.showText = ((nowMs / kBlinkMs) % 2 == 0);
+        v.showText = ((s.nowMs / kBlinkMs) % 2 == 0);
         return v;
     }
 
     // Time screen: Idle shows the configured duration; Running/Paused show remaining.
     v.screen = TimerView::Screen::Time;
-    const uint32_t duration  = TimerManager.getDuration();
-    const uint32_t remaining = (ts == TimerState::Idle) ? duration : TimerManager.getRemaining();
+    const uint32_t duration  = s.duration;
+    const uint32_t remaining = (ts == TimerState::Idle) ? duration : s.remaining;
     formatTimerDisplay(remaining, v.text, sizeof(v.text));
     v.showText = true;
 
@@ -77,15 +75,15 @@ TimerView TimerViewModel::compute(unsigned long nowMs, bool iconEnabled)
     // configured duration, so editing the duration mid-run leaves the in-progress
     // bar untouched (it re-arms on the next start/reset). See API-17 in
     // TIMER_TEST_PLAN.md. Falls back to the configured duration if no snapshot.
-    uint32_t barDuration = TimerManager.getRunDuration();
+    uint32_t barDuration = s.runDuration;
     if (barDuration == 0) barDuration = duration;
     if (ts != TimerState::Idle && barDuration > 0)
     {
         // The bar also reflows when the icon is hidden: it spans the full panel
         // instead of the 23px region right of the icon. Right edge stays anchored
         // at col 31 either way (barX0 + barMaxLen == kScreenW).
-        const int16_t barX0     = iconEnabled ? kBarX0     : 0;          // 9  or 0
-        const int16_t barMaxLen = iconEnabled ? kBarMaxLen : kScreenW;   // 23 or 32
+        const int16_t barX0     = s.iconEnabled ? kBarX0     : 0;          // 9  or 0
+        const int16_t barMaxLen = s.iconEnabled ? kBarMaxLen : kScreenW;   // 23 or 32
         uint32_t len = ((uint32_t)barMaxLen * remaining) / barDuration;
         if (len > (uint32_t)barMaxLen)
             len = (uint32_t)barMaxLen;

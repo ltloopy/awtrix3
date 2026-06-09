@@ -1202,17 +1202,30 @@ void test_U35_select_options_match_enums(void) {
 // and the icon-file (.jpg/.gif) lookup, both of which need real display I/O.
 // ============================================================================
 
+// Builds a TimerSnapshot from the live TimerManager, mirroring the single
+// production mapping in TimerApp (src/Apps.cpp). Used by the D-tests that drive
+// the manager through real start()/tick()/setDuration()/config arithmetic and
+// then assert the view of that exact state.
+static TimerSnapshot mgrSnapshot(unsigned long nowMs, bool iconEnabled = true) {
+    return TimerSnapshot{
+        TimerManager.getState(), TimerManager.getDuration(), TimerManager.getRemaining(),
+        TimerManager.getRunDuration(), TimerManager.isInConfig(), TimerManager.getConfigField(),
+        TimerManager.getConfigHH(), TimerManager.getConfigMM(), TimerManager.getConfigSS(),
+        iconEnabled, nowMs};
+}
+
 // D1 — Idle shows the configured duration as compact text, with no bar.
 void test_D1_view_idle_shows_duration_no_bar(void) {
-    TimerManager.setDuration(300);
-    TimerView v = TimerViewModel::compute(0);
+    const TimerSnapshot s{TimerState::Idle, 300, 0, 0, false, 0, 0, 0, 0, true, 0};
+    TimerView v = TimerViewModel::compute(s);
     TEST_ASSERT_EQUAL(static_cast<int>(TimerView::Screen::Time), static_cast<int>(v.screen));
     TEST_ASSERT_EQUAL_STRING("5:00", v.text);
     TEST_ASSERT_TRUE(v.showText);
     TEST_ASSERT_FALSE(v.showBar);
 }
 
-// D2 — Running shows the remaining time with a bar.
+// D2 — Running shows the remaining time with a bar. Drives the real run clock so
+// the snapshot carries the same remaining (240) the manager computes.
 void test_D2_view_running_shows_remaining_with_bar(void) {
     TimerManager.setDuration(300);
     TimerManager.start();
@@ -1220,26 +1233,23 @@ void test_D2_view_running_shows_remaining_with_bar(void) {
     TimerManager.tick();
     TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Running),
                       static_cast<int>(TimerManager.getState()));
-    TimerView v = TimerViewModel::compute(0);
+    TimerView v = TimerViewModel::compute(mgrSnapshot(0));
     TEST_ASSERT_EQUAL(static_cast<int>(TimerView::Screen::Time), static_cast<int>(v.screen));
     TEST_ASSERT_EQUAL_STRING("4:00", v.text);
     TEST_ASSERT_TRUE(v.showText);
     TEST_ASSERT_TRUE(v.showBar);
 }
 
-// D3 — Finished blinks "0:00" at the 500 ms cadence; no bar.
+// D3 — Finished blinks "0:00" at the 500 ms cadence; no bar. The blink is a pure
+// function of nowMs, so three snapshots differing only in nowMs cover it.
 void test_D3_view_finished_blinks_0_00(void) {
-    TimerManager.setDuration(5);
-    TimerManager.start();
-    fixture::advance(5000);
-    TimerManager.tick();
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Finished),
-                      static_cast<int>(TimerManager.getState()));
+    const TimerSnapshot base{TimerState::Finished, 5, 0, 5, false, 0, 0, 0, 0, true, 0};
+    TimerSnapshot s_on = base, s_off = base, s_on2 = base;
+    s_on.nowMs = 0; s_off.nowMs = 500; s_on2.nowMs = 1000;
 
-    // nowMs drives the blink directly (independent of the run clock).
-    TimerView on  = TimerViewModel::compute(0);
-    TimerView off = TimerViewModel::compute(500);
-    TimerView on2 = TimerViewModel::compute(1000);
+    TimerView on  = TimerViewModel::compute(s_on);
+    TimerView off = TimerViewModel::compute(s_off);
+    TimerView on2 = TimerViewModel::compute(s_on2);
 
     TEST_ASSERT_EQUAL(static_cast<int>(TimerView::Screen::Finished), static_cast<int>(on.screen));
     TEST_ASSERT_EQUAL_STRING("0:00", on.text);
@@ -1251,42 +1261,37 @@ void test_D3_view_finished_blinks_0_00(void) {
 
 // D4 — Progress bar geometry: right-anchored, drains from the left
 // (barStartX + barLen == 32, the right edge at column 31), and a sub-1-cell
-// remaining draws no bar.
+// remaining draws no bar. Geometry depends only on (remaining, runDuration,
+// iconEnabled), so each case is an explicit Running snapshot.
 void test_D4_view_bar_geometry_right_anchored(void) {
     // Half remaining: 23 * 50/100 = 11 cells, anchored right.
-    TimerManager.setDuration(100);
-    TimerManager.start();
-    fixture::advance(50000);
-    TimerManager.tick();
-    TEST_ASSERT_EQUAL_UINT32(50, TimerManager.getRemaining());
-    TimerView half = TimerViewModel::compute(0);
+    const TimerSnapshot s_half{TimerState::Running, 100, 50, 100, false, 0, 0, 0, 0, true, 0};
+    TimerView half = TimerViewModel::compute(s_half);
     TEST_ASSERT_TRUE(half.showBar);
     TEST_ASSERT_EQUAL_UINT8(11, half.barLen);
     TEST_ASSERT_EQUAL_INT16(21, half.barStartX);                 // 9 + (23 - 11)
     TEST_ASSERT_EQUAL_INT16(32, half.barStartX + half.barLen);   // right edge anchored
 
     // Full remaining: full-length bar starting at the bar origin.
-    TimerManager.reset();
-    TimerManager.start();
-    TimerView full = TimerViewModel::compute(0);
+    const TimerSnapshot s_full{TimerState::Running, 100, 100, 100, false, 0, 0, 0, 0, true, 0};
+    TimerView full = TimerViewModel::compute(s_full);
     TEST_ASSERT_EQUAL_UINT8(23, full.barLen);
     TEST_ASSERT_EQUAL_INT16(9, full.barStartX);
     TEST_ASSERT_EQUAL_INT16(32, full.barStartX + full.barLen);
 
     // Tiny remaining (1s of 100): 23 * 1/100 == 0 cells -> no bar drawn.
-    fixture::advance(99000);
-    TimerManager.tick();
-    TEST_ASSERT_EQUAL_UINT32(1, TimerManager.getRemaining());
-    TimerView tiny = TimerViewModel::compute(0);
+    const TimerSnapshot s_tiny{TimerState::Running, 100, 1, 100, false, 0, 0, 0, 0, true, 0};
+    TimerView tiny = TimerViewModel::compute(s_tiny);
     TEST_ASSERT_FALSE(tiny.showBar);
 }
 
 // D5 — Config screen: HH:MM:SS centered over the full panel, field underline
-// tracks configCycleField, no bar.
+// tracks configCycleField, no bar. Drives the manager so the snapshot carries
+// the real config-buffer decomposition (3661 -> 01:01:01) and field cursor.
 void test_D5_view_config_screen(void) {
     TimerManager.setDuration(3661);     // 1:01:01
     TimerManager.enterConfigMode();
-    TimerView v = TimerViewModel::compute(0);
+    TimerView v = TimerViewModel::compute(mgrSnapshot(0));
     TEST_ASSERT_EQUAL(static_cast<int>(TimerView::Screen::Config), static_cast<int>(v.screen));
     TEST_ASSERT_EQUAL_STRING("01:01:01", v.text);
     TEST_ASSERT_TRUE(v.showText);
@@ -1297,7 +1302,7 @@ void test_D5_view_config_screen(void) {
     TEST_ASSERT_FALSE(v.showBar);
 
     TimerManager.configCycleField();                // HH -> MM
-    TimerView v2 = TimerViewModel::compute(0);
+    TimerView v2 = TimerViewModel::compute(mgrSnapshot(0));
     TEST_ASSERT_EQUAL_UINT8(1, v2.underlineField);
 }
 
@@ -1318,11 +1323,12 @@ void test_D6_formatTimerDisplay_vs_wire_string(void) {
 // Icon on (default): text region 8..32, bar in the 23px region right of the icon.
 // Icon off: showIcon false, text region 0..32, bar spans the full 32px panel.
 void test_D7_view_icon_disabled_reflows_text_and_bar(void) {
-    TimerManager.setDuration(100);
-    TimerManager.start();                               // full remaining -> full bar
+    // Running, full remaining -> full bar. The two cases differ only in iconEnabled.
+    const TimerSnapshot base{TimerState::Running, 100, 100, 100, false, 0, 0, 0, 0, true, 0};
 
-    // Icon on (explicit true == the default).
-    TimerView on = TimerViewModel::compute(0, true);
+    // Icon on (the default).
+    TimerSnapshot s_on = base; s_on.iconEnabled = true;
+    TimerView on = TimerViewModel::compute(s_on);
     TEST_ASSERT_TRUE(on.showIcon);
     TEST_ASSERT_EQUAL_INT16(8, on.textRegionX0);
     TEST_ASSERT_EQUAL_INT16(24, on.textRegionW);
@@ -1331,7 +1337,8 @@ void test_D7_view_icon_disabled_reflows_text_and_bar(void) {
     TEST_ASSERT_EQUAL_INT16(32, on.barStartX + on.barLen);
 
     // Icon off: everything reflows to the full panel, bar still right-anchored.
-    TimerView off = TimerViewModel::compute(0, false);
+    TimerSnapshot s_off = base; s_off.iconEnabled = false;
+    TimerView off = TimerViewModel::compute(s_off);
     TEST_ASSERT_FALSE(off.showIcon);
     TEST_ASSERT_EQUAL_INT16(0, off.textRegionX0);
     TEST_ASSERT_EQUAL_INT16(32, off.textRegionW);
@@ -1349,7 +1356,7 @@ void test_D8_view_duration_edit_while_running_buffers_bar(void) {
     TimerManager.start();
     fixture::advance(50000);            // 50s elapsed -> 50s remaining
     TimerManager.tick();
-    TimerView before = TimerViewModel::compute(0);
+    TimerView before = TimerViewModel::compute(mgrSnapshot(0));
     TEST_ASSERT_EQUAL_UINT8(11, before.barLen);   // 23 * 50/100, mirrors D4
 
     TimerManager.setDuration(600);      // edit duration mid-run
@@ -1361,8 +1368,12 @@ void test_D8_view_duration_edit_while_running_buffers_bar(void) {
     TEST_ASSERT_EQUAL_UINT32(600, TimerManager.getDuration());
     TEST_ASSERT_EQUAL_UINT32(100, TimerManager.getRunDuration());
 
-    // Bar buffered to the run snapshot (still 11), not snapped to 23*50/600.
-    TimerView after = TimerViewModel::compute(0);
+    // The snapshot carries duration=600 but runDuration=100; the bar divides by the
+    // run snapshot, so it stays 11 rather than snapping to 23*50/600.
+    const TimerSnapshot mid = mgrSnapshot(0);
+    TEST_ASSERT_EQUAL_UINT32(600, mid.duration);
+    TEST_ASSERT_EQUAL_UINT32(100, mid.runDuration);
+    TimerView after = TimerViewModel::compute(mid);
     TEST_ASSERT_TRUE(after.showBar);
     TEST_ASSERT_EQUAL_UINT8(11, after.barLen);
 
@@ -1370,7 +1381,7 @@ void test_D8_view_duration_edit_while_running_buffers_bar(void) {
     TimerManager.reset();
     TimerManager.start();
     TEST_ASSERT_EQUAL_UINT32(600, TimerManager.getRunDuration());
-    TimerView rearmed = TimerViewModel::compute(0);
+    TimerView rearmed = TimerViewModel::compute(mgrSnapshot(0));
     TEST_ASSERT_EQUAL_UINT8(23, rearmed.barLen);  // full bar at the new duration
 }
 

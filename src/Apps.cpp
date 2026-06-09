@@ -502,8 +502,14 @@ void TimerApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x,
 
     // What to draw is decided by the display-free view-model; this function is
     // its painter (font-dependent centering + the actual draws). See TimerView.h.
-    const bool iconEnabled = TIMER_ICON_ENABLED;
-    const TimerView view = TimerViewModel::compute(millis(), iconEnabled);
+    // Capture the live TimerManager state into an explicit snapshot once; this is
+    // the only place that maps manager state into the display-free view input.
+    const TimerSnapshot snap{
+        TimerManager.getState(), TimerManager.getDuration(), TimerManager.getRemaining(),
+        TimerManager.getRunDuration(), TimerManager.isInConfig(), TimerManager.getConfigField(),
+        TimerManager.getConfigHH(), TimerManager.getConfigMM(), TimerManager.getConfigSS(),
+        TIMER_ICON_ENABLED, millis()};
+    const TimerView view = TimerViewModel::compute(snap);
 
     // Config and Finished pin the app in the rotation while they're on screen.
     if (view.screen == TimerView::Screen::Config || view.screen == TimerView::Screen::Finished)

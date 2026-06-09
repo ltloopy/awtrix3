@@ -24,6 +24,10 @@
 // strings are ENCODED. The MQTT raw-uint8_t-index publish path is untouched -- the
 // published index is the enum value, which is exactly this table's row index.
 
+// Timer lifecycle state. Lives here (not in TimerManager.h) so display-side value
+// types like TimerSnapshot can carry it without depending on the manager singleton.
+enum class TimerState : uint8_t { Idle = 0, Running = 1, Paused = 2, Finished = 3 };
+
 enum class BuzzerMode   : uint8_t { Off = 0, End = 1, Countdown = 2, COUNT };
 enum class FinishedMode : uint8_t { AutoClear = 0, Hold = 1, ReAlert = 2, COUNT };
 

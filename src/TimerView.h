@@ -3,6 +3,28 @@
 
 #include <Arduino.h>
 
+#include "TimerEnums.h"   // TimerState (carried by TimerSnapshot, no TimerManager dependency)
+
+// The explicit, per-frame input to TimerViewModel::compute(): a plain-data
+// snapshot of everything the view reads, captured once from TimerManager by the
+// painter (src/Apps.cpp). It carries no methods and no TimerManager dependency,
+// so compute() is a pure function of this value and the host tests can construct
+// it directly. See CONTEXT.md ("Timer View").
+struct TimerSnapshot
+{
+    TimerState    state;        // lifecycle state (Idle/Running/Paused/Finished)
+    uint32_t      duration;     // configured duration (seconds)
+    uint32_t      remaining;    // live remaining (seconds); compute uses it only when !Idle
+    uint32_t      runDuration;  // bar-denominator snapshot captured when the run began
+    bool          inConfig;     // on-device config edit in progress
+    uint8_t       configField;  // highlighted field: 0 = HH, 1 = MM, 2 = SS
+    uint8_t       configHH;     // config edit buffer, hours
+    uint8_t       configMM;     // config edit buffer, minutes
+    uint8_t       configSS;     // config edit buffer, seconds
+    bool          iconEnabled;  // TIMER_ICON_ENABLED: gates the icon + full-panel reflow
+    unsigned long nowMs;        // millis(); drives the 500 ms Finished blink only
+};
+
 // A pure, per-frame description of what the Timer app should draw. It holds no
 // pixels and no font metrics: it is fully determined by TimerManager state, the
 // current time (for the Finished blink), and the icon-enabled display flag (which
@@ -42,10 +64,12 @@ struct TimerView
 
 namespace TimerViewModel
 {
-    // Compute the view from the live TimerManager state. `nowMs` (millis())
-    // drives the 500 ms Finished blink only. `iconEnabled` (TIMER_ICON_ENABLED)
-    // gates the icon and, when false, reflows text + bar to the full panel.
-    TimerView compute(unsigned long nowMs, bool iconEnabled = true);
+    // Compute the view from an explicit snapshot of the timer state. Every value
+    // compute() reads comes from `s` — it never touches the TimerManager singleton.
+    // `s.nowMs` drives the 500 ms Finished blink only; `s.iconEnabled`
+    // (TIMER_ICON_ENABLED) gates the icon and, when false, reflows text + bar to
+    // the full panel.
+    TimerView compute(const TimerSnapshot &s);
 
     // The compact on-screen format, fitted to the 24px text region:
     //   < 1h   -> "M:SS"   (305  -> "5:05")
