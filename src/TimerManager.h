@@ -4,7 +4,8 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
-#include "TimerEnums.h"   // TimerState + BuzzerMode / FinishedMode + their codec tables (ADR-0010)
+#include "TimerEnums.h"          // TimerState + BuzzerMode / FinishedMode + their codec tables (ADR-0010)
+#include "TimerConfigEditor.h"   // display-free duration editor; owns the config-mode working state (ADR-0011)
 
 // Result of parseCommand. All control surfaces share one validation policy
 // (reject invalid input atomically); only the HTTP API surfaces this as a
@@ -37,9 +38,11 @@ private:
     unsigned long lastRealertMs = 0;
     unsigned long lastPublishMs = 0;
 
-    bool          inConfig            = false;
-    uint8_t       configField         = 0;
-    uint8_t       configHH = 0, configMM = 0, configSS = 0;
+    // Config-mode working state (field cursor + HH/MM/SS buffers + cap-aware adjust)
+    // lives in the display-free TimerConfigEditor; this class keeps only the
+    // tick-loop bookkeeping for the 30 s no-input timeout and the hold-to-repeat
+    // (millis()/button concerns the editor stays clear of). See docs/adr/0011.
+    TimerConfigEditor configEditor;
     unsigned long configLastInputMs   = 0;
     unsigned long configRepeatLeftMs  = 0;
     unsigned long configRepeatRightMs = 0;
@@ -142,11 +145,11 @@ public:
     void exitConfigMode();
     void configCycleField();
     void configAdjust(int delta);
-    bool    isInConfig()      const { return inConfig; }
-    uint8_t getConfigField()  const { return configField; }
-    uint8_t getConfigHH()     const { return configHH; }
-    uint8_t getConfigMM()     const { return configMM; }
-    uint8_t getConfigSS()     const { return configSS; }
+    bool    isInConfig()      const { return configEditor.isActive(); }
+    uint8_t getConfigField()  const { return configEditor.field(); }
+    uint8_t getConfigHH()     const { return configEditor.hh(); }
+    uint8_t getConfigMM()     const { return configEditor.mm(); }
+    uint8_t getConfigSS()     const { return configEditor.ss(); }
 
     TimerState   getState()        const { return state; }
     uint32_t     getRemaining()    const { return remainingSec; }

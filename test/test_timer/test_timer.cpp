@@ -14,6 +14,7 @@
 #include "../../src/TimerView.h"
 #include "../../src/TimerSettings.h"
 #include "../../src/TimerMenu.h"
+#include "../../src/TimerConfigEditor.h"
 #include "Preferences.h"
 
 void setUp(void) {
@@ -341,93 +342,16 @@ void test_U13_start_from_finished_stops_sound_and_rearms(void) {
 }
 
 // ============================================================================
-// U14 — Config wheels respect default TIMER_MAX_DURATION (86400 = 24h)
-// HH is capped at 23 when MM=SS=59; +1 past the cap wraps to 0.
+// U14–U17 — the deterministic config-wheel cap/wrap math was retargeted to drive
+// TimerConfigEditor directly when that editor was extracted from TimerManager
+// (ADR-0011). It now lives as test_CE2..test_CE5 near the bottom of this file:
+//   U14 (default 24h cap, HH wraps at 23)            -> test_CE2
+//   U15 (tight 3600 cap, per-field recompute)        -> test_CE3
+//   U16 (no cap when TIMER_MAX_DURATION == 0)         -> test_CE4
+//   U17 (decrement at 0 wraps to the dynamic cap)     -> test_CE5
+// The TimerManager forwarder roundtrip is still covered end-to-end by U18/U19/
+// U22/U27/U31 below, which exercise enterConfigMode/exitConfigMode + run-state.
 // ============================================================================
-void test_U14_config_default_cap_wraps_HH_at_23(void) {
-    TimerManager.setDuration(86399);
-    TimerManager.enterConfigMode();
-    TEST_ASSERT_TRUE(TimerManager.isInConfig());
-    TEST_ASSERT_EQUAL_UINT8(23, TimerManager.getConfigHH());
-    TEST_ASSERT_EQUAL_UINT8(59, TimerManager.getConfigMM());
-    TEST_ASSERT_EQUAL_UINT8(59, TimerManager.getConfigSS());
-    TEST_ASSERT_EQUAL_UINT8(0,  TimerManager.getConfigField());
-
-    // dynMax(HH | MM=59,SS=59) = (86400-3599)/3600 = 23. cur=23, +1 → 24 > 23 → 0.
-    TimerManager.configAdjust(+1);
-    TEST_ASSERT_EQUAL_UINT8(0, TimerManager.getConfigHH());
-
-    // From 0, +1 returns to 1 (cap still 23).
-    TimerManager.configAdjust(+1);
-    TEST_ASSERT_EQUAL_UINT8(1, TimerManager.getConfigHH());
-}
-
-// ============================================================================
-// U15 — Tight cap (TIMER_MAX_DURATION=3600) caps HH at 1 with MM=SS=0
-// And recomputes the cap when other fields move.
-// ============================================================================
-void test_U15_config_tight_cap_HH_at_1_then_MM_at_0(void) {
-    TIMER_MAX_DURATION = 3600;
-    TimerManager.setDuration(1);
-    TimerManager.enterConfigMode();
-    // From setDuration(1): HH=0, MM=0, SS=1, field=HH.
-
-    // Zero out SS so other-field math is clean.
-    TimerManager.configCycleField();   // → MM
-    TimerManager.configCycleField();   // → SS
-    TimerManager.configAdjust(-1);     // SS 1→0
-    TEST_ASSERT_EQUAL_UINT8(0, TimerManager.getConfigSS());
-    TimerManager.configCycleField();   // → HH
-
-    // dynMax(HH | MM=0,SS=0) = 3600/3600 = 1. 0→1.
-    TimerManager.configAdjust(+1);
-    TEST_ASSERT_EQUAL_UINT8(1, TimerManager.getConfigHH());
-
-    // cur=1, +1 → 2 > 1 → wrap to 0.
-    TimerManager.configAdjust(+1);
-    TEST_ASSERT_EQUAL_UINT8(0, TimerManager.getConfigHH());
-
-    // Bring HH back to 1, then cycle to MM. With HH=1, dynMax(MM) = 0 → wrap.
-    TimerManager.configAdjust(+1);
-    TEST_ASSERT_EQUAL_UINT8(1, TimerManager.getConfigHH());
-    TimerManager.configCycleField();   // → MM
-    TimerManager.configAdjust(+1);
-    TEST_ASSERT_EQUAL_UINT8(0, TimerManager.getConfigMM());
-}
-
-// ============================================================================
-// U16 — TIMER_MAX_DURATION == 0 means no cap (legacy 99/59/59 wrap)
-// ============================================================================
-void test_U16_config_no_cap_when_max_is_zero(void) {
-    TIMER_MAX_DURATION = 0;
-    TimerManager.setDuration(1);
-    TimerManager.enterConfigMode();
-
-    // HH at 0 → 99 increments climbs to 99; one more wraps to 0.
-    for (int i = 0; i < 99; ++i) TimerManager.configAdjust(+1);
-    TEST_ASSERT_EQUAL_UINT8(99, TimerManager.getConfigHH());
-    TimerManager.configAdjust(+1);
-    TEST_ASSERT_EQUAL_UINT8(0, TimerManager.getConfigHH());
-}
-
-// ============================================================================
-// U17 — Decrement at 0 wraps to the dynamic cap
-// ============================================================================
-void test_U17_config_decrement_wraps_to_dynamic_max(void) {
-    TIMER_MAX_DURATION = 3600;
-    TimerManager.setDuration(1);
-    TimerManager.enterConfigMode();
-
-    // Zero SS so otherSec=0 when editing HH.
-    TimerManager.configCycleField();  // MM
-    TimerManager.configCycleField();  // SS
-    TimerManager.configAdjust(-1);    // SS 1→0
-    TimerManager.configCycleField();  // HH
-
-    // HH=0, dynMax=1, delta=-1 → wraps to 1.
-    TimerManager.configAdjust(-1);
-    TEST_ASSERT_EQUAL_UINT8(1, TimerManager.getConfigHH());
-}
 
 // ============================================================================
 // U18 — Exit-time setDuration backstop never has to clamp (cap held mid-edit)
@@ -2110,6 +2034,114 @@ void test_T10_codec_roundtrip_aliases_and_case(void) {
     TEST_ASSERT_FALSE(TimerManager_::parseFinishedMode("nope", f));
 }
 
+// ============================================================================
+// TimerConfigEditor — direct-drive tests for the extracted duration editor.
+// These exercise the pure value object in isolation (no TimerManager singleton,
+// no DisplayManager). The cap math reads the TIMER_MAX_DURATION global, so each
+// test sets it explicitly. See docs/adr/0011-timer-config-editor-extraction.md.
+// ============================================================================
+
+// CE1 — enter() decomposes a duration into HH/MM/SS, starts on the HH field,
+// and becomes active. (Mirrors the U14 setup, now on the editor directly.)
+void test_CE1_enter_decomposes_and_activates(void) {
+    TimerConfigEditor ed;
+    TEST_ASSERT_FALSE(ed.isActive());
+    ed.enter(86399);   // 23:59:59
+    TEST_ASSERT_TRUE(ed.isActive());
+    TEST_ASSERT_EQUAL_UINT8(23, ed.hh());
+    TEST_ASSERT_EQUAL_UINT8(59, ed.mm());
+    TEST_ASSERT_EQUAL_UINT8(59, ed.ss());
+    TEST_ASSERT_EQUAL_UINT8(0,  ed.field());
+}
+
+// CE2 — adjust() wraps the HH field at the dynamic cap. With MM=SS=59 and the
+// default 24h max, dynMax(HH) = (86400-3599)/3600 = 23, so +1 past 23 wraps to 0.
+void test_CE2_adjust_default_cap_wraps_HH_at_23(void) {
+    TIMER_MAX_DURATION = 86400;
+    TimerConfigEditor ed;
+    ed.enter(86399);   // 23:59:59, field=HH
+    TEST_ASSERT_EQUAL_UINT8(23, ed.hh());
+
+    ed.adjust(+1);     // 23 -> 24 > cap 23 -> 0
+    TEST_ASSERT_EQUAL_UINT8(0, ed.hh());
+
+    ed.adjust(+1);     // 0 -> 1
+    TEST_ASSERT_EQUAL_UINT8(1, ed.hh());
+}
+
+// CE3 — a tight cap (TIMER_MAX_DURATION=3600) caps HH at 1 with MM=SS=0, and the
+// cap recomputes when other fields move: with HH=1, dynMax(MM) collapses to 0.
+void test_CE3_adjust_tight_cap_recomputes_per_field(void) {
+    TIMER_MAX_DURATION = 3600;
+    TimerConfigEditor ed;
+    ed.enter(1);            // 00:00:01, field=HH
+
+    ed.cycleField();        // -> MM
+    ed.cycleField();        // -> SS
+    ed.adjust(-1);          // SS 1 -> 0
+    TEST_ASSERT_EQUAL_UINT8(0, ed.ss());
+    ed.cycleField();        // -> HH
+
+    ed.adjust(+1);          // dynMax(HH | MM=0,SS=0) = 1: 0 -> 1
+    TEST_ASSERT_EQUAL_UINT8(1, ed.hh());
+    ed.adjust(+1);          // 1 -> 2 > cap 1 -> wrap to 0
+    TEST_ASSERT_EQUAL_UINT8(0, ed.hh());
+
+    ed.adjust(+1);          // back to 1
+    ed.cycleField();        // -> MM; with HH=1, dynMax(MM) = 0 -> wrap to 0
+    ed.adjust(+1);
+    TEST_ASSERT_EQUAL_UINT8(0, ed.mm());
+}
+
+// CE4 — TIMER_MAX_DURATION == 0 disables the cap (legacy 99/59/59 wrap).
+void test_CE4_adjust_no_cap_when_max_is_zero(void) {
+    TIMER_MAX_DURATION = 0;
+    TimerConfigEditor ed;
+    ed.enter(1);
+    for (int i = 0; i < 99; ++i) ed.adjust(+1);
+    TEST_ASSERT_EQUAL_UINT8(99, ed.hh());
+    ed.adjust(+1);          // 99 -> wrap to 0
+    TEST_ASSERT_EQUAL_UINT8(0, ed.hh());
+}
+
+// CE5 — decrement at 0 wraps to the dynamic cap, not stay pinned at 0.
+void test_CE5_adjust_decrement_wraps_to_dynamic_max(void) {
+    TIMER_MAX_DURATION = 3600;
+    TimerConfigEditor ed;
+    ed.enter(1);
+    ed.cycleField();        // MM
+    ed.cycleField();        // SS
+    ed.adjust(-1);          // SS 1 -> 0
+    ed.cycleField();        // HH
+    ed.adjust(-1);          // HH 0, dynMax=1, -1 -> wrap to 1
+    TEST_ASSERT_EQUAL_UINT8(1, ed.hh());
+}
+
+// CE6 — cycleField rotates HH -> MM -> SS -> HH.
+void test_CE6_cycleField_rotates(void) {
+    TimerConfigEditor ed;
+    ed.enter(0);
+    TEST_ASSERT_EQUAL_UINT8(0, ed.field());
+    ed.cycleField(); TEST_ASSERT_EQUAL_UINT8(1, ed.field());
+    ed.cycleField(); TEST_ASSERT_EQUAL_UINT8(2, ed.field());
+    ed.cycleField(); TEST_ASSERT_EQUAL_UINT8(0, ed.field());
+}
+
+// CE7 — exit() recomposes HH/MM/SS back to seconds and deactivates. The edited
+// 01:00:00 round-trips to 3600 with no clamping needed (cap held during the edit).
+void test_CE7_exit_recomposes_and_deactivates(void) {
+    TIMER_MAX_DURATION = 3600;
+    TimerConfigEditor ed;
+    ed.enter(1);
+    ed.cycleField();        // MM
+    ed.cycleField();        // SS
+    ed.adjust(-1);          // SS 1 -> 0
+    ed.cycleField();        // HH
+    ed.adjust(+1);          // HH 0 -> 1  (now 01:00:00)
+    TEST_ASSERT_EQUAL_UINT32(3600, ed.exit());
+    TEST_ASSERT_FALSE(ed.isActive());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
@@ -2125,10 +2157,7 @@ int main(int, char **) {
     RUN_TEST(test_U11_getIconForState_per_state_with_idle_fallback);
     RUN_TEST(test_U12_reset_from_finished_stops_sound_and_returns_idle);
     RUN_TEST(test_U13_start_from_finished_stops_sound_and_rearms);
-    RUN_TEST(test_U14_config_default_cap_wraps_HH_at_23);
-    RUN_TEST(test_U15_config_tight_cap_HH_at_1_then_MM_at_0);
-    RUN_TEST(test_U16_config_no_cap_when_max_is_zero);
-    RUN_TEST(test_U17_config_decrement_wraps_to_dynamic_max);
+    // U14–U17 retargeted to TimerConfigEditor (test_CE2..CE5); see note above their defs.
     RUN_TEST(test_U18_config_exit_value_already_within_cap);
     RUN_TEST(test_U19_enterConfig_clamps_duration_at_99h);
     RUN_TEST(test_U20_icon_name_validation);
@@ -2195,5 +2224,12 @@ int main(int, char **) {
     RUN_TEST(test_M8_enum_labels_source_from_codec);
     RUN_TEST(test_T9_codec_tables_well_formed);
     RUN_TEST(test_T10_codec_roundtrip_aliases_and_case);
+    RUN_TEST(test_CE1_enter_decomposes_and_activates);
+    RUN_TEST(test_CE2_adjust_default_cap_wraps_HH_at_23);
+    RUN_TEST(test_CE3_adjust_tight_cap_recomputes_per_field);
+    RUN_TEST(test_CE4_adjust_no_cap_when_max_is_zero);
+    RUN_TEST(test_CE5_adjust_decrement_wraps_to_dynamic_max);
+    RUN_TEST(test_CE6_cycleField_rotates);
+    RUN_TEST(test_CE7_exit_recomposes_and_deactivates);
     return UNITY_END();
 }

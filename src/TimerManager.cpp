@@ -68,7 +68,7 @@ void TimerManager_::setup()
     if (TIMER_MAX_DURATION > 0 && durationSec > TIMER_MAX_DURATION) durationSec = TIMER_MAX_DURATION;
     remainingSec = durationSec;
     state = TimerState::Idle;
-    inConfig = false;   // a (re)boot is never mid-edit; complete the runtime reset
+    configEditor.exit();   // a (re)boot is never mid-edit; discard any editor state (return unused)
 
     loadMelodiesCached();
 }
@@ -335,68 +335,40 @@ bool TimerManager_::isValidAction(const String &s)
     return a == "start" || a == "pause" || a == "reset";
 }
 
+// The config-mode value logic lives in TimerConfigEditor; these methods stay as
+// thin forwarders so TimerView/Apps.cpp/PeripheryManager are unchanged. The
+// run-state mutation (the enter-time 99h clamp, the exit-time setDuration/drain/
+// broadcast) and the 30 s timeout timestamp stay here — the editor is value-only.
+// See docs/adr/0011-timer-config-editor-extraction.md.
 void TimerManager_::enterConfigMode()
 {
     if (state != TimerState::Idle) return;
-    if (durationSec > kConfigHHMax) durationSec = kConfigHHMax;
-    uint32_t h, m, s;
-    secondsToHMS(durationSec, h, m, s);
-    if (h > 99) h = 99;
-    configHH = (uint8_t)h;
-    configMM = (uint8_t)m;
-    configSS = (uint8_t)s;
-    configField = 0;
+    if (durationSec > kConfigHHMax) durationSec = kConfigHHMax;   // keep HH two-digit-editable (run-state)
+    configEditor.enter(durationSec);
     configLastInputMs = millis();
     configRepeatLeftMs = 0;
     configRepeatRightMs = 0;
-    inConfig = true;
 }
 
 void TimerManager_::exitConfigMode()
 {
-    if (!inConfig) return;
-    uint32_t total = hmsToSeconds(configHH, configMM, configSS);
-    inConfig = false;
-    setDuration(total);
+    if (!configEditor.isActive()) return;
+    setDuration(configEditor.exit());   // commit the edited duration through the unchanged path
     DisplayManager.drainDeferredNotifications();
-    broadcastRunState(nullptr);   // duration is run-state; propagate the new length
+    broadcastRunState(nullptr);         // duration is run-state; propagate the new length
 }
 
 void TimerManager_::configCycleField()
 {
-    if (!inConfig) return;
-    configField = (configField + 1) % 3;
+    if (!configEditor.isActive()) return;
+    configEditor.cycleField();
     configLastInputMs = millis();
 }
 
 void TimerManager_::configAdjust(int delta)
 {
-    if (!inConfig) return;
-
-    const uint8_t  hardMax = (configField == 0) ? 99 : 59;
-    const uint32_t perUnit = (configField == 0) ? 3600UL : (configField == 1) ? 60UL : 1UL;
-    const uint32_t otherSec = (configField == 0)
-        ? (uint32_t)configMM * 60UL + (uint32_t)configSS
-        : (configField == 1)
-            ? (uint32_t)configHH * 3600UL + (uint32_t)configSS
-            : (uint32_t)configHH * 3600UL + (uint32_t)configMM * 60UL;
-
-    uint8_t maxVal = hardMax;
-    if (TIMER_MAX_DURATION > 0)
-    {
-        uint32_t headroom = (TIMER_MAX_DURATION > otherSec) ? (TIMER_MAX_DURATION - otherSec) : 0;
-        uint32_t room     = headroom / perUnit;
-        if (room < maxVal) maxVal = (uint8_t)room;
-    }
-
-    uint8_t cur = (configField == 0) ? configHH : (configField == 1 ? configMM : configSS);
-    if (cur > maxVal) cur = maxVal;
-    int next = (int)cur + (delta >= 0 ? 1 : -1);
-    if (next < 0) next = maxVal;
-    else if (next > (int)maxVal) next = 0;
-    if      (configField == 0) configHH = (uint8_t)next;
-    else if (configField == 1) configMM = (uint8_t)next;
-    else                       configSS = (uint8_t)next;
+    if (!configEditor.isActive()) return;
+    configEditor.adjust(delta);
     configLastInputMs = millis();
 }
 
@@ -522,7 +494,7 @@ void TimerManager_::tick()
 {
     unsigned long now = millis();
 
-    if (inConfig)
+    if (configEditor.isActive())
     {
         if (now - configLastInputMs >= (unsigned long)TIMER_CONFIG_TIMEOUT * 1000UL)
         {
@@ -697,12 +669,13 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     if (haveAction && !isValidAction(doc["action"].as<String>())) return TimerCmdResult::BadField;
 
     // -- Command is known-good: only now disturb device state. --
-    if (inConfig)
+    if (configEditor.isActive())
     {
         // An accepted inbound command discards an in-progress on-device edit and
         // drains any notifications deferred during config. A rejected command (above)
-        // leaves the edit untouched.
-        inConfig = false;
+        // leaves the edit untouched. exit() deactivates; the return is intentionally
+        // discarded (the edit is aborted, not committed via setDuration).
+        configEditor.exit();
         DisplayManager.drainDeferredNotifications();
         if (DEBUG_MODE) DEBUG_PRINTLN("timer: config aborted by inbound command");
     }

@@ -53,7 +53,7 @@ _Avoid_: reading `icon_enabled` as "enable the idle icon" or as a member of the 
 
 There are two physically distinct on-device places to configure the Timer; use the right name for the right one.
 
-- **Timer-app config mode** — long-press middle from `Idle` while the Timer app is on screen. Edits **duration only** (HH/MM/SS wheels, auto-repeat on hold, 30 s no-input auto-applies). Lives in `TimerManager` ([TimerManager.cpp:483-499](src/TimerManager.cpp#L483)).
+- **Timer-app config mode** — long-press middle from `Idle` while the Timer app is on screen. Edits **duration only** (HH/MM/SS wheels, auto-repeat on hold, 30 s no-input auto-applies). The display-free editor — field cursor, the three edit buffers, and the cap-aware adjust math — lives in `TimerConfigEditor` ([TimerConfigEditor.cpp](src/TimerConfigEditor.cpp)); `TimerManager` keeps thin forwarders (`enterConfigMode`/`exitConfigMode`/`configCycleField`/`configAdjust`) plus the tick-loop timeout/auto-repeat bookkeeping, and commits the edited duration through `setDuration`. See [ADR-0011](docs/adr/0011-timer-config-editor-extraction.md).
 - **TIMER global menu** — long-press middle from any app to open the global menu, navigate to the `TIMER` top entry. A seven-slot field walker that edits **buzzer mode, finished mode, the three per-mode timing knobs, and the two display-element toggles** (`ICON` / `BAR`, see below). Lives in `MenuManager` ([MenuManager.cpp](src/MenuManager.cpp)).
 
 ADR-0001 originally named "the on-device config buttons" as the timer's single on-device control surface — that referred to the Timer-app config mode. With the global `TIMER` menu added, on-device timer configuration now spans both surfaces; ADR-0003 documents the addition.
