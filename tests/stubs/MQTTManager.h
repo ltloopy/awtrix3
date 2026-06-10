@@ -5,7 +5,10 @@
 #include <Arduino.h>
 #include <vector>
 
-#include "TimerHa.h"
+// Relative path, not "TimerHa.h": native_prelude.h force-includes this stub
+// into every compilation unit, including library builds (ArduinoFake) whose
+// include path has tests/stubs but not src/.
+#include "../../src/TimerHa.h"
 
 // Fixture identity for the wire seam's canonical topics. dataPrefix mirrors the
 // device default MQTT_PREFIX = String(uniqueID); deviceUniqueId is the 12-hex
