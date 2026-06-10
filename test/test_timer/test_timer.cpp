@@ -71,7 +71,7 @@ void test_U2_parseCommand_null_empty_garbage_are_noops(void) {
                       static_cast<int>(TimerManager.getState()));
 
     // No MQTT publish should have occurred for any of the bad inputs.
-    TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(PublishCall::State));
+    TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_STATE_TOPIC));
 
     // A subsequent valid command works.
     TimerManager.parseCommand("{\"action\":\"start\"}");
@@ -88,13 +88,14 @@ void test_U3_start_from_idle_publishes_state_then_remaining(void) {
     TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Running),
                       static_cast<int>(TimerManager.getState()));
 
-    // The contract: publishState("running") MUST precede publishRemaining(...).
-    // Find the index of the first State and first Remaining publish post-start.
+    // The contract: "running" on the state topic MUST precede publishRemaining(...).
+    // Find the index of the first state-topic and first Remaining publish post-start.
     int stateIdx = -1, remIdx = -1;
     for (size_t i = 0; i < MQTTManager.recorded.size(); ++i) {
         const auto &c = MQTTManager.recorded[i];
-        if (stateIdx < 0 && c.kind == PublishCall::State    && c.state_str == "running") stateIdx = (int)i;
-        if (remIdx   < 0 && c.kind == PublishCall::Remaining && c.value == 300)          remIdx   = (int)i;
+        if (stateIdx < 0 && c.kind == PublishCall::Wire &&
+            c.topic == fixture::TIMER_STATE_TOPIC && c.payload == "running") stateIdx = (int)i;
+        if (remIdx   < 0 && c.kind == PublishCall::Remaining && c.value == 300) remIdx = (int)i;
     }
     TEST_ASSERT_GREATER_OR_EQUAL_INT(0, stateIdx);
     TEST_ASSERT_GREATER_OR_EQUAL_INT(0, remIdx);
@@ -142,12 +143,12 @@ void test_U5_autoclear_returns_to_idle_after_hold(void) {
     fixture::advance(static_cast<uint32_t>(TIMER_FINISHED_HOLD) * 1000U + 100U);
     TimerManager.tick();
 
-    // Assert: state returned to Idle; last state publish == "idle".
+    // Assert: state returned to Idle; last publish on the state topic == "idle".
     TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle),
                       static_cast<int>(TimerManager.getState()));
-    const PublishCall *last = fixture::last_publish(PublishCall::State);
+    const PublishCall *last = fixture::last_publish(fixture::TIMER_STATE_TOPIC);
     TEST_ASSERT_NOT_NULL(last);
-    TEST_ASSERT_EQUAL_STRING("idle", last->state_str.c_str());
+    TEST_ASSERT_EQUAL_STRING("idle", last->payload.c_str());
 }
 
 // ============================================================================
@@ -169,7 +170,7 @@ void test_U6_parseCommand_noop_when_disabled(void) {
     TEST_ASSERT_EQUAL_UINT32(baseline, TimerManager.getDuration());
 
     // Nothing published to HA from the gated commands.
-    TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(PublishCall::State));
+    TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_STATE_TOPIC));
     TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(PublishCall::Duration));
 
     // Re-enabling restores command processing (returns Ok).
@@ -307,9 +308,9 @@ void test_U12_reset_from_finished_stops_sound_and_returns_idle(void) {
     TEST_ASSERT_EQUAL_UINT32(5, TimerManager.getRemaining());
     TEST_ASSERT_EQUAL_INT(1, PeripheryManager.stop_calls);
     TEST_ASSERT_FALSE(PeripheryManager.isPlaying());
-    const PublishCall *last = fixture::last_publish(PublishCall::State);
+    const PublishCall *last = fixture::last_publish(fixture::TIMER_STATE_TOPIC);
     TEST_ASSERT_NOT_NULL(last);
-    TEST_ASSERT_EQUAL_STRING("idle", last->state_str.c_str());
+    TEST_ASSERT_EQUAL_STRING("idle", last->payload.c_str());
 }
 
 // ============================================================================
@@ -336,9 +337,9 @@ void test_U13_start_from_finished_stops_sound_and_rearms(void) {
     TEST_ASSERT_EQUAL_UINT32(5, TimerManager.getRemaining());
     TEST_ASSERT_EQUAL_INT(1, PeripheryManager.stop_calls);
     TEST_ASSERT_FALSE(PeripheryManager.isPlaying());
-    const PublishCall *last = fixture::last_publish(PublishCall::State);
+    const PublishCall *last = fixture::last_publish(fixture::TIMER_STATE_TOPIC);
     TEST_ASSERT_NOT_NULL(last);
-    TEST_ASSERT_EQUAL_STRING("running", last->state_str.c_str());
+    TEST_ASSERT_EQUAL_STRING("running", last->payload.c_str());
 }
 
 // ============================================================================
@@ -1584,9 +1585,9 @@ void test_U51_setDuration_while_paused_resets_to_idle(void) {
     TEST_ASSERT_EQUAL_UINT32(600, TimerManager.getRemaining());
     TEST_ASSERT_EQUAL_UINT32(600, TimerManager.getDuration());
 
-    const PublishCall *st = fixture::last_publish(PublishCall::State);
+    const PublishCall *st = fixture::last_publish(fixture::TIMER_STATE_TOPIC);
     TEST_ASSERT_NOT_NULL(st);
-    TEST_ASSERT_EQUAL_STRING("idle", st->state_str.c_str());
+    TEST_ASSERT_EQUAL_STRING("idle", st->payload.c_str());
     const PublishCall *rem = fixture::last_publish(PublishCall::Remaining);
     TEST_ASSERT_NOT_NULL(rem);
     TEST_ASSERT_EQUAL_UINT32(600, rem->value);
@@ -2306,6 +2307,61 @@ void test_CE12_buttonstate_constructible_from_two_reads(void) {
     TEST_ASSERT_FALSE(none.rightPressed);
 }
 
+// ============================================================================
+// W1 — wire seam: the canonical ArduinoHA data-topic builder (issue #31)
+// The Timer's real external interface is the wire. This pins the exact topic
+// shape ArduinoHA emits on device ({dataPrefix}/{deviceUniqueId}/{entityId}/
+// stat_t per HASerializer::generateDataTopic + HAStateTopic) so a format
+// drift in the shared builder fails here, not in Home Assistant.
+// ============================================================================
+void test_W1_state_topic_builder_formats_canonical_topic(void) {
+    char topic[160];
+    formatTimerHaDataTopic("awtrix_self", "a1b2c3d4e5f6", "d4e5f6_timer_state",
+                           topic, sizeof(topic));
+    TEST_ASSERT_EQUAL_STRING("awtrix_self/a1b2c3d4e5f6/d4e5f6_timer_state/stat_t", topic);
+}
+
+// ============================================================================
+// W2 — wire seam end-to-end: start() puts payload "running" on the state topic
+// Asserts the real wire contract (topic + payload), not the dispatch path:
+// after start, the broker would receive "running" on the canonical state
+// topic. The expected topic is the fixture literal — spelled independently of
+// the builder — so a wrong-topic regression anywhere in the publish path
+// (id format, topic format, routing) fails here.
+// ============================================================================
+void test_W2_start_publishes_running_on_state_topic(void) {
+    TimerManager.start();
+
+    const PublishCall *wire = fixture::last_publish(fixture::TIMER_STATE_TOPIC);
+    TEST_ASSERT_NOT_NULL(wire);
+    TEST_ASSERT_EQUAL_STRING("running", wire->payload.c_str());
+}
+
+// ============================================================================
+// W3 — wire fidelity across the lifecycle: after start the broker would see
+// "running" on the state topic; after AutoClear runs out, "idle" on the SAME
+// topic. Together with W2 this is acceptance criterion 4 of issue #31.
+// ============================================================================
+void test_W3_autoclear_publishes_idle_on_state_topic(void) {
+    TimerManager.setDuration(5);
+    TimerManager.start();
+    const PublishCall *afterStart = fixture::last_publish(fixture::TIMER_STATE_TOPIC);
+    TEST_ASSERT_NOT_NULL(afterStart);
+    TEST_ASSERT_EQUAL_STRING("running", afterStart->payload.c_str());
+
+    // Run out the countdown (-> Finished), then the AutoClear hold (-> Idle).
+    fixture::advance(5000);
+    TimerManager.tick();
+    fixture::advance(static_cast<uint32_t>(TIMER_FINISHED_HOLD) * 1000U + 100U);
+    TimerManager.tick();
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle),
+                      static_cast<int>(TimerManager.getState()));
+    const PublishCall *afterClear = fixture::last_publish(fixture::TIMER_STATE_TOPIC);
+    TEST_ASSERT_NOT_NULL(afterClear);
+    TEST_ASSERT_EQUAL_STRING("idle", afterClear->payload.c_str());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
@@ -2403,5 +2459,8 @@ int main(int, char **) {
     RUN_TEST(test_CE10_left_decrements_and_release_rewaits);
     RUN_TEST(test_CE11_hold_suppresses_timeout);
     RUN_TEST(test_CE12_buttonstate_constructible_from_two_reads);
+    RUN_TEST(test_W1_state_topic_builder_formats_canonical_topic);
+    RUN_TEST(test_W2_start_publishes_running_on_state_topic);
+    RUN_TEST(test_W3_autoclear_publishes_idle_on_state_topic);
     return UNITY_END();
 }

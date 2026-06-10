@@ -69,7 +69,6 @@ private:
     uint32_t computeCurrentRemaining() const;
     void enterRunning();
     void enterFinished();
-    void publishState();
     void publishRemaining();
     void publishDuration();
     void publishBuzzerMode();
@@ -122,6 +121,11 @@ public:
     void setIconFinished(const String &name, bool publish = true);
 
     void publishIcons();
+
+    // Republish the current run-state string through the wire seam (issue #31).
+    // Public because MQTTManager re-emits it on connect / discovery enable; it
+    // is the only path that puts the state key on the wire.
+    void publishState();
 
     TimerCmdResult parseCommand(const char *json);
 

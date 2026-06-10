@@ -1,5 +1,6 @@
 #include "TimerManager.h"
 #include "TimerSettings.h"
+#include "TimerHa.h"
 #include "Globals.h"
 #include "PeripheryManager.h"
 #include "DisplayManager.h"
@@ -745,7 +746,14 @@ void TimerManager_::onShowTimerChange(bool prev, bool now)
     if (prev && !now) reset();
 }
 
-void TimerManager_::publishState()        { MQTTManager.publishTimerState(getStateString()); }
+// State is run-state, not a member-config row, so it goes through the wire
+// seam directly: the exact (topic, payload) the broker receives, byte-identical
+// to the retired HASensor::setValue path (issue #31 / PRD #28).
+void TimerManager_::publishState()
+{
+    MQTTManager.publishTimerWire(MQTTManager.timerWireTopic(TimerHaEntity::State).c_str(),
+                                 getStateString());
+}
 void TimerManager_::publishRemaining()    { MQTTManager.publishTimerRemaining(remainingSec); }
 void TimerManager_::publishDuration()     { MQTTManager.publishTimerDuration(durationSec); }
 void TimerManager_::publishBuzzerMode()   { MQTTManager.publishTimerBuzzer((uint8_t)buzzerMode); }

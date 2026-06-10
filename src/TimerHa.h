@@ -53,4 +53,13 @@ inline const TimerHaDescriptor &timerHaDescriptor(TimerHaEntity slot)
 // and reordering the table moves no entity's id.
 void formatTimerHaEntityId(const TimerHaDescriptor &d, const char *macSuffix, char *out, size_t outLen);
 
+// The single place an entity id becomes the full MQTT data (state) topic the
+// broker sees: "{dataPrefix}/{deviceUniqueId}/{entityId}/stat_t". MUST stay
+// byte-identical to what ArduinoHA emits for the same entity
+// (HASerializer::generateDataTopic with the HAStateTopic suffix "stat_t") —
+// the wire seam publishes to this topic where setValue() used to, so a format
+// drift here is a wire-protocol change. Pinned by test W1.
+void formatTimerHaDataTopic(const char *dataPrefix, const char *deviceUniqueId,
+                            const char *entityId, char *out, size_t outLen);
+
 #endif
