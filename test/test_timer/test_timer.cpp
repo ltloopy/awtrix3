@@ -2291,6 +2291,21 @@ void test_CE11_hold_suppresses_timeout(void) {
     }
 }
 
+// CE12 — regression guard for issue #25: ButtonState is constructible from two button
+// reads. The paren-init form below has no matching overload until the explicit
+// (bool,bool) constructor exists (paren aggregate-init is C++20, off here), so this
+// pins the constructor that lets the device's gnu++11 two-arg brace-init compile.
+// A default-constructed ButtonState stays {false, false}.
+void test_CE12_buttonstate_constructible_from_two_reads(void) {
+    TimerConfigEditor::ButtonState b(true, false);
+    TEST_ASSERT_TRUE(b.leftPressed);
+    TEST_ASSERT_FALSE(b.rightPressed);
+
+    TimerConfigEditor::ButtonState none;
+    TEST_ASSERT_FALSE(none.leftPressed);
+    TEST_ASSERT_FALSE(none.rightPressed);
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
@@ -2387,5 +2402,6 @@ int main(int, char **) {
     RUN_TEST(test_CE9_held_button_autorepeats_at_cadence);
     RUN_TEST(test_CE10_left_decrements_and_release_rewaits);
     RUN_TEST(test_CE11_hold_suppresses_timeout);
+    RUN_TEST(test_CE12_buttonstate_constructible_from_two_reads);
     return UNITY_END();
 }

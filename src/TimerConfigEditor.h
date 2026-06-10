@@ -37,7 +37,18 @@ public:
     // Injected per-tick button state: raw "pressed" reads (PeripheryManager
     // buttonL/R isPressed()). The editor owns the long-press threshold and repeat
     // cadence, deriving held time from the nowMs handed to tick().
-    struct ButtonState { bool leftPressed = false; bool rightPressed = false; };
+    // An explicit two-arg constructor (alongside a defaulted default ctor) keeps the
+    // member defaults but makes construction standard-independent: a class with default
+    // member initializers is not an aggregate under C++11, so the call site's two-arg
+    // brace-init (TimerManager.cpp) would otherwise need the C++14 relaxed-aggregate
+    // rule and break the gnu++11 device build. See docs/adr/0013 and issue #25.
+    struct ButtonState
+    {
+        bool leftPressed  = false;
+        bool rightPressed = false;
+        ButtonState() = default;
+        ButtonState(bool l, bool r) : leftPressed(l), rightPressed(r) {}
+    };
 
     // tick() result: TimedOut once the 30 s no-input window elapses (the caller
     // commits the edit and exits); Active while editing continues.
