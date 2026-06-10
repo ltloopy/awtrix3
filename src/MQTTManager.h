@@ -4,6 +4,8 @@
 #include <Arduino.h>
 #include <map>
 
+#include "TimerHa.h"
+
 class MQTTManager_
 {
 private:
@@ -27,9 +29,16 @@ public:
     bool isConnected();
     String getValueForTopic(const String &topic);
 
+    // The Timer wire seam (issue #31 / PRD #28): the single chokepoint through
+    // which Timer MQTT output flows as (topic, payload) strings. On device it
+    // reaches the broker (retained, like the HA setValue path it replaces); the
+    // host-test stub records the pair. timerWireTopic() sources an entity's
+    // canonical data topic — byte-identical to what ArduinoHA emits.
+    void publishTimerWire(const char *topic, const char *payload);
+    String timerWireTopic(TimerHaEntity slot);
+
     void publishTimerDuration(uint32_t seconds);
     void publishTimerRemaining(uint32_t seconds);
-    void publishTimerState(const char *stateStr);
     void publishTimerBuzzer(uint8_t index);
     void publishTimerFinished(uint8_t index);
     void publishTimerIcons(const String &idle, const String &running, const String &paused, const String &finished);

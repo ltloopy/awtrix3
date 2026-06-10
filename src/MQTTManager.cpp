@@ -154,7 +154,7 @@ void MQTTManager_::enableTimerHADiscovery()
 
     publishTimerDuration(TimerManager.getDuration());
     publishTimerRemaining(TimerManager.getRemaining());
-    publishTimerState(TimerManager.getStateString());
+    TimerManager.publishState(); // routes through the wire seam
     publishTimerBuzzer((uint8_t)TimerManager.getBuzzerMode());
     publishTimerFinished((uint8_t)TimerManager.getFinishedMode());
     TimerManager.publishIcons();
@@ -659,7 +659,7 @@ void onMqttConnected()
         {
             MQTTManager.publishTimerDuration(TimerManager.getDuration());
             MQTTManager.publishTimerRemaining(TimerManager.getRemaining());
-            MQTTManager.publishTimerState(TimerManager.getStateString());
+            TimerManager.publishState(); // routes through the wire seam
             MQTTManager.publishTimerBuzzer((uint8_t)TimerManager.getBuzzerMode());
             MQTTManager.publishTimerFinished((uint8_t)TimerManager.getFinishedMode());
             TimerManager.publishIcons();
@@ -1013,9 +1013,29 @@ void MQTTManager_::publishTimerRemaining(uint32_t seconds)
     if (timerRemaining) timerRemaining->setValue((uint32_t)seconds);
 }
 
-void MQTTManager_::publishTimerState(const char *stateStr)
+// The Timer wire seam (issue #31): publishes the exact (topic, payload) the
+// caller hands over — retained, like the HASensor::setValue path it replaces.
+// Gated on the Timer HA entities existing (timerDuration is the creation
+// sentinel, see createTimerHAEntities), which preserves the per-entity
+// null-check behaviour of the retired one-liner publish methods; mqtt.publish
+// itself no-ops while disconnected, as beginPublish did before.
+void MQTTManager_::publishTimerWire(const char *topic, const char *payload)
 {
-    if (timerStateSensor) timerStateSensor->setValue(stateStr);
+    if (!timerDuration) return;
+    mqtt.publish(topic, payload, true);
+}
+
+// Canonical full data topic for a Timer HA entity slot, from the same inputs
+// ArduinoHA's HASerializer::generateDataTopic uses: the data prefix installed
+// in setup() (MQTT_PREFIX), the device unique id, and the entity id buffer
+// resolved through formatTimerHaEntityId. Byte-identity is pinned by test W1.
+String MQTTManager_::timerWireTopic(TimerHaEntity slot)
+{
+    const char *deviceUniqueId = device.getUniqueId();
+    if (!deviceUniqueId) return String();
+    char topic[160];
+    formatTimerHaDataTopic(MQTT_PREFIX.c_str(), deviceUniqueId, timerHaId(slot), topic, sizeof(topic));
+    return String(topic);
 }
 
 void MQTTManager_::publishTimerBuzzer(uint8_t index)

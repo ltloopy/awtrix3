@@ -91,4 +91,25 @@ inline const PublishCall *last_publish(PublishCall::Kind k) {
     return nullptr;
 }
 
+// The canonical state topic the broker would see, hand-spelled (NOT computed
+// via the TimerHa builders) so tests assert against an independent spelling of
+// the wire contract: {TEST_WIRE_DATA_PREFIX}/{TEST_WIRE_DEVICE_ID}/
+// {TEST_WIRE_MAC_SUFFIX}_timer_state/stat_t.
+inline const char *TIMER_STATE_TOPIC = "awtrix_self/a1b2c3d4e5f6/d4e5f6_timer_state/stat_t";
+
+// Topic-keyed queries over the wire seam's (topic, payload) recordings.
+inline int count_publish(const String &topic) {
+    int n = 0;
+    for (const auto &c : MQTTManager.recorded)
+        if (c.kind == PublishCall::Wire && c.topic == topic) n++;
+    return n;
+}
+
+inline const PublishCall *last_publish(const String &topic) {
+    for (auto it = MQTTManager.recorded.rbegin(); it != MQTTManager.recorded.rend(); ++it) {
+        if (it->kind == PublishCall::Wire && it->topic == topic) return &*it;
+    }
+    return nullptr;
+}
+
 }  // namespace fixture

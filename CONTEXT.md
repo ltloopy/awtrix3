@@ -93,6 +93,25 @@ Two distinct kinds of Timer interface; do not conflate them.
 
 _Avoid_: calling `GET /api/timer` a "control surface" or implying it participates in atomic-reject. It observes; it never writes.
 
+### Timer wire seam
+
+The single chokepoint through which Timer MQTT output flows as `(topic, payload)`
+strings: `MQTTManager.publishTimerWire(topic, payload)`. On device it reaches the
+broker (retained, exactly like the ArduinoHA `setValue` path it replaces); in host
+tests the stub records the pairs, so tests assert the **real wire contract** — the
+exact topic and payload the broker would see — not the internal dispatch path.
+
+An entity's canonical topic is sourced through `timerWireTopic(slot)` →
+`formatTimerHaDataTopic` in TimerHa (host-compiled), which **must stay
+byte-identical** to what ArduinoHA's `HASerializer::generateDataTopic` emits
+(`{dataPrefix}/{deviceUniqueId}/{entityId}/stat_t`). Re-routing a key through the
+seam is a structural change only; any topic or payload difference it introduces is
+a bug. Today the `state` key flows through the seam; the remaining keys migrate in
+later PRD-#28 slices.
+
+_Avoid_: publishing Timer MQTT output around the seam, or computing a wire topic
+anywhere but the TimerHa builders.
+
 ### Propagation surface
 
 A third kind of Timer interface, distinct from both control and observation. The

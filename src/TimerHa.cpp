@@ -80,3 +80,10 @@ void formatTimerHaEntityId(const TimerHaDescriptor &d, const char *macSuffix, ch
 {
     snprintf(out, outLen, d.idFormat, macSuffix);
 }
+
+void formatTimerHaDataTopic(const char *dataPrefix, const char *deviceUniqueId,
+                            const char *entityId, char *out, size_t outLen)
+{
+    // "stat_t" is ArduinoHA's HAStateTopic suffix; see the contract in TimerHa.h.
+    snprintf(out, outLen, "%s/%s/%s/stat_t", dataPrefix, deviceUniqueId, entityId);
+}
