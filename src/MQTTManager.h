@@ -38,8 +38,6 @@ public:
     String timerWireTopic(TimerHaEntity slot);
 
     void publishTimerDuration(uint32_t seconds);
-    void publishTimerBuzzer(uint8_t index);
-    void publishTimerFinished(uint8_t index);
     void publishTimerIcons(const String &idle, const String &running, const String &paused, const String &finished);
     void createTimerHAEntities();
     void enableTimerHADiscovery();

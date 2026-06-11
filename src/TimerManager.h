@@ -70,8 +70,6 @@ private:
     void enterRunning();
     void enterFinished();
     void publishDuration();
-    void publishBuzzerMode();
-    void publishFinishedMode();
     void persist();
     void persistIfDirty();
     void loadMelodiesCached();
@@ -129,6 +127,12 @@ public:
     // Same for the remaining-seconds key (issue #32): the only path that puts
     // remaining on the wire; the periodic republish throttle stays in tick().
     void publishRemaining();
+
+    // Same for the two enum keys (issue #33), dispatching through their member-
+    // config rows' publish hooks: the only paths that put buzzer/finished on
+    // the wire. Public for the same connect / discovery-enable republish sites.
+    void publishBuzzerMode();
+    void publishFinishedMode();
 
     TimerCmdResult parseCommand(const char *json);
 

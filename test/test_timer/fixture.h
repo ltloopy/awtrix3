@@ -101,6 +101,11 @@ inline const char *TIMER_STATE_TOPIC = "awtrix_self/a1b2c3d4e5f6/d4e5f6_timer_st
 // {TEST_WIRE_DATA_PREFIX}/{TEST_WIRE_DEVICE_ID}/{TEST_WIRE_MAC_SUFFIX}_timer_rem/stat_t.
 inline const char *TIMER_REMAINING_TOPIC = "awtrix_self/a1b2c3d4e5f6/d4e5f6_timer_rem/stat_t";
 
+// And for the two enum selects (issue #33), ids per TimerHa.cpp's
+// HAtimerBuzID "%s_timer_buz" / HAtimerFinID "%s_timer_fin".
+inline const char *TIMER_BUZZER_TOPIC   = "awtrix_self/a1b2c3d4e5f6/d4e5f6_timer_buz/stat_t";
+inline const char *TIMER_FINISHED_TOPIC = "awtrix_self/a1b2c3d4e5f6/d4e5f6_timer_fin/stat_t";
+
 // Topic-keyed queries over the wire seam's (topic, payload) recordings.
 inline int count_publish(const String &topic) {
     int n = 0;
