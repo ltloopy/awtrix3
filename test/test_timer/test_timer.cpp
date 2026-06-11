@@ -88,14 +88,14 @@ void test_U3_start_from_idle_publishes_state_then_remaining(void) {
     TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Running),
                       static_cast<int>(TimerManager.getState()));
 
-    // The contract: "running" on the state topic MUST precede publishRemaining(...).
-    // Find the index of the first state-topic and first Remaining publish post-start.
+    // The contract: "running" on the state topic MUST precede the remaining
+    // publish. Find the index of the first publish on each topic post-start.
     int stateIdx = -1, remIdx = -1;
     for (size_t i = 0; i < MQTTManager.recorded.size(); ++i) {
         const auto &c = MQTTManager.recorded[i];
-        if (stateIdx < 0 && c.kind == PublishCall::Wire &&
-            c.topic == fixture::TIMER_STATE_TOPIC && c.payload == "running") stateIdx = (int)i;
-        if (remIdx   < 0 && c.kind == PublishCall::Remaining && c.value == 300) remIdx = (int)i;
+        if (c.kind != PublishCall::Wire) continue;
+        if (stateIdx < 0 && c.topic == fixture::TIMER_STATE_TOPIC && c.payload == "running") stateIdx = (int)i;
+        if (remIdx   < 0 && c.topic == fixture::TIMER_REMAINING_TOPIC && c.payload == "300") remIdx = (int)i;
     }
     TEST_ASSERT_GREATER_OR_EQUAL_INT(0, stateIdx);
     TEST_ASSERT_GREATER_OR_EQUAL_INT(0, remIdx);
@@ -1588,9 +1588,9 @@ void test_U51_setDuration_while_paused_resets_to_idle(void) {
     const PublishCall *st = fixture::last_publish(fixture::TIMER_STATE_TOPIC);
     TEST_ASSERT_NOT_NULL(st);
     TEST_ASSERT_EQUAL_STRING("idle", st->payload.c_str());
-    const PublishCall *rem = fixture::last_publish(PublishCall::Remaining);
+    const PublishCall *rem = fixture::last_publish(fixture::TIMER_REMAINING_TOPIC);
     TEST_ASSERT_NOT_NULL(rem);
-    TEST_ASSERT_EQUAL_UINT32(600, rem->value);
+    TEST_ASSERT_EQUAL_STRING("600", rem->payload.c_str());
 }
 
 // ============================================================================
@@ -2362,6 +2362,45 @@ void test_W3_autoclear_publishes_idle_on_state_topic(void) {
     TEST_ASSERT_EQUAL_STRING("idle", afterClear->payload.c_str());
 }
 
+// ============================================================================
+// W4 — wire fidelity for the remaining key (issue #32): start() puts the
+// remaining seconds, as a plain decimal string, on the canonical remaining
+// topic. Payload format pins the retired HASensorNumber(PrecisionP0) setValue
+// path; the expected topic is the fixture literal, spelled independently of
+// the TimerHa builders.
+// ============================================================================
+void test_W4_start_publishes_remaining_seconds_on_remaining_topic(void) {
+    TimerManager.start();   // default fixture duration: 300 s
+
+    const PublishCall *wire = fixture::last_publish(fixture::TIMER_REMAINING_TOPIC);
+    TEST_ASSERT_NOT_NULL(wire);
+    TEST_ASSERT_EQUAL_STRING("300", wire->payload.c_str());
+}
+
+// ============================================================================
+// W5 — the periodic remaining republish keeps its throttle (issue #32): with
+// TIMER_PUBLISH_INTERVAL = 5 s, driving tick() every 250 ms for 12 s of run
+// puts exactly two periodic publishes on the remaining topic (at the 5 s and
+// 10 s boundaries) — not one per tick or per elapsed second. Routing through
+// the wire seam changed HOW the publish is expressed, not WHEN it fires.
+// ============================================================================
+void test_W5_tick_republishes_remaining_only_at_publish_interval(void) {
+    TIMER_PUBLISH_INTERVAL = 5;
+    TimerManager.setDuration(60);
+    TimerManager.start();   // publishes remaining "60" immediately
+    int baseline = fixture::count_publish(fixture::TIMER_REMAINING_TOPIC);
+
+    for (int t = 250; t <= 12000; t += 250) {
+        fixture::advance(250);
+        TimerManager.tick();
+    }
+
+    TEST_ASSERT_EQUAL_INT(2, fixture::count_publish(fixture::TIMER_REMAINING_TOPIC) - baseline);
+    const PublishCall *rem = fixture::last_publish(fixture::TIMER_REMAINING_TOPIC);
+    TEST_ASSERT_NOT_NULL(rem);
+    TEST_ASSERT_EQUAL_STRING("50", rem->payload.c_str());   // 60 s - 10 s boundary
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
@@ -2462,5 +2501,7 @@ int main(int, char **) {
     RUN_TEST(test_W1_state_topic_builder_formats_canonical_topic);
     RUN_TEST(test_W2_start_publishes_running_on_state_topic);
     RUN_TEST(test_W3_autoclear_publishes_idle_on_state_topic);
+    RUN_TEST(test_W4_start_publishes_remaining_seconds_on_remaining_topic);
+    RUN_TEST(test_W5_tick_republishes_remaining_only_at_publish_interval);
     return UNITY_END();
 }

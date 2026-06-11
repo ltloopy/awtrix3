@@ -754,7 +754,14 @@ void TimerManager_::publishState()
     MQTTManager.publishTimerWire(MQTTManager.timerWireTopic(TimerHaEntity::State).c_str(),
                                  getStateString());
 }
-void TimerManager_::publishRemaining()    { MQTTManager.publishTimerRemaining(remainingSec); }
+// Remaining is run-state too (issue #32): straight through the seam, payload a
+// plain decimal string — byte-identical to the retired HASensorNumber
+// (PrecisionP0) setValue path.
+void TimerManager_::publishRemaining()
+{
+    MQTTManager.publishTimerWire(MQTTManager.timerWireTopic(TimerHaEntity::Remaining).c_str(),
+                                 String(remainingSec).c_str());
+}
 void TimerManager_::publishDuration()     { MQTTManager.publishTimerDuration(durationSec); }
 void TimerManager_::publishBuzzerMode()   { MQTTManager.publishTimerBuzzer((uint8_t)buzzerMode); }
 void TimerManager_::publishFinishedMode() { MQTTManager.publishTimerFinished((uint8_t)finishedMode); }

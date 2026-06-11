@@ -106,8 +106,10 @@ An entity's canonical topic is sourced through `timerWireTopic(slot)` →
 byte-identical** to what ArduinoHA's `HASerializer::generateDataTopic` emits
 (`{dataPrefix}/{deviceUniqueId}/{entityId}/stat_t`). Re-routing a key through the
 seam is a structural change only; any topic or payload difference it introduces is
-a bug. Today the `state` key flows through the seam; the remaining keys migrate in
-later PRD-#28 slices.
+a bug. Today the run-state keys (`state` and `remaining`) flow through the seam;
+the member-config keys migrate in later PRD-#28 slices. Re-routing changes how a
+publish is expressed, never when it fires — the periodic `remaining` republish
+keeps its `TIMER_PUBLISH_INTERVAL` throttle in `tick()`.
 
 _Avoid_: publishing Timer MQTT output around the seam, or computing a wire topic
 anywhere but the TimerHa builders.

@@ -153,8 +153,8 @@ void MQTTManager_::enableTimerHADiscovery()
         mqtt.publishConfigForDeviceType(dt);
 
     publishTimerDuration(TimerManager.getDuration());
-    publishTimerRemaining(TimerManager.getRemaining());
-    TimerManager.publishState(); // routes through the wire seam
+    TimerManager.publishRemaining(); // routes through the wire seam
+    TimerManager.publishState();     // routes through the wire seam
     publishTimerBuzzer((uint8_t)TimerManager.getBuzzerMode());
     publishTimerFinished((uint8_t)TimerManager.getFinishedMode());
     TimerManager.publishIcons();
@@ -658,8 +658,8 @@ void onMqttConnected()
         if (SHOW_TIMER)
         {
             MQTTManager.publishTimerDuration(TimerManager.getDuration());
-            MQTTManager.publishTimerRemaining(TimerManager.getRemaining());
-            TimerManager.publishState(); // routes through the wire seam
+            TimerManager.publishRemaining(); // routes through the wire seam
+            TimerManager.publishState();     // routes through the wire seam
             MQTTManager.publishTimerBuzzer((uint8_t)TimerManager.getBuzzerMode());
             MQTTManager.publishTimerFinished((uint8_t)TimerManager.getFinishedMode());
             TimerManager.publishIcons();
@@ -1006,11 +1006,6 @@ void MQTTManager_::tick()
 void MQTTManager_::publishTimerDuration(uint32_t seconds)
 {
     if (timerDuration) timerDuration->setState(TimerManager_::formatHMS(seconds).c_str(), true);
-}
-
-void MQTTManager_::publishTimerRemaining(uint32_t seconds)
-{
-    if (timerRemaining) timerRemaining->setValue((uint32_t)seconds);
 }
 
 // The Timer wire seam (issue #31): publishes the exact (topic, payload) the

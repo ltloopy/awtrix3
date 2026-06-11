@@ -69,7 +69,6 @@ private:
     uint32_t computeCurrentRemaining() const;
     void enterRunning();
     void enterFinished();
-    void publishRemaining();
     void publishDuration();
     void publishBuzzerMode();
     void publishFinishedMode();
@@ -126,6 +125,10 @@ public:
     // Public because MQTTManager re-emits it on connect / discovery enable; it
     // is the only path that puts the state key on the wire.
     void publishState();
+
+    // Same for the remaining-seconds key (issue #32): the only path that puts
+    // remaining on the wire; the periodic republish throttle stays in tick().
+    void publishRemaining();
 
     TimerCmdResult parseCommand(const char *json);
 
