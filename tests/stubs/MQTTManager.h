@@ -19,7 +19,7 @@
 #define TEST_WIRE_MAC_SUFFIX    "d4e5f6"
 
 struct PublishCall {
-    enum Kind { Wire, Remaining, Duration, Buzzer, Finished, Icons };
+    enum Kind { Wire, Duration, Buzzer, Finished, Icons };
     Kind kind;
     String  topic;     // Wire only: full data topic as the broker would see it
     String  payload;   // Wire only: exact payload string
@@ -49,7 +49,6 @@ public:
         return String(topic);
     }
 
-    void publishTimerRemaining(uint32_t seconds){ recorded.push_back({PublishCall::Remaining, "", "", seconds, "", "", "", ""}); }
     void publishTimerDuration(uint32_t seconds) { recorded.push_back({PublishCall::Duration,  "", "", seconds, "", "", "", ""}); }
     void publishTimerBuzzer(uint8_t index)      { recorded.push_back({PublishCall::Buzzer,    "", "", index, "", "", "", ""}); }
     void publishTimerFinished(uint8_t index)    { recorded.push_back({PublishCall::Finished,  "", "", index, "", "", "", ""}); }
