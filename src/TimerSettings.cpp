@@ -4,6 +4,8 @@
 
 #include "Globals.h"
 #include "TimerManager.h"   // TimerManager_::isValidIconName (shared Name char-rule)
+#include "MQTTManager.h"    // the (topic, payload) wire seam the publish hooks emit on
+#include "TimerHa.h"        // TimerHaEntity slots for the hooks' canonical topics
 #include <Preferences.h>
 
 namespace
@@ -228,6 +230,14 @@ namespace
     }
     void memApplyBuzzer(const TcValue &v) { TimerManager.setBuzzerMode((BuzzerMode)v.num); }
     void memEmitBuzzer (JsonDocument &doc) { doc["buzzer"] = TimerManager.buzzerModeString(); }
+    // Publish hook (issue #33): the live value onto the wire seam, payload the
+    // per-enum codec's canonical `wire` string -- never the numeric index, and
+    // deliberately not the HASelect `ha` label the retired setState path sent.
+    void memPublishBuzzer()
+    {
+        MQTTManager.publishTimerWire(MQTTManager.timerWireTopic(TimerHaEntity::Buzzer).c_str(),
+                                     TimerManager.buzzerModeString());
+    }
 
     // -- finished --
     bool memValidateFinished(JsonVariantConst v, TcValue &out)
@@ -239,6 +249,12 @@ namespace
     }
     void memApplyFinished(const TcValue &v) { TimerManager.setFinishedMode((FinishedMode)v.num); }
     void memEmitFinished (JsonDocument &doc) { doc["finished"] = TimerManager.finishedModeString(); }
+    // Publish hook: see memPublishBuzzer.
+    void memPublishFinished()
+    {
+        MQTTManager.publishTimerWire(MQTTManager.timerWireTopic(TimerHaEntity::Finished).c_str(),
+                                     TimerManager.finishedModeString());
+    }
 
     // -- icon_<state> (shared validate; per-state apply/emit) --
     bool memValidateIcon(JsonVariantConst v, TcValue &out)
@@ -258,13 +274,15 @@ namespace
     void memEmitIconFinished(JsonDocument &doc) { doc["icon_finished"] = TimerManager.getIconFinished(); }
 }
 
+// Icon rows carry no publish hook yet: they go out via the aggregate publishIcons
+// (a later issue migrates it onto the seam).
 const TimerMemberConfigDesc TIMER_MEMBER_CONFIG_DESCS[] = {
-    {"buzzer",        memValidateBuzzer,   memApplyBuzzer,        memEmitBuzzer},
-    {"finished",      memValidateFinished, memApplyFinished,      memEmitFinished},
-    {"icon_idle",     memValidateIcon,     memApplyIconIdle,      memEmitIconIdle},
-    {"icon_running",  memValidateIcon,     memApplyIconRunning,   memEmitIconRunning},
-    {"icon_paused",   memValidateIcon,     memApplyIconPaused,    memEmitIconPaused},
-    {"icon_finished", memValidateIcon,     memApplyIconFinished,  memEmitIconFinished},
+    {"buzzer",        memValidateBuzzer,   memApplyBuzzer,        memEmitBuzzer,        memPublishBuzzer},
+    {"finished",      memValidateFinished, memApplyFinished,      memEmitFinished,      memPublishFinished},
+    {"icon_idle",     memValidateIcon,     memApplyIconIdle,      memEmitIconIdle,      nullptr},
+    {"icon_running",  memValidateIcon,     memApplyIconRunning,   memEmitIconRunning,   nullptr},
+    {"icon_paused",   memValidateIcon,     memApplyIconPaused,    memEmitIconPaused,    nullptr},
+    {"icon_finished", memValidateIcon,     memApplyIconFinished,  memEmitIconFinished,  nullptr},
 };
 
 const size_t TIMER_MEMBER_CONFIG_DESC_COUNT =
@@ -281,4 +299,15 @@ bool timerDocTouchesMemberConfig(const JsonDocument &doc)
     for (size_t i = 0; i < TIMER_MEMBER_CONFIG_DESC_COUNT; ++i)
         if (doc.containsKey(TIMER_MEMBER_CONFIG_DESCS[i].cmdKey)) return true;
     return false;
+}
+
+void timerMemberConfigPublish(const char *cmdKey)
+{
+    for (size_t i = 0; i < TIMER_MEMBER_CONFIG_DESC_COUNT; ++i)
+    {
+        const TimerMemberConfigDesc &d = TIMER_MEMBER_CONFIG_DESCS[i];
+        if (strcmp(d.cmdKey, cmdKey) != 0) continue;
+        if (d.publish) d.publish();
+        return;
+    }
 }

@@ -1887,7 +1887,9 @@ void test_M2_enum_cycle_wraps_and_routes_via_setter(void) {
 
     timerMenuAdjust(0, +1);   // Off -> End
     TEST_ASSERT_EQUAL_UINT8((uint8_t)BuzzerMode::End, (uint8_t)TimerManager.getBuzzerMode());
-    TEST_ASSERT_NOT_NULL(fixture::last_publish(PublishCall::Buzzer));
+    const PublishCall *buz = fixture::last_publish(fixture::TIMER_BUZZER_TOPIC);
+    TEST_ASSERT_NOT_NULL(buz);
+    TEST_ASSERT_EQUAL_STRING("end", buz->payload.c_str());
 
     timerMenuAdjust(0, +1);   // End -> Countdown
     timerMenuAdjust(0, +1);   // Countdown -> Off (wrap)
@@ -1896,12 +1898,15 @@ void test_M2_enum_cycle_wraps_and_routes_via_setter(void) {
     timerMenuAdjust(0, -1);   // Off -> Countdown (wrap backward)
     TEST_ASSERT_EQUAL_UINT8((uint8_t)BuzzerMode::Countdown, (uint8_t)TimerManager.getBuzzerMode());
 
-    // finished slot routes through its setter too.
+    // finished slot routes through its setter too (proven on the wire: the
+    // row's publish hook puts the codec string on the canonical topic).
     TimerManager.setFinishedMode(FinishedMode::AutoClear);
     MQTTManager.__test_reset();
     timerMenuAdjust(2, +1);   // AutoClear -> Hold
     TEST_ASSERT_EQUAL_UINT8((uint8_t)FinishedMode::Hold, (uint8_t)TimerManager.getFinishedMode());
-    TEST_ASSERT_NOT_NULL(fixture::last_publish(PublishCall::Finished));
+    const PublishCall *fin = fixture::last_publish(fixture::TIMER_FINISHED_TOPIC);
+    TEST_ASSERT_NOT_NULL(fin);
+    TEST_ASSERT_EQUAL_STRING("hold", fin->payload.c_str());
 }
 
 // M3 — stepped ranges saturate at the descriptor bounds (no overshoot/underflow).
@@ -2401,6 +2406,57 @@ void test_W5_tick_republishes_remaining_only_at_publish_interval(void) {
     TEST_ASSERT_EQUAL_STRING("50", rem->payload.c_str());   // 60 s - 10 s boundary
 }
 
+// ============================================================================
+// W6 — wire fidelity for the finished enum (issue #33, the PRD's marquee
+// regression test): setting finished mode to hold puts the canonical codec
+// wire string "hold" — never a numeric index, never the HA label "Hold" —
+// on the canonical finished topic. Driven through parseCommand so the whole
+// validate→apply→publish chain of the member-config row is under test; the
+// expected topic is the fixture literal, spelled independently of the
+// TimerHa builders, so a wrong-topic regression fails here too.
+// ============================================================================
+void test_W6_finished_hold_publishes_wire_string_on_finished_topic(void) {
+    TimerManager.parseCommand("{\"finished\":\"hold\"}");
+
+    const PublishCall *wire = fixture::last_publish(fixture::TIMER_FINISHED_TOPIC);
+    TEST_ASSERT_NOT_NULL(wire);
+    TEST_ASSERT_EQUAL_STRING("hold", wire->payload.c_str());
+}
+
+// ============================================================================
+// W7 — wire fidelity for the buzzer enum (issue #33): a buzzer change puts the
+// canonical codec wire string "countdown" — never the enum's numeric index —
+// on the canonical buzzer topic. Same parseCommand-driven chain as W6.
+// ============================================================================
+void test_W7_buzzer_change_publishes_codec_string_on_buzzer_topic(void) {
+    TimerManager.parseCommand("{\"buzzer\":\"countdown\"}");
+
+    const PublishCall *wire = fixture::last_publish(fixture::TIMER_BUZZER_TOPIC);
+    TEST_ASSERT_NOT_NULL(wire);
+    TEST_ASSERT_EQUAL_STRING("countdown", wire->payload.c_str());
+}
+
+// ============================================================================
+// W8 — topic isolation for the enum keys (issue #33): each key publishes to
+// its OWN canonical topic and nothing crosses over, and a no-op set (same
+// value again) publishes nothing — the setter equality-skip survives the
+// hook routing. Together with W6/W7 this makes a wrong-topic change fail CI.
+// ============================================================================
+void test_W8_enum_keys_publish_only_their_own_topic_and_skip_noops(void) {
+    TimerManager.parseCommand("{\"buzzer\":\"countdown\"}");
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_BUZZER_TOPIC));
+    TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_FINISHED_TOPIC));
+
+    TimerManager.parseCommand("{\"finished\":\"hold\"}");
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_FINISHED_TOPIC));
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_BUZZER_TOPIC));
+
+    // No-op sets: same values again -> no further publish on either topic.
+    TimerManager.parseCommand("{\"buzzer\":\"countdown\",\"finished\":\"hold\"}");
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_BUZZER_TOPIC));
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_FINISHED_TOPIC));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
@@ -2503,5 +2559,8 @@ int main(int, char **) {
     RUN_TEST(test_W3_autoclear_publishes_idle_on_state_topic);
     RUN_TEST(test_W4_start_publishes_remaining_seconds_on_remaining_topic);
     RUN_TEST(test_W5_tick_republishes_remaining_only_at_publish_interval);
+    RUN_TEST(test_W6_finished_hold_publishes_wire_string_on_finished_topic);
+    RUN_TEST(test_W7_buzzer_change_publishes_codec_string_on_buzzer_topic);
+    RUN_TEST(test_W8_enum_keys_publish_only_their_own_topic_and_skip_noops);
     return UNITY_END();
 }

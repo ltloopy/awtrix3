@@ -153,10 +153,10 @@ void MQTTManager_::enableTimerHADiscovery()
         mqtt.publishConfigForDeviceType(dt);
 
     publishTimerDuration(TimerManager.getDuration());
-    TimerManager.publishRemaining(); // routes through the wire seam
-    TimerManager.publishState();     // routes through the wire seam
-    publishTimerBuzzer((uint8_t)TimerManager.getBuzzerMode());
-    publishTimerFinished((uint8_t)TimerManager.getFinishedMode());
+    TimerManager.publishRemaining();    // routes through the wire seam
+    TimerManager.publishState();        // routes through the wire seam
+    TimerManager.publishBuzzerMode();   // routes through the row's publish hook + seam
+    TimerManager.publishFinishedMode(); // routes through the row's publish hook + seam
     TimerManager.publishIcons();
 }
 
@@ -658,10 +658,10 @@ void onMqttConnected()
         if (SHOW_TIMER)
         {
             MQTTManager.publishTimerDuration(TimerManager.getDuration());
-            TimerManager.publishRemaining(); // routes through the wire seam
-            TimerManager.publishState();     // routes through the wire seam
-            MQTTManager.publishTimerBuzzer((uint8_t)TimerManager.getBuzzerMode());
-            MQTTManager.publishTimerFinished((uint8_t)TimerManager.getFinishedMode());
+            TimerManager.publishRemaining();    // routes through the wire seam
+            TimerManager.publishState();        // routes through the wire seam
+            TimerManager.publishBuzzerMode();   // routes through the row's publish hook + seam
+            TimerManager.publishFinishedMode(); // routes through the row's publish hook + seam
             TimerManager.publishIcons();
         }
     }
@@ -1031,16 +1031,6 @@ String MQTTManager_::timerWireTopic(TimerHaEntity slot)
     char topic[160];
     formatTimerHaDataTopic(MQTT_PREFIX.c_str(), deviceUniqueId, timerHaId(slot), topic, sizeof(topic));
     return String(topic);
-}
-
-void MQTTManager_::publishTimerBuzzer(uint8_t index)
-{
-    if (timerBuzzer) timerBuzzer->setState(index);
-}
-
-void MQTTManager_::publishTimerFinished(uint8_t index)
-{
-    if (timerFinishedSel) timerFinishedSel->setState(index);
 }
 
 void MQTTManager_::publishTimerIcons(const String &idle, const String &running, const String &paused, const String &finished)
