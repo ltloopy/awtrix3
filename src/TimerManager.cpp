@@ -763,8 +763,11 @@ void TimerManager_::publishRemaining()
                                  String(remainingSec).c_str());
 }
 void TimerManager_::publishDuration()     { MQTTManager.publishTimerDuration(durationSec); }
-void TimerManager_::publishBuzzerMode()   { MQTTManager.publishTimerBuzzer((uint8_t)buzzerMode); }
-void TimerManager_::publishFinishedMode() { MQTTManager.publishTimerFinished((uint8_t)finishedMode); }
+// The enum keys are member-config rows (issue #33): dispatch through the row's
+// declared publish hook so validate/apply/emit/publish stay co-located and the
+// table is the single definition of how each key goes out on the wire.
+void TimerManager_::publishBuzzerMode()   { timerMemberConfigPublish("buzzer"); }
+void TimerManager_::publishFinishedMode() { timerMemberConfigPublish("finished"); }
 
 // ---------------------------------------------------------------------------
 // Propagation surface (device-to-device timer sync). See CONTEXT.md and
