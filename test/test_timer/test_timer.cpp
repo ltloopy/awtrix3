@@ -33,20 +33,21 @@ void tearDown(void) {}
 
 // ============================================================================
 // U1 — setDuration clamping
-// Proves: Globals + Preferences fake wired correctly; publishDuration recorded.
+// Proves: Globals + Preferences fake wired correctly; each clamp publishes the
+// clamped value, as trimmed HMS, on the canonical duration topic (issue #34).
 // ============================================================================
 void test_U1_setDuration_clamps_low_and_high(void) {
     TimerManager.setDuration(0);
     TEST_ASSERT_EQUAL_UINT32(1, TimerManager.getDuration());
-    const PublishCall *low = fixture::last_publish(PublishCall::Duration);
+    const PublishCall *low = fixture::last_publish(fixture::TIMER_DURATION_TOPIC);
     TEST_ASSERT_NOT_NULL(low);
-    TEST_ASSERT_EQUAL_UINT32(1, low->value);
+    TEST_ASSERT_EQUAL_STRING("0:01", low->payload.c_str());
 
     TimerManager.setDuration(99999);
     TEST_ASSERT_EQUAL_UINT32(TIMER_MAX_DURATION, TimerManager.getDuration());
-    const PublishCall *high = fixture::last_publish(PublishCall::Duration);
+    const PublishCall *high = fixture::last_publish(fixture::TIMER_DURATION_TOPIC);
     TEST_ASSERT_NOT_NULL(high);
-    TEST_ASSERT_EQUAL_UINT32(TIMER_MAX_DURATION, high->value);
+    TEST_ASSERT_EQUAL_STRING("24:00:00", high->payload.c_str());   // fixture cap 86400 s
 
     // Preferences round-trip: simulate reboot by calling setup() again.
     TimerManager.setup();
@@ -93,7 +94,6 @@ void test_U3_start_from_idle_publishes_state_then_remaining(void) {
     int stateIdx = -1, remIdx = -1;
     for (size_t i = 0; i < MQTTManager.recorded.size(); ++i) {
         const auto &c = MQTTManager.recorded[i];
-        if (c.kind != PublishCall::Wire) continue;
         if (stateIdx < 0 && c.topic == fixture::TIMER_STATE_TOPIC && c.payload == "running") stateIdx = (int)i;
         if (remIdx   < 0 && c.topic == fixture::TIMER_REMAINING_TOPIC && c.payload == "300") remIdx = (int)i;
     }
@@ -171,7 +171,7 @@ void test_U6_parseCommand_noop_when_disabled(void) {
 
     // Nothing published to HA from the gated commands.
     TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_STATE_TOPIC));
-    TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(PublishCall::Duration));
+    TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_DURATION_TOPIC));
 
     // Re-enabling restores command processing (returns Ok).
     SHOW_TIMER = true;
@@ -2457,6 +2457,56 @@ void test_W8_enum_keys_publish_only_their_own_topic_and_skip_noops(void) {
     TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_FINISHED_TOPIC));
 }
 
+// ============================================================================
+// W9 — wire fidelity for the duration key (issue #34): a duration change puts
+// the trimmed-HMS clock string — the format the retired HAText::setState path
+// sent — on the canonical duration topic. Driven through parseCommand so the
+// whole validate→apply→publish chain is under test; the expected topic is the
+// fixture literal, spelled independently of the TimerHa builders.
+// ============================================================================
+void test_W9_duration_change_publishes_hms_on_duration_topic(void) {
+    TimerManager.parseCommand("{\"duration\":3661}");
+
+    const PublishCall *wire = fixture::last_publish(fixture::TIMER_DURATION_TOPIC);
+    TEST_ASSERT_NOT_NULL(wire);
+    TEST_ASSERT_EQUAL_STRING("1:01:01", wire->payload.c_str());
+}
+
+// ============================================================================
+// W10 — wire fidelity for the icons key (issue #34): an icon change puts the
+// aggregate four-state JSON — byte-identical to the retired direct
+// mqtt.publish() composer — on the plain prefix topic {MQTT_PREFIX}/timer/
+// icons (the one published Timer topic that is NOT an HA entity data topic).
+// Driven through parseCommand so the member-config row's validate→apply→
+// publish chain is under test; expected topic is the fixture literal.
+// ============================================================================
+void test_W10_icon_change_publishes_aggregate_json_on_icons_topic(void) {
+    TimerManager.parseCommand("{\"icon_idle\":\"clock\"}");
+
+    const PublishCall *wire = fixture::last_publish(fixture::TIMER_ICONS_TOPIC);
+    TEST_ASSERT_NOT_NULL(wire);
+    TEST_ASSERT_EQUAL_STRING(
+        "{\"idle\":\"clock\",\"running\":\"\",\"paused\":\"\",\"finished\":\"\"}",
+        wire->payload.c_str());
+}
+
+// ============================================================================
+// W11 — no-op sets stay silent for the migrated keys (issue #34): re-sending
+// the current duration and icon values publishes nothing further on either
+// topic — the setter equality-skip survives the seam/hook routing. Completes
+// the no-op coverage W8 established for the enum keys.
+// ============================================================================
+void test_W11_noop_duration_and_icon_sets_do_not_publish(void) {
+    TimerManager.parseCommand("{\"duration\":120,\"icon_idle\":\"clock\"}");
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_DURATION_TOPIC));
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_ICONS_TOPIC));
+
+    // Same values again -> no further publish on either topic.
+    TimerManager.parseCommand("{\"duration\":120,\"icon_idle\":\"clock\"}");
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_DURATION_TOPIC));
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_ICONS_TOPIC));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
@@ -2562,5 +2612,8 @@ int main(int, char **) {
     RUN_TEST(test_W6_finished_hold_publishes_wire_string_on_finished_topic);
     RUN_TEST(test_W7_buzzer_change_publishes_codec_string_on_buzzer_topic);
     RUN_TEST(test_W8_enum_keys_publish_only_their_own_topic_and_skip_noops);
+    RUN_TEST(test_W9_duration_change_publishes_hms_on_duration_topic);
+    RUN_TEST(test_W10_icon_change_publishes_aggregate_json_on_icons_topic);
+    RUN_TEST(test_W11_noop_duration_and_icon_sets_do_not_publish);
     return UNITY_END();
 }

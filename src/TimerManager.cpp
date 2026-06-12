@@ -178,7 +178,9 @@ void TimerManager_::setIconFinished(const String &name, bool publish)
 
 void TimerManager_::publishIcons()
 {
-    MQTTManager.publishTimerIcons(iconIdle, iconRunning, iconPaused, iconFinished);
+    // The four icon rows declare ONE shared aggregate publish hook (issue #34),
+    // so dispatching any icon key reaches the same declaration.
+    timerMemberConfigPublish("icon_idle");
 }
 
 uint32_t TimerManager_::computeCurrentRemaining() const
@@ -762,7 +764,13 @@ void TimerManager_::publishRemaining()
     MQTTManager.publishTimerWire(MQTTManager.timerWireTopic(TimerHaEntity::Remaining).c_str(),
                                  String(remainingSec).c_str());
 }
-void TimerManager_::publishDuration()     { MQTTManager.publishTimerDuration(durationSec); }
+// Duration is run-state too (issue #34): straight through the seam, payload the
+// trimmed-HMS clock string — byte-identical to the retired HAText::setState path.
+void TimerManager_::publishDuration()
+{
+    MQTTManager.publishTimerWire(MQTTManager.timerWireTopic(TimerHaEntity::Duration).c_str(),
+                                 formatHMS(durationSec).c_str());
+}
 // The enum keys are member-config rows (issue #33): dispatch through the row's
 // declared publish hook so validate/apply/emit/publish stay co-located and the
 // table is the single definition of how each key goes out on the wire.
