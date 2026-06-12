@@ -777,6 +777,29 @@ void TimerManager_::publishDuration()
 void TimerManager_::publishBuzzerMode()   { timerMemberConfigPublish("buzzer"); }
 void TimerManager_::publishFinishedMode() { timerMemberConfigPublish("finished"); }
 
+// Full wire refresh (issue #41, closing PRD #28). The run-state trio is a fixed
+// set (state/remaining/duration are run-state, not table rows); the config half
+// is DERIVED from TIMER_MEMBER_CONFIG_DESCS, so a row added with a publish hook
+// is republished on connect / discovery-enable without touching this function.
+// Hooks are deduped by pointer — the four icon rows share one aggregate hook,
+// whose JSON must hit the wire exactly once. Order preserved from the retired
+// hand-listed blocks: duration, remaining, state, then table order.
+void TimerManager_::publishAllWire()
+{
+    publishDuration();
+    publishRemaining();
+    publishState();
+    for (size_t i = 0; i < TIMER_MEMBER_CONFIG_DESC_COUNT; ++i)
+    {
+        void (*hook)() = TIMER_MEMBER_CONFIG_DESCS[i].publish;
+        if (!hook) continue;
+        bool fired = false;
+        for (size_t j = 0; j < i && !fired; ++j)
+            fired = (TIMER_MEMBER_CONFIG_DESCS[j].publish == hook);
+        if (!fired) hook();
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Propagation surface (device-to-device timer sync). See CONTEXT.md and
 // docs/adr/0006-timer-multi-device-sync.md.

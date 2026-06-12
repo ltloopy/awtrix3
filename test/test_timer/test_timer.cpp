@@ -2507,6 +2507,43 @@ void test_W11_noop_duration_and_icon_sets_do_not_publish(void) {
     TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_ICONS_TOPIC));
 }
 
+// ============================================================================
+// W12 — full wire refresh (issue #41, closing PRD #28): publishAllWire() puts
+// every declared wire artifact — state, remaining, duration, buzzer, finished,
+// icons aggregate — on its canonical topic EXACTLY once with the current value
+// as payload. "Every" pins that the connect / discovery-enable republish is
+// derived from the member table (a new published row cannot be silently
+// skipped); "exactly once" pins the shared-icons-hook dedupe. The total count
+// pins that nothing else rides along. No order assertion: boot-republish order
+// is not a contract anyone consumes.
+// ============================================================================
+void test_W12_publishAllWire_each_artifact_exactly_once(void) {
+    // Seed non-default values through parseCommand, then clear the recording
+    // so only the refresh itself is counted.
+    TimerManager.parseCommand(
+        "{\"duration\":3661,\"buzzer\":\"countdown\",\"finished\":\"hold\",\"icon_idle\":\"clock\"}");
+    MQTTManager.__test_reset();
+
+    TimerManager.publishAllWire();
+
+    TEST_ASSERT_EQUAL_INT(6, (int)MQTTManager.recorded.size());
+    const char *topics[] = {
+        fixture::TIMER_STATE_TOPIC,    fixture::TIMER_REMAINING_TOPIC,
+        fixture::TIMER_DURATION_TOPIC, fixture::TIMER_BUZZER_TOPIC,
+        fixture::TIMER_FINISHED_TOPIC, fixture::TIMER_ICONS_TOPIC};
+    for (const char *t : topics)
+        TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(t));
+
+    TEST_ASSERT_EQUAL_STRING("idle",      fixture::last_publish(fixture::TIMER_STATE_TOPIC)->payload.c_str());
+    TEST_ASSERT_EQUAL_STRING("3661",      fixture::last_publish(fixture::TIMER_REMAINING_TOPIC)->payload.c_str());
+    TEST_ASSERT_EQUAL_STRING("1:01:01",   fixture::last_publish(fixture::TIMER_DURATION_TOPIC)->payload.c_str());
+    TEST_ASSERT_EQUAL_STRING("countdown", fixture::last_publish(fixture::TIMER_BUZZER_TOPIC)->payload.c_str());
+    TEST_ASSERT_EQUAL_STRING("hold",      fixture::last_publish(fixture::TIMER_FINISHED_TOPIC)->payload.c_str());
+    TEST_ASSERT_EQUAL_STRING(
+        "{\"idle\":\"clock\",\"running\":\"\",\"paused\":\"\",\"finished\":\"\"}",
+        fixture::last_publish(fixture::TIMER_ICONS_TOPIC)->payload.c_str());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
@@ -2615,5 +2652,6 @@ int main(int, char **) {
     RUN_TEST(test_W9_duration_change_publishes_hms_on_duration_topic);
     RUN_TEST(test_W10_icon_change_publishes_aggregate_json_on_icons_topic);
     RUN_TEST(test_W11_noop_duration_and_icon_sets_do_not_publish);
+    RUN_TEST(test_W12_publishAllWire_each_artifact_exactly_once);
     return UNITY_END();
 }

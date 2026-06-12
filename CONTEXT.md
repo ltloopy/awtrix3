@@ -106,10 +106,17 @@ An entity's canonical topic is sourced through `timerWireTopic(slot)` →
 byte-identical** to what ArduinoHA's `HASerializer::generateDataTopic` emits
 (`{dataPrefix}/{deviceUniqueId}/{entityId}/stat_t`). Re-routing a key through the
 seam is a structural change only; any topic or payload difference it introduces is
-a bug. Today the run-state keys (`state` and `remaining`) flow through the seam;
-the member-config keys migrate in later PRD-#28 slices. Re-routing changes how a
+a bug. **All** Timer publishes flow through the seam: the run-state keys (`state`,
+`remaining`, `duration`) directly, the member-config keys via their
+`TIMER_MEMBER_CONFIG_DESCS` rows' publish hooks. Re-routing changes how a
 publish is expressed, never when it fires — the periodic `remaining` republish
 keeps its `TIMER_PUBLISH_INTERVAL` throttle in `tick()`.
+
+The **full wire refresh** — every wire artifact republished once, on MQTT
+(re)connect or discovery enable — is `TimerManager.publishAllWire()`: the
+run-state trio plus the member table's publish hooks (deduped, so the shared
+icons hook fires once). Because the config half is derived from the table, a new
+published row cannot be silently skipped by the refresh.
 
 _Avoid_: publishing Timer MQTT output around the seam, or computing a wire topic
 anywhere but the TimerHa builders.
