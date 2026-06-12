@@ -138,6 +138,12 @@ public:
     void publishBuzzerMode();
     void publishFinishedMode();
 
+    // Full wire refresh (issue #41): republish every Timer wire artifact once —
+    // the run-state trio plus every member-config row's publish hook, derived
+    // from TIMER_MEMBER_CONFIG_DESCS so a new published row cannot be skipped.
+    // The single call the connect / discovery-enable republish sites make.
+    void publishAllWire();
+
     TimerCmdResult parseCommand(const char *json);
 
     // -- Propagation surface --

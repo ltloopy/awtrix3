@@ -152,12 +152,7 @@ void MQTTManager_::enableTimerHADiscovery()
     for (HABaseDeviceType *dt : timerTypes)
         mqtt.publishConfigForDeviceType(dt);
 
-    TimerManager.publishDuration();     // routes through the wire seam
-    TimerManager.publishRemaining();    // routes through the wire seam
-    TimerManager.publishState();        // routes through the wire seam
-    TimerManager.publishBuzzerMode();   // routes through the row's publish hook + seam
-    TimerManager.publishFinishedMode(); // routes through the row's publish hook + seam
-    TimerManager.publishIcons();
+    TimerManager.publishAllWire();   // every wire artifact, derived from the member table (issue #41)
 }
 
 void MQTTManager_::removeTimerHAEntities()
@@ -656,14 +651,7 @@ void onMqttConnected()
         version->setValue(VERSION);
 
         if (SHOW_TIMER)
-        {
-            TimerManager.publishDuration();     // routes through the wire seam
-            TimerManager.publishRemaining();    // routes through the wire seam
-            TimerManager.publishState();        // routes through the wire seam
-            TimerManager.publishBuzzerMode();   // routes through the row's publish hook + seam
-            TimerManager.publishFinishedMode(); // routes through the row's publish hook + seam
-            TimerManager.publishIcons();
-        }
+            TimerManager.publishAllWire();   // every wire artifact, derived from the member table (issue #41)
     }
 
     MQTTManager.publish("stats/effects", DisplayManager.getEffectNames().c_str());
