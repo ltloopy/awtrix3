@@ -78,19 +78,6 @@ inline String last_sync_payload() {
     return ServerManager.sent.empty() ? String() : ServerManager.sent.back();
 }
 
-inline int count_publish(PublishCall::Kind k) {
-    int n = 0;
-    for (const auto &c : MQTTManager.recorded) if (c.kind == k) n++;
-    return n;
-}
-
-inline const PublishCall *last_publish(PublishCall::Kind k) {
-    for (auto it = MQTTManager.recorded.rbegin(); it != MQTTManager.recorded.rend(); ++it) {
-        if (it->kind == k) return &*it;
-    }
-    return nullptr;
-}
-
 // The canonical state topic the broker would see, hand-spelled (NOT computed
 // via the TimerHa builders) so tests assert against an independent spelling of
 // the wire contract: {TEST_WIRE_DATA_PREFIX}/{TEST_WIRE_DEVICE_ID}/
@@ -106,17 +93,24 @@ inline const char *TIMER_REMAINING_TOPIC = "awtrix_self/a1b2c3d4e5f6/d4e5f6_time
 inline const char *TIMER_BUZZER_TOPIC   = "awtrix_self/a1b2c3d4e5f6/d4e5f6_timer_buz/stat_t";
 inline const char *TIMER_FINISHED_TOPIC = "awtrix_self/a1b2c3d4e5f6/d4e5f6_timer_fin/stat_t";
 
+// Duration text entity (issue #34), id per TimerHa.cpp's HAtimerDurID "%s_timer_dur".
+inline const char *TIMER_DURATION_TOPIC = "awtrix_self/a1b2c3d4e5f6/d4e5f6_timer_dur/stat_t";
+
+// The aggregate icons JSON rides a plain prefix topic, not an HA entity data
+// topic: {MQTT_PREFIX}/timer/icons (MQTT_PREFIX defaults to uniqueID on device).
+inline const char *TIMER_ICONS_TOPIC = "awtrix_self/timer/icons";
+
 // Topic-keyed queries over the wire seam's (topic, payload) recordings.
 inline int count_publish(const String &topic) {
     int n = 0;
     for (const auto &c : MQTTManager.recorded)
-        if (c.kind == PublishCall::Wire && c.topic == topic) n++;
+        if (c.topic == topic) n++;
     return n;
 }
 
 inline const PublishCall *last_publish(const String &topic) {
     for (auto it = MQTTManager.recorded.rbegin(); it != MQTTManager.recorded.rend(); ++it) {
-        if (it->kind == PublishCall::Wire && it->topic == topic) return &*it;
+        if (it->topic == topic) return &*it;
     }
     return nullptr;
 }

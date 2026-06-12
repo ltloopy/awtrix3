@@ -18,16 +18,12 @@
 #define TEST_WIRE_DEVICE_ID     "a1b2c3d4e5f6"
 #define TEST_WIRE_MAC_SUFFIX    "d4e5f6"
 
+// Every Timer publish flows through the wire seam (PRD #28, issues #31–#34),
+// so a recorded publish IS a (topic, payload) pair — the exact bytes the
+// broker would see. There is no other shape to record.
 struct PublishCall {
-    enum Kind { Wire, Duration, Icons };
-    Kind kind;
-    String  topic;     // Wire only: full data topic as the broker would see it
-    String  payload;   // Wire only: exact payload string
-    uint32_t value;
-    String  icon_idle;
-    String  icon_running;
-    String  icon_paused;
-    String  icon_finished;
+    String topic;      // full data topic as the broker would see it
+    String payload;    // exact payload string
 };
 
 class MQTTManager_ {
@@ -35,7 +31,7 @@ public:
     // The (topic, payload) wire seam (issue #31): same signature the device
     // implements with a retained mqtt.publish; here it records the pair.
     void publishTimerWire(const char *topic, const char *payload) {
-        recorded.push_back({PublishCall::Wire, String(topic), String(payload), 0, "", "", "", ""});
+        recorded.push_back({String(topic), String(payload)});
     }
 
     // Canonical full data topic for a Timer HA entity slot, built through the
@@ -49,10 +45,9 @@ public:
         return String(topic);
     }
 
-    void publishTimerDuration(uint32_t seconds) { recorded.push_back({PublishCall::Duration,  "", "", seconds, "", "", "", ""}); }
-    void publishTimerIcons(const String &idle, const String &running, const String &paused, const String &finished) {
-        recorded.push_back({PublishCall::Icons, "", "", 0, idle, running, paused, finished});
-    }
+    // Mirror of the device's MQTT_PREFIX + "/timer/icons" (MQTT_PREFIX defaults
+    // to String(uniqueID) = the fixture data prefix).
+    String timerIconsTopic() { return String(TEST_WIRE_DATA_PREFIX "/timer/icons"); }
 
     std::vector<PublishCall> recorded;
 

@@ -69,7 +69,6 @@ private:
     uint32_t computeCurrentRemaining() const;
     void enterRunning();
     void enterFinished();
-    void publishDuration();
     void persist();
     void persistIfDirty();
     void loadMelodiesCached();
@@ -127,6 +126,11 @@ public:
     // Same for the remaining-seconds key (issue #32): the only path that puts
     // remaining on the wire; the periodic republish throttle stays in tick().
     void publishRemaining();
+
+    // Same for the duration key (issue #34): the only path that puts the
+    // trimmed-HMS duration on the wire. Public for the same connect /
+    // discovery-enable republish sites.
+    void publishDuration();
 
     // Same for the two enum keys (issue #33), dispatching through their member-
     // config rows' publish hooks: the only paths that put buzzer/finished on

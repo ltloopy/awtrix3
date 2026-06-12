@@ -272,17 +272,30 @@ namespace
     void memEmitIconRunning (JsonDocument &doc) { doc["icon_running"]  = TimerManager.getIconRunning(); }
     void memEmitIconPaused  (JsonDocument &doc) { doc["icon_paused"]   = TimerManager.getIconPaused(); }
     void memEmitIconFinished(JsonDocument &doc) { doc["icon_finished"] = TimerManager.getIconFinished(); }
+    // Publish hook, shared by all four icon rows (issue #34): the icon keys have
+    // ONE wire artifact — the aggregate four-state JSON on the plain
+    // {MQTT_PREFIX}/timer/icons topic (not an HA entity data topic), payload
+    // byte-identical to the retired MQTTManager::publishTimerIcons composer.
+    void memPublishIcons()
+    {
+        DynamicJsonDocument doc(256);
+        doc["idle"]     = TimerManager.getIconIdle();
+        doc["running"]  = TimerManager.getIconRunning();
+        doc["paused"]   = TimerManager.getIconPaused();
+        doc["finished"] = TimerManager.getIconFinished();
+        String payload;
+        serializeJson(doc, payload);
+        MQTTManager.publishTimerWire(MQTTManager.timerIconsTopic().c_str(), payload.c_str());
+    }
 }
 
-// Icon rows carry no publish hook yet: they go out via the aggregate publishIcons
-// (a later issue migrates it onto the seam).
 const TimerMemberConfigDesc TIMER_MEMBER_CONFIG_DESCS[] = {
     {"buzzer",        memValidateBuzzer,   memApplyBuzzer,        memEmitBuzzer,        memPublishBuzzer},
     {"finished",      memValidateFinished, memApplyFinished,      memEmitFinished,      memPublishFinished},
-    {"icon_idle",     memValidateIcon,     memApplyIconIdle,      memEmitIconIdle,      nullptr},
-    {"icon_running",  memValidateIcon,     memApplyIconRunning,   memEmitIconRunning,   nullptr},
-    {"icon_paused",   memValidateIcon,     memApplyIconPaused,    memEmitIconPaused,    nullptr},
-    {"icon_finished", memValidateIcon,     memApplyIconFinished,  memEmitIconFinished,  nullptr},
+    {"icon_idle",     memValidateIcon,     memApplyIconIdle,      memEmitIconIdle,      memPublishIcons},
+    {"icon_running",  memValidateIcon,     memApplyIconRunning,   memEmitIconRunning,   memPublishIcons},
+    {"icon_paused",   memValidateIcon,     memApplyIconPaused,    memEmitIconPaused,    memPublishIcons},
+    {"icon_finished", memValidateIcon,     memApplyIconFinished,  memEmitIconFinished,  memPublishIcons},
 };
 
 const size_t TIMER_MEMBER_CONFIG_DESC_COUNT =

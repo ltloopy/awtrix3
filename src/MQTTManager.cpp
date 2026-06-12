@@ -152,7 +152,7 @@ void MQTTManager_::enableTimerHADiscovery()
     for (HABaseDeviceType *dt : timerTypes)
         mqtt.publishConfigForDeviceType(dt);
 
-    publishTimerDuration(TimerManager.getDuration());
+    TimerManager.publishDuration();     // routes through the wire seam
     TimerManager.publishRemaining();    // routes through the wire seam
     TimerManager.publishState();        // routes through the wire seam
     TimerManager.publishBuzzerMode();   // routes through the row's publish hook + seam
@@ -657,7 +657,7 @@ void onMqttConnected()
 
         if (SHOW_TIMER)
         {
-            MQTTManager.publishTimerDuration(TimerManager.getDuration());
+            TimerManager.publishDuration();     // routes through the wire seam
             TimerManager.publishRemaining();    // routes through the wire seam
             TimerManager.publishState();        // routes through the wire seam
             TimerManager.publishBuzzerMode();   // routes through the row's publish hook + seam
@@ -1003,11 +1003,6 @@ void MQTTManager_::tick()
     }
 }
 
-void MQTTManager_::publishTimerDuration(uint32_t seconds)
-{
-    if (timerDuration) timerDuration->setState(TimerManager_::formatHMS(seconds).c_str(), true);
-}
-
 // The Timer wire seam (issue #31): publishes the exact (topic, payload) the
 // caller hands over — retained, like the HASensor::setValue path it replaces.
 // Gated on the Timer HA entities existing (timerDuration is the creation
@@ -1033,19 +1028,12 @@ String MQTTManager_::timerWireTopic(TimerHaEntity slot)
     return String(topic);
 }
 
-void MQTTManager_::publishTimerIcons(const String &idle, const String &running, const String &paused, const String &finished)
+// Canonical topic for the aggregate icons JSON (issue #34) — the one published
+// Timer topic that is NOT an HA entity data topic. The host-test stub mirrors
+// this from its fixture prefix, so tests pin the same spelling.
+String MQTTManager_::timerIconsTopic()
 {
-    if (!mqtt.isConnected())
-        return;
-    DynamicJsonDocument doc(256);
-    doc["idle"]     = idle;
-    doc["running"]  = running;
-    doc["paused"]   = paused;
-    doc["finished"] = finished;
-    String payload;
-    serializeJson(doc, payload);
-    String topic = MQTT_PREFIX + "/timer/icons";
-    mqtt.publish(topic.c_str(), payload.c_str(), true);
+    return MQTT_PREFIX + "/timer/icons";
 }
 
 void MQTTManager_::publish(const char *topic, const char *payload)
