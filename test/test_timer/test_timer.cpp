@@ -447,6 +447,63 @@ void test_U21_parseCommand_batches_persist(void) {
 }
 
 // ============================================================================
+// U55 (#43) — a payload rejected mid-validation persists nothing
+// The atomic-reject path exits before the apply block, so the "timer"
+// namespace must see no flush and keep its prior values.
+// ============================================================================
+void test_U55_parseCommand_rejected_payload_persists_nothing(void) {
+    int begin_at_start = Preferences::begin_calls;
+
+    // duration is valid; buzzer is not -> whole command rejected.
+    TimerCmdResult r = TimerManager.parseCommand("{\"duration\":600,\"buzzer\":\"bogus\"}");
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField), static_cast<int>(r));
+    TEST_ASSERT_EQUAL_INT(0, Preferences::begin_calls - begin_at_start);  // no NVS flush
+    TEST_ASSERT_EQUAL_UINT32(300, TimerManager.getDuration());            // RAM untouched too
+}
+
+// ============================================================================
+// U56 (#43) — an all-no-op payload causes no NVS write
+// Every value equals current state (setUp defaults), so the deep setters'
+// equality-skip leaves nothing dirty and the batch must not flush.
+// ============================================================================
+void test_U56_parseCommand_noop_payload_does_not_write_nvs(void) {
+    int begin_at_start = Preferences::begin_calls;
+
+    TimerCmdResult r = TimerManager.parseCommand(
+        "{\"duration\":300,\"buzzer\":\"end\",\"finished\":\"auto-clear\","
+        "\"icon_idle\":\"\",\"icon_running\":\"\"}");
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok), static_cast<int>(r));
+    TEST_ASSERT_EQUAL_INT(0, Preferences::begin_calls - begin_at_start);  // nothing dirtied -> no flush
+}
+
+// ============================================================================
+// U57 (#43) — after a multi-key payload the stored "timer"-namespace values
+// are correct. Proven by reboot round-trip (setup() reloads from Preferences,
+// same precedent as U1), covering every member-backed key in one batch.
+// ============================================================================
+void test_U57_parseCommand_multikey_stores_correct_values(void) {
+    TimerCmdResult r = TimerManager.parseCommand(
+        "{\"duration\":600,\"buzzer\":\"countdown\",\"finished\":\"hold\","
+        "\"icon_idle\":\"a\",\"icon_running\":\"b\",\"icon_paused\":\"c\",\"icon_finished\":\"d\"}");
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok), static_cast<int>(r));
+
+    // Simulate reboot: setup() reloads the "timer" namespace from Preferences.
+    TimerManager.setup();
+
+    TEST_ASSERT_EQUAL_UINT32(600, TimerManager.getDuration());
+    TEST_ASSERT_EQUAL(static_cast<int>(BuzzerMode::Countdown),
+                      static_cast<int>(TimerManager.getBuzzerMode()));
+    TEST_ASSERT_EQUAL(static_cast<int>(FinishedMode::Hold),
+                      static_cast<int>(TimerManager.getFinishedMode()));
+    TEST_ASSERT_EQUAL_STRING("a", TimerManager.getIconIdle().c_str());
+    TEST_ASSERT_EQUAL_STRING("b", TimerManager.getIconRunning().c_str());
+    TEST_ASSERT_EQUAL_STRING("c", TimerManager.getIconPaused().c_str());
+    TEST_ASSERT_EQUAL_STRING("d", TimerManager.getIconFinished().c_str());
+}
+
+// ============================================================================
 // U22 (M1) — parseCommand while in config: drop partial edit, drain deferred,
 // accept command. The partial edit must NOT be committed to durationSec.
 // ============================================================================
@@ -2564,6 +2621,9 @@ int main(int, char **) {
     RUN_TEST(test_U19_enterConfig_clamps_duration_at_99h);
     RUN_TEST(test_U20_icon_name_validation);
     RUN_TEST(test_U21_parseCommand_batches_persist);
+    RUN_TEST(test_U55_parseCommand_rejected_payload_persists_nothing);
+    RUN_TEST(test_U56_parseCommand_noop_payload_does_not_write_nvs);
+    RUN_TEST(test_U57_parseCommand_multikey_stores_correct_values);
     RUN_TEST(test_U22_parseCommand_aborts_config_without_committing_edit);
     RUN_TEST(test_U23_formatHMS_trimmed);
     RUN_TEST(test_U24_parseHMS_accepts);

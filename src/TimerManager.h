@@ -47,6 +47,35 @@ private:
     bool _suspendPersist = false;
     bool _dirty          = false;
 
+    // RAII guard that makes the persist-batching window a visible lexical scope
+    // (PRD #29). Construction suspends member-backed persistence; scope exit
+    // flushes the "timer" NVS namespace exactly once iff a setter dirtied state
+    // during the window, then clears the suspend/dirty state. Exceptions are off
+    // on this target, so "scope exit" means the normal return paths.
+    class PersistBatch
+    {
+    public:
+        explicit PersistBatch(TimerManager_ &tm) : tm(tm)
+        {
+            tm._suspendPersist = true;
+            tm._dirty = false;
+        }
+        ~PersistBatch()
+        {
+            tm._suspendPersist = false;
+            if (tm._dirty)
+            {
+                tm._dirty = false;
+                tm.persist();
+            }
+        }
+        PersistBatch(const PersistBatch &) = delete;
+        PersistBatch &operator=(const PersistBatch &) = delete;
+
+    private:
+        TimerManager_ &tm;
+    };
+
     // -- Propagation surface (device-to-device timer sync) --
     // While true, an inbound sync packet is being applied via parseCommand; the
     // broadcast* methods early-return so a received command is never re-emitted

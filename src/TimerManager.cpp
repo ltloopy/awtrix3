@@ -675,19 +675,14 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     }
 
     // Member-backed applies via publish-aware setters (routed through the member table's
-    // apply hooks); their "timer"-namespace NVS writes are batched under _suspendPersist
-    // into a single persist(). duration stays its own call (run-state, B1; applied first
-    // so it lands before any member-config side effects).
-    _suspendPersist = true;
-    _dirty = false;
-    if (haveDuration) setDuration(durSecs);   // pre-validated in range
-    for (size_t i = 0; i < TIMER_MEMBER_CONFIG_DESC_COUNT; ++i)
-        if (memberPresent[i]) TIMER_MEMBER_CONFIG_DESCS[i].apply(memberStaged[i]);
-    _suspendPersist = false;
-    if (_dirty)
+    // apply hooks); their "timer"-namespace NVS writes are batched by the PersistBatch
+    // guard into one flush on scope exit. duration stays its own call (run-state, B1;
+    // applied first so it lands before any member-config side effects).
     {
-        _dirty = false;
-        persist();
+        PersistBatch batch(*this);
+        if (haveDuration) setDuration(durSecs);   // pre-validated in range
+        for (size_t i = 0; i < TIMER_MEMBER_CONFIG_DESC_COUNT; ++i)
+            if (memberPresent[i]) TIMER_MEMBER_CONFIG_DESCS[i].apply(memberStaged[i]);
     }
 
     if (tableChanged)  saveSettings();        // persist the "awtrix"-namespace table keys once
