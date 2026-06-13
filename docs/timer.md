@@ -11,6 +11,62 @@ physical buttons on the Ulanzi TC001.
 
 ---
 
+## Control & configuration matrix
+
+`POST /api/timer` and the `{prefix}/timer` MQTT topic share one command parser
+([ADR-0001](adr/0001-timer-command-validation-parity.md)) and accept the **same
+JSON keys** — listed once in the "API / MQTT key" column. `GET /api/timer`
+returns the read-only snapshot. `dev.json` keys override NVS on **every boot**
+([dev.md](dev.md)). Legend: ✅ set · 👁 read-only · — n/a.
+
+### Run-state (not persisted; resets to Idle on reboot)
+
+| Item | API / MQTT key | dev.json | Home Assistant | On-device |
+|------|----------------|----------|----------------|-----------|
+| Start / Pause / Reset | `action`: `start`/`pause`/`reset` ✅ | — | `Timer start` / `Timer pause` / `Timer reset` buttons ✅ | mid-button (per state) ✅ |
+| State | `state` 👁 (GET) | — | `Timer state` sensor 👁 | on screen 👁 |
+| Remaining | `remaining` / `remaining_str` 👁 (GET) | — | `Timer remaining` sensor (`s`) 👁 | countdown text 👁 |
+
+### Core settings (member-backed, NVS `"timer"`)
+
+| Item | API / MQTT key | dev.json | Home Assistant | On-device |
+|------|----------------|----------|----------------|-----------|
+| Duration | `duration` ✅ (sec / `MM:SS` / `HH:MM:SS`) | — | `Timer duration` text ✅ | config editor (long-press mid) ✅ |
+| Buzzer mode | `buzzer`: `off`/`end`/`countdown` ✅ | — | `Timer buzzer` select ✅ | `TIMER` menu (`BZR …`) ✅ |
+| Finished mode | `finished`: `auto-clear`/`hold`/`re-alert` ✅ | — | `Timer finished mode` select ✅ | `TIMER` menu (`FIN …`) ✅ |
+| Per-state icons | `icon_idle`/`icon_running`/`icon_paused`/`icon_finished` ✅ | `timer_icon_idle` … `timer_icon_finished` ✅ | — (mirrored to retained `{prefix}/timer/icons`) | — |
+
+### Behavior-tuning knobs (NVS `"awtrix"`, table `TIMER_SETTINGS_DESCS`)
+
+| Item | API / MQTT key | dev.json | Home Assistant | On-device |
+|------|----------------|----------|----------------|-----------|
+| Finished hold (1–300 s, dflt 10) | `finished_hold` ✅ | `timer_finished_hold` ✅ | — | `TIMER` menu (`CLEAR`) ✅ |
+| Re-alert interval (5–300 s, dflt 15) | `realert_interval` ✅ | `timer_realert_interval` ✅ | 👁 attr on finished select | `TIMER` menu (`ALERT`) ✅ |
+| Countdown window (0–30 s, dflt 3) | `countdown_seconds` ✅ | `timer_countdown_seconds` ✅ | — | `TIMER` menu (`CDOWN`) ✅ |
+| Max duration (1–604800 s, dflt 86400) | `max_duration` ✅ | `timer_max_duration` ✅ | — | — (caps config editor) |
+| Remaining publish interval (1–60 s, dflt 1) | `remaining_publish_interval` ✅ | `timer_remaining_publish_interval` ✅ | — (governs sensor cadence) | — |
+| App config timeout (5–300 s, dflt 30) | `app_config_timeout` ✅ | `timer_app_config_timeout` ✅ | — | — (governs editor idle) |
+| Icon enabled (dflt true) | `icon_enabled` ✅ | `timer_icon_enabled` ✅ | — | `TIMER` menu (`ICON`) ✅ |
+| Bar enabled (dflt true) | `bar_enabled` ✅ | `timer_bar_enabled` ✅ | — | `TIMER` menu (`BAR`) ✅ |
+| Bar color (hex / `#RRGGBB`, dflt 0 = text color) | `bar_color` ✅ | `timer_bar_color` ✅ | — | — |
+| Tick melody (dflt `timer_tick`) | `melody_tick` ✅ | `timer_melody_tick` ✅ | — | — |
+| End melody (dflt `timer_end`) | `melody_end` ✅ | `timer_melody_end` ✅ | — | — |
+
+### Multi-device sync (local identity; never propagated to peers)
+
+| Item | API / MQTT key | dev.json | Home Assistant | On-device |
+|------|----------------|----------|----------------|-----------|
+| Sync follow (dflt false) | `sync_follow` ✅ | `timer_sync_follow` ✅ | — | — |
+| Sync targets (`all` / CSV, dflt empty) | `sync_targets` ✅ | `timer_sync_targets` ✅ | — | — |
+
+### Master enable
+
+| Item | API / MQTT | dev.json | Home Assistant | On-device |
+|------|------------|----------|----------------|-----------|
+| Show timer (dflt true) | `enabled` 👁 (GET); POST→409 & topic ignored when off | `show_timer` ✅ | — (8 entities pruned when off) | web settings `TIMER` toggle (NVS) |
+
+---
+
 ## MQTT command topic
 
 ```
