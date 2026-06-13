@@ -499,8 +499,14 @@ void MenuManager_::selectButtonLong()
             saveSettings();
             break;
         case TimerConfigMenu:
-            TimerManager.persistConfig();     // flush enum edits deferred during scroll ("timer" ns, ADR-0008)
-            saveSettings();                   // table-backed knob/toggle keys ("awtrix" ns)
+            {
+                // The long-press commit is one PersistBatch window (PRD #29):
+                // scope exit flushes enum edits deferred during scroll ("timer"
+                // ns, iff any) then the table-backed knob/toggle keys ("awtrix"
+                // ns), the same commit seam parseCommand uses.
+                TimerManager_::PersistBatch batch(TimerManager);
+                batch.markTableDirty();
+            }
             TimerManager.broadcastConfig();   // propagate the committed timer config to peers
             break;
         default:

@@ -99,3 +99,15 @@ alternatives:
   the commit now discards enum edits too (uniform with the knobs).
 - No NVS format change; no new HA entities; the per-slot step sizes from ADR-0003 decision 5
   are preserved (now data in the table).
+
+**Addendum — the commit endpoint is now a `PersistBatch` window (PRD #29, #45).**
+`TimerManager::persistConfig()` is retired. The long-press commit opens the (now public)
+`TimerManager_::PersistBatch` RAII guard — the same commit seam `parseCommand`'s apply block
+uses — whose scope exit flushes the deferred enum edits (`"timer"` namespace, iff a
+`persist=false` edit marked the member state dirty during the scroll session) and then the
+table-backed half (`"awtrix"` namespace via `markTableDirty()` → `saveSettings()`), each at
+most once. The per-call `persist=false` flag and the deferred-to-commit behaviour above are
+unchanged; only the commit endpoint moved. The "stateful bracket spanning the menu session"
+rejected above stays rejected: the guard's window is the commit itself, not the session —
+scroll edits still ride the stateless per-call flag, with the dirty bit recording that a
+flush is owed.
