@@ -239,10 +239,13 @@ to the vendored ArduinoHA `HASelect` (see [PRD #17](https://github.com/ltloopy/a
 A retained `{"realert_interval":N}` is published to that topic, so HA surfaces
 the configured re-alert cadence as an attribute on the finished-mode entity. It
 goes out at discovery-enable and on every MQTT (re)connect, right after the
-finished-mode value; being retained, it survives an HA or broker restart with no
-extra publish. The value tracks `TIMER_REALERT_INTERVAL` (only meaningful while
-finished mode is `re-alert`); it is read-only from HA — change the interval via
-the `realert_interval` command key, `dev.json`, or the on-device `TIMER` menu.
+finished-mode value, and is republished promptly whenever the `realert_interval`
+command key is applied — locally or via a synced peer's propagated config
+snapshot — so HA always reflects the device's real cadence; being retained, it
+also survives an HA or broker restart with no extra publish. The value tracks
+`TIMER_REALERT_INTERVAL` (only meaningful while finished mode is `re-alert`); it
+is read-only from HA — change the interval via the `realert_interval` command
+key, `dev.json`, or the on-device `TIMER` menu.
 
 ---
 

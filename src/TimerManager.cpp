@@ -665,6 +665,7 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     //    publish-aware setters. --
     bool snapshotChanged = false;   // any config-block (inSnapshot) table key -> broadcastConfig()
     bool melodyChanged   = false;
+    bool realertChanged  = false;   // realert_interval -> finished-mode attribute republish
     {
         PersistBatch batch(*this);
         for (size_t i = 0; i < TIMER_SETTINGS_DESC_COUNT; ++i)
@@ -674,6 +675,7 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
             if (timerSettingStore(d, tableStaged[i])) batch.markTableDirty();
             if (d.inSnapshot) snapshotChanged = true;
             if (strcmp(d.cmdKey, "melody_tick") == 0 || strcmp(d.cmdKey, "melody_end") == 0) melodyChanged = true;
+            if (strcmp(d.cmdKey, "realert_interval") == 0) realertChanged = true;
         }
         if (haveDuration) setDuration(durSecs);   // pre-validated in range
         for (size_t i = 0; i < TIMER_MEMBER_CONFIG_DESC_COUNT; ++i)
@@ -681,6 +683,11 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     }
 
     if (melodyChanged) loadMelodiesCached();
+    // The re-alert cadence is a JSON attribute of the finished-mode select (issue
+    // #51), not a wire row with its own setter, so republish it here when the key
+    // applied. Fires on the remote-apply path too (it is not _remoteApply-gated),
+    // keeping each synced peer's HA attribute consistent with no extra code (#52).
+    if (realertChanged) publishFinishedAttributes();
 
     if (haveAction)
     {

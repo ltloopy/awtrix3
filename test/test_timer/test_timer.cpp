@@ -1670,6 +1670,29 @@ void test_S6_sync_off_never_broadcasts(void) {
     TEST_ASSERT_EQUAL_INT(0, fixture::sync_packet_count());
 }
 
+// S7 — a peer-propagated config snapshot carrying realert_interval reaches this
+// clock through applySyncCommand -> parseCommand (the remote-apply path) and
+// fires the SAME finished-mode attribute republish a local edit does, so a
+// synced peer's HA tracks the cadence with no extra code (issue #52 / PRD #17).
+// The republish is intentionally NOT _remoteApply-gated; the one-hop guard only
+// stops re-broadcast, which this also asserts (sync_packet_count stays 0).
+void test_S7_remote_realert_interval_republishes_finished_attribute(void) {
+    SHOW_TIMER = true;
+    TIMER_SYNC_FOLLOW  = true;
+    TIMER_SYNC_TARGETS = "all";   // this clock would relay its own local edits
+    fixture::advance(1000);       // millis() > 0 so the dedup TTL math is well-defined
+
+    TimerManager.applySyncCommand(
+        "{\"_sync\":{\"src\":\"awtrix_o\",\"seq\":7,\"tgt\":\"all\"},\"realert_interval\":99}");
+
+    TEST_ASSERT_EQUAL_UINT16(99, TIMER_REALERT_INTERVAL);   // remote snapshot applied
+    const PublishCall *attr = fixture::last_publish(fixture::TIMER_FINISHED_ATTR_TOPIC);
+    TEST_ASSERT_NOT_NULL(attr);
+    TEST_ASSERT_EQUAL_STRING("{\"realert_interval\":99}", attr->payload.c_str());
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_FINISHED_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(0, fixture::sync_packet_count());  // one-hop: applied, never relayed
+}
+
 // ============================================================================
 // U51 — Editing duration while Paused resets the timer to Idle with the new
 // duration (remaining follows the new full duration; state publish == "idle").
@@ -2731,6 +2754,39 @@ void test_W13_publishFinishedAttributes_emits_current_realert_interval(void) {
     TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_FINISHED_TOPIC));
 }
 
+// ============================================================================
+// W14 — realert_interval change republishes the finished-mode attribute
+// (issue #52 / PRD #17): a config command carrying a new realert_interval makes
+// parseCommand fire publishFinishedAttributes(), so HA's view of the cadence
+// tracks the device. The attribute payload reflects the JUST-applied value
+// (read live from TIMER_REALERT_INTERVAL after the table store), proving the
+// republish happens after the apply, not before. Same parseCommand-driven
+// validate→apply→publish chain W6/W7 exercise for the enum keys.
+// ============================================================================
+void test_W14_realert_interval_change_republishes_finished_attribute(void) {
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.parseCommand("{\"realert_interval\":42}")));
+
+    const PublishCall *attr = fixture::last_publish(fixture::TIMER_FINISHED_ATTR_TOPIC);
+    TEST_ASSERT_NOT_NULL(attr);
+    TEST_ASSERT_EQUAL_STRING("{\"realert_interval\":42}", attr->payload.c_str());
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_FINISHED_ATTR_TOPIC));
+}
+
+// ============================================================================
+// W15 — the attribute republish is keyed precisely on realert_interval (issue
+// #52): a config command that edits OTHER keys — including the finished-mode
+// select and its sibling tuning row finished_hold — leaves the attribute topic
+// silent. Pins that the trigger is "realert_interval applied", not "any config
+// change", so unrelated edits don't churn the retained attribute.
+// ============================================================================
+void test_W15_config_without_realert_interval_does_not_republish_attribute(void) {
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.parseCommand("{\"finished\":\"hold\",\"finished_hold\":42}")));
+
+    TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_FINISHED_ATTR_TOPIC));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
@@ -2803,6 +2859,7 @@ int main(int, char **) {
     RUN_TEST(test_S4_applySyncCommand_gating);
     RUN_TEST(test_S5_remote_apply_does_not_rebroadcast);
     RUN_TEST(test_S6_sync_off_never_broadcasts);
+    RUN_TEST(test_S7_remote_realert_interval_republishes_finished_attribute);
     RUN_TEST(test_T1_table_uintrange_boundaries);
     RUN_TEST(test_T2_table_strict_types);
     RUN_TEST(test_T3_table_bespoke_validators);
@@ -2848,5 +2905,7 @@ int main(int, char **) {
     RUN_TEST(test_W11_noop_duration_and_icon_sets_do_not_publish);
     RUN_TEST(test_W12_publishAllWire_each_artifact_exactly_once);
     RUN_TEST(test_W13_publishFinishedAttributes_emits_current_realert_interval);
+    RUN_TEST(test_W14_realert_interval_change_republishes_finished_attribute);
+    RUN_TEST(test_W15_config_without_realert_interval_does_not_republish_attribute);
     return UNITY_END();
 }
