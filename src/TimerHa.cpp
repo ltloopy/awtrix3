@@ -87,3 +87,11 @@ void formatTimerHaDataTopic(const char *dataPrefix, const char *deviceUniqueId,
     // "stat_t" is ArduinoHA's HAStateTopic suffix; see the contract in TimerHa.h.
     snprintf(out, outLen, "%s/%s/%s/stat_t", dataPrefix, deviceUniqueId, entityId);
 }
+
+void formatTimerHaAttrTopic(const char *dataPrefix, const char *deviceUniqueId,
+                            const char *entityId, char *out, size_t outLen)
+{
+    // "json_attr_t" is ArduinoHA's HAJsonAttributesTopic suffix; see the contract
+    // in TimerHa.h.
+    snprintf(out, outLen, "%s/%s/%s/json_attr_t", dataPrefix, deviceUniqueId, entityId);
+}

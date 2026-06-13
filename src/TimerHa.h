@@ -62,4 +62,13 @@ void formatTimerHaEntityId(const TimerHaDescriptor &d, const char *macSuffix, ch
 void formatTimerHaDataTopic(const char *dataPrefix, const char *deviceUniqueId,
                             const char *entityId, char *out, size_t outLen);
 
+// The finished-mode select's JSON-attributes data topic:
+// "{dataPrefix}/{deviceUniqueId}/{entityId}/json_attr_t". Same data-topic shape
+// as formatTimerHaDataTopic but with ArduinoHA's HAJsonAttributesTopic suffix
+// ("json_attr_t") — MUST stay byte-identical to what HASelect::setJsonAttributes
+// advertises in the discovery config, since the retained attribute value rides
+// the wire seam to this exact topic. Pinned by test W13.
+void formatTimerHaAttrTopic(const char *dataPrefix, const char *deviceUniqueId,
+                            const char *entityId, char *out, size_t outLen);
+
 #endif
