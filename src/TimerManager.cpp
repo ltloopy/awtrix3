@@ -658,34 +658,29 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
         if (DEBUG_MODE) DEBUG_PRINTLN("timer: config aborted by inbound command");
     }
 
-    // -- Command is known-good: apply. Table rows first, so TIMER_MAX_DURATION lands
-    //    before setDuration() sees it (ADR-0001 addendum). The table writes globals
-    //    only; they persist to the "awtrix" namespace via saveSettings() below. --
-    bool tableChanged    = false;   // any table key written -> needs saveSettings()
+    // -- Command is known-good: apply, inside ONE PersistBatch window; its scope
+    //    exit commits the whole config (both NVS namespaces, each at most once).
+    //    Table rows first, so TIMER_MAX_DURATION lands before setDuration() sees
+    //    it (ADR-0001 addendum). Then duration (run-state, B1; applied before any
+    //    member-config side effects), then the member-backed applies via their
+    //    publish-aware setters. --
     bool snapshotChanged = false;   // any config-block (inSnapshot) table key -> broadcastConfig()
     bool melodyChanged   = false;
-    for (size_t i = 0; i < TIMER_SETTINGS_DESC_COUNT; ++i)
-    {
-        if (!tablePresent[i]) continue;
-        const TimerSettingDesc &d = TIMER_SETTINGS_DESCS[i];
-        timerSettingStore(d, tableStaged[i]);
-        tableChanged = true;
-        if (d.inSnapshot) snapshotChanged = true;
-        if (strcmp(d.cmdKey, "melody_tick") == 0 || strcmp(d.cmdKey, "melody_end") == 0) melodyChanged = true;
-    }
-
-    // Member-backed applies via publish-aware setters (routed through the member table's
-    // apply hooks); their "timer"-namespace NVS writes are batched by the PersistBatch
-    // guard into one flush on scope exit. duration stays its own call (run-state, B1;
-    // applied first so it lands before any member-config side effects).
     {
         PersistBatch batch(*this);
+        for (size_t i = 0; i < TIMER_SETTINGS_DESC_COUNT; ++i)
+        {
+            if (!tablePresent[i]) continue;
+            const TimerSettingDesc &d = TIMER_SETTINGS_DESCS[i];
+            if (timerSettingStore(d, tableStaged[i])) batch.markTableDirty();
+            if (d.inSnapshot) snapshotChanged = true;
+            if (strcmp(d.cmdKey, "melody_tick") == 0 || strcmp(d.cmdKey, "melody_end") == 0) melodyChanged = true;
+        }
         if (haveDuration) setDuration(durSecs);   // pre-validated in range
         for (size_t i = 0; i < TIMER_MEMBER_CONFIG_DESC_COUNT; ++i)
             if (memberPresent[i]) TIMER_MEMBER_CONFIG_DESCS[i].apply(memberStaged[i]);
     }
 
-    if (tableChanged)  saveSettings();        // persist the "awtrix"-namespace table keys once
     if (melodyChanged) loadMelodiesCached();
 
     if (haveAction)

@@ -135,15 +135,40 @@ bool timerSettingParse(const TimerSettingDesc &d, JsonVariantConst v, TcValue &o
     return false;
 }
 
-void timerSettingStore(const TimerSettingDesc &d, const TcValue &v)
+bool timerSettingStore(const TimerSettingDesc &d, const TcValue &v)
 {
     switch (d.type)
     {
-        case TcType::U16:  *static_cast<uint16_t *>(d.storage) = (uint16_t)v.num; break;
-        case TcType::U32:  *static_cast<uint32_t *>(d.storage) = v.num;           break;
-        case TcType::Bool: *static_cast<bool *>    (d.storage) = v.b;             break;
-        case TcType::Str:  *static_cast<String *>  (d.storage) = v.str;           break;
+        case TcType::U16:
+        {
+            uint16_t *p = static_cast<uint16_t *>(d.storage);
+            if (*p == (uint16_t)v.num) return false;
+            *p = (uint16_t)v.num;
+            return true;
+        }
+        case TcType::U32:
+        {
+            uint32_t *p = static_cast<uint32_t *>(d.storage);
+            if (*p == v.num) return false;
+            *p = v.num;
+            return true;
+        }
+        case TcType::Bool:
+        {
+            bool *p = static_cast<bool *>(d.storage);
+            if (*p == v.b) return false;
+            *p = v.b;
+            return true;
+        }
+        case TcType::Str:
+        {
+            String *p = static_cast<String *>(d.storage);
+            if (*p == v.str) return false;
+            *p = v.str;
+            return true;
+        }
     }
+    return false;
 }
 
 void timerSettingsLoadNvs(Preferences &prefs)

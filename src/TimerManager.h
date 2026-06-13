@@ -12,6 +12,10 @@
 // status code — MQTT ignores it. See docs/adr/0001-timer-command-validation-parity.md.
 enum class TimerCmdResult : uint8_t { Ok = 0, BadJson = 1, BadField = 2, Disabled = 3 };
 
+// Globals.cpp's full "awtrix"-namespace flush (declared in Globals.h, repeated
+// here so the PersistBatch guard below can perform the table-half commit).
+void saveSettings();
+
 class TimerManager_
 {
 private:
@@ -48,10 +52,12 @@ private:
     bool _dirty          = false;
 
     // RAII guard that makes the persist-batching window a visible lexical scope
-    // (PRD #29). Construction suspends member-backed persistence; scope exit
-    // flushes the "timer" NVS namespace exactly once iff a setter dirtied state
-    // during the window, then clears the suspend/dirty state. Exceptions are off
-    // on this target, so "scope exit" means the normal return paths.
+    // (PRD #29). Construction suspends member-backed persistence; scope exit is
+    // the ONE place that commits the whole Timer config, flushing both NVS
+    // namespaces at most once each: the member-backed "timer" namespace iff a
+    // setter dirtied state during the window, then the table-backed "awtrix"
+    // namespace (saveSettings) iff markTableDirty() was called. Exceptions are
+    // off on this target, so "scope exit" means the normal return paths.
     class PersistBatch
     {
     public:
@@ -68,12 +74,18 @@ private:
                 tm._dirty = false;
                 tm.persist();
             }
+            if (tableDirty)
+                saveSettings();
         }
+        // A table-backed ("awtrix"-namespace) value changed inside the window.
+        void markTableDirty() { tableDirty = true; }
+
         PersistBatch(const PersistBatch &) = delete;
         PersistBatch &operator=(const PersistBatch &) = delete;
 
     private:
         TimerManager_ &tm;
+        bool tableDirty = false;
     };
 
     // -- Propagation surface (device-to-device timer sync) --
