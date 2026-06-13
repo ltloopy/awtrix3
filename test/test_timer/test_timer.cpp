@@ -2086,8 +2086,8 @@ void test_M6_label_formatting(void) {
 }
 
 // M7 — an enum adjust applies + publishes live but DEFERS the NVS write; the write
-// happens only on the commit (persistConfig). Proven via Preferences::begin_calls
-// (persist() brackets a begin("timer")). See ADR-0008.
+// happens only on the long-press commit (the PersistBatch guard, #45). Proven via
+// Preferences::begin_calls (persist() brackets a begin("timer")). See ADR-0008.
 void test_M7_enum_adjust_defers_persist_until_commit(void) {
     TimerManager.setBuzzerMode(BuzzerMode::End);   // known starting point (default persist)
     int before = Preferences::begin_calls;
@@ -2096,7 +2096,9 @@ void test_M7_enum_adjust_defers_persist_until_commit(void) {
     TEST_ASSERT_EQUAL_UINT8((uint8_t)BuzzerMode::Countdown, (uint8_t)TimerManager.getBuzzerMode());
     TEST_ASSERT_EQUAL_INT(before, Preferences::begin_calls);   // no "timer"-ns write yet
 
-    TimerManager.persistConfig();
+    {
+        TimerManager_::PersistBatch batch(TimerManager);       // the commit seam
+    }
     TEST_ASSERT_TRUE(Preferences::begin_calls > before);       // commit flushed it
 }
 
@@ -2113,6 +2115,33 @@ void test_M8_enum_labels_source_from_codec(void) {
         TimerManager.setFinishedMode((FinishedMode)i);
         TEST_ASSERT_EQUAL_STRING(TIMER_FINISHED_CODEC[i].menu, timerMenuLabel(2).c_str());
     }
+}
+
+// M9 — the TIMER-menu long-press commit is ONE PersistBatch window (#45): enum
+// edits deferred during scroll ("timer" ns) and table-row edits ("awtrix" ns)
+// persist together at scope exit, exactly one flush per namespace. Mirrors
+// MenuManager's TimerConfigMenu commit seam (device-only; stubbed here).
+void test_M9_menu_commit_one_persistbatch_flushes_both_namespaces(void) {
+    saveSettings_calls = 0;
+    int before = Preferences::begin_calls;
+
+    timerMenuAdjust(0, +1);   // buzzer End -> Countdown: applies live, persist deferred
+    timerMenuAdjust(3, +1);   // finished_hold 10 -> 15: table row, RAM only
+    TEST_ASSERT_EQUAL_INT(0, Preferences::begin_calls - before);   // no "timer" write during scroll
+    TEST_ASSERT_EQUAL_INT(0, saveSettings_calls);                  // no "awtrix" write during scroll
+
+    {   // the long-press commit: scope exit flushes both namespaces together
+        TimerManager_::PersistBatch batch(TimerManager);
+        batch.markTableDirty();
+    }
+    TEST_ASSERT_EQUAL_INT(1, Preferences::begin_calls - before);   // one "timer" flush
+    TEST_ASSERT_EQUAL_INT(1, saveSettings_calls);                  // one "awtrix" flush
+    TEST_ASSERT_EQUAL_UINT16(15, TIMER_FINISHED_HOLD);
+
+    // The deferred enum edit actually reached NVS: reboot round-trip (same
+    // precedent as U57 — setup() reloads from Preferences).
+    TimerManager.setup();
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)BuzzerMode::Countdown, (uint8_t)TimerManager.getBuzzerMode());
 }
 
 // ============================================================================
@@ -2738,6 +2767,7 @@ int main(int, char **) {
     RUN_TEST(test_M6_label_formatting);
     RUN_TEST(test_M7_enum_adjust_defers_persist_until_commit);
     RUN_TEST(test_M8_enum_labels_source_from_codec);
+    RUN_TEST(test_M9_menu_commit_one_persistbatch_flushes_both_namespaces);
     RUN_TEST(test_T9_codec_tables_well_formed);
     RUN_TEST(test_T10_codec_roundtrip_aliases_and_case);
     RUN_TEST(test_CE1_enter_decomposes_and_activates);

@@ -49,44 +49,11 @@ private:
     TimerConfigEditor configEditor;
 
     bool _suspendPersist = false;
+    // Member-backed RAM state differs from the "timer" NVS namespace: set by a
+    // suspended persistIfDirty() inside a PersistBatch window, or by a deferred
+    // (persist=false) enum edit during a TIMER-menu scroll session. Cleared by
+    // the flush that writes it (persistIfDirty / PersistBatch scope exit).
     bool _dirty          = false;
-
-    // RAII guard that makes the persist-batching window a visible lexical scope
-    // (PRD #29). Construction suspends member-backed persistence; scope exit is
-    // the ONE place that commits the whole Timer config, flushing both NVS
-    // namespaces at most once each: the member-backed "timer" namespace iff a
-    // setter dirtied state during the window, then the table-backed "awtrix"
-    // namespace (saveSettings) iff markTableDirty() was called. Exceptions are
-    // off on this target, so "scope exit" means the normal return paths.
-    class PersistBatch
-    {
-    public:
-        explicit PersistBatch(TimerManager_ &tm) : tm(tm)
-        {
-            tm._suspendPersist = true;
-            tm._dirty = false;
-        }
-        ~PersistBatch()
-        {
-            tm._suspendPersist = false;
-            if (tm._dirty)
-            {
-                tm._dirty = false;
-                tm.persist();
-            }
-            if (tableDirty)
-                saveSettings();
-        }
-        // A table-backed ("awtrix"-namespace) value changed inside the window.
-        void markTableDirty() { tableDirty = true; }
-
-        PersistBatch(const PersistBatch &) = delete;
-        PersistBatch &operator=(const PersistBatch &) = delete;
-
-    private:
-        TimerManager_ &tm;
-        bool tableDirty = false;
-    };
 
     // -- Propagation surface (device-to-device timer sync) --
     // While true, an inbound sync packet is being applied via parseCommand; the
@@ -117,6 +84,46 @@ private:
     static String validateIconName(const String &name);
 
 public:
+    // RAII guard that makes the persist-batching window a visible lexical scope
+    // (PRD #29) — the ONE commit seam shared by both batch call sites:
+    // parseCommand's apply block and the TIMER menu's long-press commit
+    // (MenuManager). While the guard lives, member-backed persistence is
+    // suspended; scope exit commits the whole Timer config, flushing both NVS
+    // namespaces at most once each: the member-backed "timer" namespace iff RAM
+    // holds uncommitted member state (a setter dirtied it inside the window, or
+    // deferred persist=false menu edits dirtied it beforehand), then the
+    // table-backed "awtrix" namespace (saveSettings) iff markTableDirty() was
+    // called. Exceptions are off on this target, so "scope exit" means the
+    // normal return paths.
+    class PersistBatch
+    {
+    public:
+        explicit PersistBatch(TimerManager_ &tm) : tm(tm)
+        {
+            tm._suspendPersist = true;
+        }
+        ~PersistBatch()
+        {
+            tm._suspendPersist = false;
+            if (tm._dirty)
+            {
+                tm._dirty = false;
+                tm.persist();
+            }
+            if (tableDirty)
+                saveSettings();
+        }
+        // A table-backed ("awtrix"-namespace) value changed inside the window.
+        void markTableDirty() { tableDirty = true; }
+
+        PersistBatch(const PersistBatch &) = delete;
+        PersistBatch &operator=(const PersistBatch &) = delete;
+
+    private:
+        TimerManager_ &tm;
+        bool tableDirty = false;
+    };
+
     static TimerManager_ &getInstance();
     void setup();
     void tick();
@@ -131,10 +138,6 @@ public:
     // caller uses the default and persists immediately. See docs/adr/0008.
     void setBuzzerMode(BuzzerMode m, bool persist = true);
     void setFinishedMode(FinishedMode m, bool persist = true);
-
-    // Flush the member-backed config block ("timer" NVS namespace) to storage. Used
-    // by the TIMER menu commit to write enum edits deferred during scroll (ADR-0008).
-    void persistConfig();
 
     // Time <-> seconds helpers shared by the MQTT/HA string path and the
     // on-device config editor. parseHMS/formatHMS are the external string

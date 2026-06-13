@@ -6,9 +6,9 @@
 namespace
 {
     // Enum hooks. The setters defer the NVS write (persist=false): the TIMER menu
-    // applies + publishes live during scroll and persists on the long-press commit
-    // via TimerManager::persistConfig() (ADR-0008). Non-capturing lambdas decay to
-    // the row's function pointers.
+    // applies + publishes live during scroll and persists on the long-press
+    // commit, where MenuManager opens the PersistBatch guard (ADR-0008 as amended
+    // by PRD #29 / #45). Non-capturing lambdas decay to the row's function pointers.
     uint8_t getBuzzer()        { return (uint8_t)TimerManager.getBuzzerMode(); }
     void    setBuzzer(uint8_t v) { TimerManager.setBuzzerMode((BuzzerMode)v, /*persist=*/false); }
     uint8_t getFinished()      { return (uint8_t)TimerManager.getFinishedMode(); }

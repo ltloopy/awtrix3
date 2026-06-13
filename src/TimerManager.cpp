@@ -68,6 +68,8 @@ void TimerManager_::setup()
     remainingSec = durationSec;
     state = TimerState::Idle;
     configEditor.exit();   // a (re)boot is never mid-edit; discard any editor state (return unused)
+    _suspendPersist = false;
+    _dirty = false;        // just loaded from NVS: RAM matches it, nothing pending
 
     loadMelodiesCached();
 }
@@ -474,6 +476,7 @@ void TimerManager_::setBuzzerMode(BuzzerMode m, bool persist)
     if (buzzerMode == m) return;
     buzzerMode = m;
     if (persist) persistIfDirty();
+    else _dirty = true;   // deferred edit: pending until the next PersistBatch commit
     publishBuzzerMode();
 }
 
@@ -482,12 +485,8 @@ void TimerManager_::setFinishedMode(FinishedMode m, bool persist)
     if (finishedMode == m) return;
     finishedMode = m;
     if (persist) persistIfDirty();
+    else _dirty = true;   // deferred edit: pending until the next PersistBatch commit
     publishFinishedMode();
-}
-
-void TimerManager_::persistConfig()
-{
-    persist();
 }
 
 void TimerManager_::tick()

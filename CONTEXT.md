@@ -77,9 +77,11 @@ kinds:
 All seven slots share one commit model (ADR-0008, superseding ADR-0003's split): each slot
 **applies to RAM live** while scrolling — and enum slots also **publish** live, so HA
 reflects them — but the **NVS write and the peer broadcast happen only on the long-press
-commit** (`TimerManager::persistConfig()` for the enum half, `saveSettings()` for the table
-half, then `broadcastConfig()`). Enum slots defer their NVS write via the `persist=false`
-argument on `setBuzzerMode`/`setFinishedMode` (sibling to `setIcon*`'s `publish` flag).
+commit**: one `PersistBatch` window (the same commit seam `parseCommand` uses, PRD #29)
+whose scope exit flushes deferred enum edits to the `"timer"` namespace and the table half
+to `"awtrix"` (`saveSettings()`), then `broadcastConfig()`. Enum slots defer their NVS
+write via the `persist=false` argument on `setBuzzerMode`/`setFinishedMode` (sibling to
+`setIcon*`'s `publish` flag).
 
 _Avoid_: calling this the "Timer-app config mode" (that is the separate HH/MM/SS duration
 editor) or implying enum edits persist per-press (they no longer do, per ADR-0008).
