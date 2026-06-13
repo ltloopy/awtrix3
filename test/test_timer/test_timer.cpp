@@ -504,6 +504,53 @@ void test_U57_parseCommand_multikey_stores_correct_values(void) {
 }
 
 // ============================================================================
+// U58 (#44) — a table-only payload whose value equals current state causes no
+// "awtrix" write; a genuinely changed value still flushes exactly once.
+// ============================================================================
+void test_U58_parseCommand_noop_table_value_skips_awtrix_write(void) {
+    // Equals the setUp default (TIMER_FINISHED_HOLD = 10) -> nothing changed.
+    saveSettings_calls = 0;
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"finished_hold\":10}")));
+    TEST_ASSERT_EQUAL_INT(0, saveSettings_calls);
+    TEST_ASSERT_EQUAL_UINT16(10, TIMER_FINISHED_HOLD);
+
+    // A real change still flushes the "awtrix" namespace once.
+    saveSettings_calls = 0;
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"finished_hold\":42}")));
+    TEST_ASSERT_EQUAL_INT(1, saveSettings_calls);
+    TEST_ASSERT_EQUAL_UINT16(42, TIMER_FINISHED_HOLD);
+}
+
+// ============================================================================
+// U59 (#44) — a mixed payload (member-backed + table keys) yields exactly one
+// flush per NVS namespace: one "timer" flush (Preferences begin/end) and one
+// "awtrix" flush (saveSettings), with correct final stored values in both.
+// ============================================================================
+void test_U59_parseCommand_mixed_payload_one_flush_per_namespace(void) {
+    saveSettings_calls = 0;
+    int begin_at_start = Preferences::begin_calls;
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand(
+                          "{\"buzzer\":\"countdown\",\"icon_idle\":\"a\",\"finished_hold\":42}")));
+
+    TEST_ASSERT_EQUAL_INT(1, Preferences::begin_calls - begin_at_start);  // one "timer" flush
+    TEST_ASSERT_EQUAL_INT(1, saveSettings_calls);                          // one "awtrix" flush
+
+    // Table half landed in its storage global (snapshotted by saveSettings).
+    TEST_ASSERT_EQUAL_UINT16(42, TIMER_FINISHED_HOLD);
+
+    // Member half landed in the "timer" namespace: reboot round-trip (same
+    // precedent as U57 — setup() reloads from Preferences).
+    TimerManager.setup();
+    TEST_ASSERT_EQUAL(static_cast<int>(BuzzerMode::Countdown),
+                      static_cast<int>(TimerManager.getBuzzerMode()));
+    TEST_ASSERT_EQUAL_STRING("a", TimerManager.getIconIdle().c_str());
+}
+
+// ============================================================================
 // U22 (M1) — parseCommand while in config: drop partial edit, drain deferred,
 // accept command. The partial edit must NOT be committed to durationSec.
 // ============================================================================
@@ -792,10 +839,12 @@ void test_U38_parseCommand_tuning_change_persists_via_saveSettings(void) {
                       static_cast<int>(TimerManager.parseCommand("{\"finished_hold\":42}")));
     TEST_ASSERT_EQUAL_INT(1, saveSettings_calls);
 
-    // Mode-only / duration-only commands do not touch awtrix Settings.
+    // Member-only commands (every member-backed kind: both enum modes, an icon,
+    // duration) do not touch awtrix Settings even when they change values (#44).
     saveSettings_calls = 0;
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
-                      static_cast<int>(TimerManager.parseCommand("{\"buzzer\":\"off\",\"duration\":120}")));
+                      static_cast<int>(TimerManager.parseCommand(
+                          "{\"buzzer\":\"off\",\"finished\":\"hold\",\"icon_idle\":\"x\",\"duration\":120}")));
     TEST_ASSERT_EQUAL_INT(0, saveSettings_calls);
 
     // Rejected command does not call saveSettings.
@@ -2624,6 +2673,8 @@ int main(int, char **) {
     RUN_TEST(test_U55_parseCommand_rejected_payload_persists_nothing);
     RUN_TEST(test_U56_parseCommand_noop_payload_does_not_write_nvs);
     RUN_TEST(test_U57_parseCommand_multikey_stores_correct_values);
+    RUN_TEST(test_U58_parseCommand_noop_table_value_skips_awtrix_write);
+    RUN_TEST(test_U59_parseCommand_mixed_payload_one_flush_per_namespace);
     RUN_TEST(test_U22_parseCommand_aborts_config_without_committing_edit);
     RUN_TEST(test_U23_formatHMS_trimmed);
     RUN_TEST(test_U24_parseHMS_accepts);

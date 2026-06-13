@@ -56,7 +56,9 @@ extern const size_t           TIMER_SETTINGS_DESC_COUNT;
 bool timerSettingParse(const TimerSettingDesc &d, JsonVariantConst v, TcValue &out);
 
 // Write a previously-parsed value to the descriptor's storage (dispatch on type).
-void timerSettingStore(const TimerSettingDesc &d, const TcValue &v);
+// Equality-skip: returns true iff the stored value actually changed, so callers
+// can elide the "awtrix" flush for no-op writes (mirrors the member setters).
+bool timerSettingStore(const TimerSettingDesc &d, const TcValue &v);
 
 // NVS round-trip for the whole table (caller brackets begin()/end()).
 void timerSettingsLoadNvs(class Preferences &prefs);
