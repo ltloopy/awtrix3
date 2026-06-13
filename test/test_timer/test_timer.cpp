@@ -1953,6 +1953,19 @@ void test_T8_member_config_validate_and_snapshot_roundtrip(void) {
 // 5 icon, 6 bar. See docs/adr/0008.
 // ============================================================================
 
+// Shared cmdKey-resolution guard for the slot-table integrity tests (issue #49):
+// resolves a table-backed slot's cmdKey exactly the way the production menu code
+// does (timerSettingByCmdKey); on a miss, formats a diagnostic into msg naming
+// the slot index, its label prefix, and the unresolved key.
+static const TimerSettingDesc *resolveSlotCmdKey(const TimerMenuSlot &s, size_t idx,
+                                                 char *msg, size_t msgLen) {
+    const TimerSettingDesc *d = s.cmdKey ? timerSettingByCmdKey(s.cmdKey) : nullptr;
+    if (!d)
+        snprintf(msg, msgLen, "slot %u (%s): cmdKey \"%s\" not in TIMER_SETTINGS_DESCS",
+                 (unsigned)idx, s.prefix ? s.prefix : "?", s.cmdKey ? s.cmdKey : "(null)");
+    return d;
+}
+
 // M1 — table is well-formed: 7 slots, every slot labels, and each table-backed
 // slot's cmdKey resolves to a descriptor whose type matches the slot kind (so the
 // menu can't reference a key the settings table doesn't back, ADR-0007).
@@ -1969,20 +1982,37 @@ void test_M1_slot_table_well_formed(void) {
                 TEST_ASSERT_NOT_NULL((void *)s.setEnum);
                 break;
             case TimerMenuKind::SteppedRange: {
-                const TimerSettingDesc *d = timerSettingByCmdKey(s.cmdKey);
-                TEST_ASSERT_NOT_NULL(d);
+                char msg[120];
+                const TimerSettingDesc *d = resolveSlotCmdKey(s, i, msg, sizeof(msg));
+                TEST_ASSERT_NOT_NULL_MESSAGE(d, msg);
                 TEST_ASSERT_TRUE(d->type == TcType::U16);
                 TEST_ASSERT_TRUE(s.step > 0);
                 break;
             }
             case TimerMenuKind::BoolToggle: {
-                const TimerSettingDesc *d = timerSettingByCmdKey(s.cmdKey);
-                TEST_ASSERT_NOT_NULL(d);
+                char msg[120];
+                const TimerSettingDesc *d = resolveSlotCmdKey(s, i, msg, sizeof(msg));
+                TEST_ASSERT_NOT_NULL_MESSAGE(d, msg);
                 TEST_ASSERT_TRUE(d->type == TcType::Bool);
                 break;
             }
         }
     }
+}
+
+// M10 — negative proof for the M1 resolution guard (issue #49): a deliberately
+// unresolvable cmdKey is caught by the same resolveSlotCmdKey path the M1 table
+// walk uses, and the diagnostic names the slot (index + label prefix) and the
+// offending key. The synthetic slot lives only here; TIMER_MENU_SLOTS is untouched.
+void test_M10_unresolved_cmdkey_guard_fires_and_names_slot(void) {
+    const TimerMenuSlot bogus = {TimerMenuKind::BoolToggle, "no_such_key", "BOGUS ",
+                                 0, nullptr, 0, nullptr, nullptr};
+    char msg[120] = "";
+    const TimerSettingDesc *d = resolveSlotCmdKey(bogus, 99, msg, sizeof(msg));
+    TEST_ASSERT_NULL(d);                                // the guard fires...
+    TEST_ASSERT_NOT_NULL(strstr(msg, "slot 99"));       // ...naming the slot...
+    TEST_ASSERT_NOT_NULL(strstr(msg, "BOGUS"));
+    TEST_ASSERT_NOT_NULL(strstr(msg, "no_such_key"));   // ...and the key.
 }
 
 // M2 — enum slots cycle both ways and route through the real TimerManager setter
@@ -2760,6 +2790,7 @@ int main(int, char **) {
     RUN_TEST(test_T7_member_config_table_well_formed);
     RUN_TEST(test_T8_member_config_validate_and_snapshot_roundtrip);
     RUN_TEST(test_M1_slot_table_well_formed);
+    RUN_TEST(test_M10_unresolved_cmdkey_guard_fires_and_names_slot);
     RUN_TEST(test_M2_enum_cycle_wraps_and_routes_via_setter);
     RUN_TEST(test_M3_stepped_range_saturates);
     RUN_TEST(test_M4_bool_toggle_flips_both_directions);
