@@ -2709,6 +2709,28 @@ void test_W12_publishAllWire_each_artifact_exactly_once(void) {
         fixture::last_publish(fixture::TIMER_ICONS_TOPIC)->payload.c_str());
 }
 
+// ============================================================================
+// W13 — finished-mode JSON attributes (issue #51 / PRD #17): the finished
+// select carries the re-alert cadence as a read-only HA attribute.
+// publishFinishedAttributes() puts a well-formed {"realert_interval":N} — the
+// CURRENT TIMER_REALERT_INTERVAL, not a hardcoded default — on the select's
+// json_attr_t topic via the wire seam. The expected topic is the fixture
+// literal (the json_attr_t sibling of TIMER_FINISHED_TOPIC), spelled
+// independently of the TimerHa builders, so a wrong-topic regression fails here.
+// ============================================================================
+void test_W13_publishFinishedAttributes_emits_current_realert_interval(void) {
+    TIMER_REALERT_INTERVAL = 42;  // a non-default value, to prove it's read live
+
+    TimerManager.publishFinishedAttributes();
+
+    const PublishCall *attr = fixture::last_publish(fixture::TIMER_FINISHED_ATTR_TOPIC);
+    TEST_ASSERT_NOT_NULL(attr);
+    TEST_ASSERT_EQUAL_STRING("{\"realert_interval\":42}", attr->payload.c_str());
+    // Exactly one publish, and only on the attributes topic.
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_FINISHED_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_FINISHED_TOPIC));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
@@ -2825,5 +2847,6 @@ int main(int, char **) {
     RUN_TEST(test_W10_icon_change_publishes_aggregate_json_on_icons_topic);
     RUN_TEST(test_W11_noop_duration_and_icon_sets_do_not_publish);
     RUN_TEST(test_W12_publishAllWire_each_artifact_exactly_once);
+    RUN_TEST(test_W13_publishFinishedAttributes_emits_current_realert_interval);
     return UNITY_END();
 }

@@ -36,6 +36,7 @@ public:
     // canonical data topic — byte-identical to what ArduinoHA emits.
     void publishTimerWire(const char *topic, const char *payload);
     String timerWireTopic(TimerHaEntity slot);
+    String timerFinishedAttrTopic();
     String timerIconsTopic();
     void createTimerHAEntities();
     void enableTimerHADiscovery();

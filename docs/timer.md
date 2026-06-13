@@ -223,13 +223,26 @@ With `HA_DISCOVERY=true`, the firmware advertises eight entities:
 | `{id}_timer_rem`   | `sensor`      | Seconds remaining (read-only, updates every `TIMER_PUBLISH_INTERVAL` s while running). |
 | `{id}_timer_state` | `sensor`      | One of `idle` / `running` / `paused` / `finished`. |
 | `{id}_timer_buz`   | `select`      | Buzzer mode. |
-| `{id}_timer_fin`   | `select`      | Finished mode. |
+| `{id}_timer_fin`   | `select`      | Finished mode. Carries a read-only `realert_interval` JSON attribute (the current `TIMER_REALERT_INTERVAL`, in seconds) so the re-alert cadence is visible in HA without leaving the entity. |
 | `{id}_timer_start` | `button`      | Equivalent to `{"action":"start"}`. |
 | `{id}_timer_pause` | `button`      | Equivalent to `{"action":"pause"}`. |
 | `{id}_timer_reset` | `button`      | Equivalent to `{"action":"reset"}`. |
 
 When the timer is started from `Idle` (and no game is active, no
 blocking-nav app is on screen), the display auto-switches to the Timer app.
+
+### Finished-mode attributes (`realert_interval`)
+
+The finished-mode select opts into a `json_attributes_topic`
+(`{prefix}/{deviceId}/{id}_timer_fin/json_attr_t`) — an opt-in capability added
+to the vendored ArduinoHA `HASelect` (see [PRD #17](https://github.com/ltloopy/awtrix3/issues/17)).
+A retained `{"realert_interval":N}` is published to that topic, so HA surfaces
+the configured re-alert cadence as an attribute on the finished-mode entity. It
+goes out at discovery-enable and on every MQTT (re)connect, right after the
+finished-mode value; being retained, it survives an HA or broker restart with no
+extra publish. The value tracks `TIMER_REALERT_INTERVAL` (only meaningful while
+finished mode is `re-alert`); it is read-only from HA — change the interval via
+the `realert_interval` command key, `dev.json`, or the on-device `TIMER` menu.
 
 ---
 

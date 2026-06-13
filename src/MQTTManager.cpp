@@ -120,6 +120,10 @@ void MQTTManager_::createTimerHAEntities()
     timerFinishedSel->setIcon(dFin.icon);
     timerFinishedSel->setName(dFin.name);
     timerFinishedSel->setState((uint8_t)TimerManager.getFinishedMode(), true);
+    // Opt the finished select into JSON attributes so its discovery config
+    // advertises json_attr_t; the retained {"realert_interval":N} then rides the
+    // wire seam to that topic (issue #51 / PRD #17). No TIMER_HA_DESCRIPTORS change.
+    timerFinishedSel->setJsonAttributes(true);
 
     timerStartBtn = new HAButton(timerHaId(TimerHaEntity::Start));
     timerStartBtn->setIcon(dStart.icon);
@@ -153,6 +157,7 @@ void MQTTManager_::enableTimerHADiscovery()
         mqtt.publishConfigForDeviceType(dt);
 
     TimerManager.publishAllWire();   // every wire artifact, derived from the member table (issue #41)
+    TimerManager.publishFinishedAttributes();   // realert_interval attribute (issue #51)
 }
 
 void MQTTManager_::removeTimerHAEntities()
@@ -651,7 +656,10 @@ void onMqttConnected()
         version->setValue(VERSION);
 
         if (SHOW_TIMER)
+        {
             TimerManager.publishAllWire();   // every wire artifact, derived from the member table (issue #41)
+            TimerManager.publishFinishedAttributes();   // realert_interval attribute (issue #51)
+        }
     }
 
     MQTTManager.publish("stats/effects", DisplayManager.getEffectNames().c_str());
@@ -1013,6 +1021,20 @@ String MQTTManager_::timerWireTopic(TimerHaEntity slot)
     if (!deviceUniqueId) return String();
     char topic[160];
     formatTimerHaDataTopic(MQTT_PREFIX.c_str(), deviceUniqueId, timerHaId(slot), topic, sizeof(topic));
+    return String(topic);
+}
+
+// The finished-mode select's JSON-attributes topic (issue #51): same inputs as
+// timerWireTopic but the json_attr_t suffix, so it matches the topic HASelect
+// advertised in discovery via setJsonAttributes. The retained attribute value
+// rides the wire seam to here.
+String MQTTManager_::timerFinishedAttrTopic()
+{
+    const char *deviceUniqueId = device.getUniqueId();
+    if (!deviceUniqueId) return String();
+    char topic[160];
+    formatTimerHaAttrTopic(MQTT_PREFIX.c_str(), deviceUniqueId,
+                           timerHaId(TimerHaEntity::Finished), topic, sizeof(topic));
     return String(topic);
 }
 

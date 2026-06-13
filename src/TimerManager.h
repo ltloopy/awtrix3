@@ -188,6 +188,14 @@ public:
     // The single call the connect / discovery-enable republish sites make.
     void publishAllWire();
 
+    // Publish the finished-mode select's JSON attributes — a retained
+    // {"realert_interval":N} carrying the current TIMER_REALERT_INTERVAL — onto
+    // the select's json_attr_t topic via the wire seam (issue #51 / PRD #17).
+    // Called right after the finished-mode publish on the connect and
+    // discovery-enable paths so HA shows the interval the moment the entity
+    // comes online and after any HA/broker restart.
+    void publishFinishedAttributes();
+
     TimerCmdResult parseCommand(const char *json);
 
     // -- Propagation surface --

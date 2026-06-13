@@ -766,6 +766,21 @@ void TimerManager_::publishDuration()
 void TimerManager_::publishBuzzerMode()   { timerMemberConfigPublish("buzzer"); }
 void TimerManager_::publishFinishedMode() { timerMemberConfigPublish("finished"); }
 
+// The finished-mode select's JSON attributes (issue #51 / PRD #17): a retained
+// {"realert_interval":N} built from the live TIMER_REALERT_INTERVAL, onto the
+// select's json_attr_t topic via the wire seam — the same path every other Timer
+// value takes. HA reads it because createTimerHAEntities opted the finished
+// select into json attributes (setJsonAttributes), so the discovery config
+// advertises this topic. Retained means HA repopulates after a restart for free.
+void TimerManager_::publishFinishedAttributes()
+{
+    DynamicJsonDocument doc(64);
+    doc["realert_interval"] = TIMER_REALERT_INTERVAL;
+    String payload;
+    serializeJson(doc, payload);
+    MQTTManager.publishTimerWire(MQTTManager.timerFinishedAttrTopic().c_str(), payload.c_str());
+}
+
 // Full wire refresh (issue #41, closing PRD #28). The run-state trio is a fixed
 // set (state/remaining/duration are run-state, not table rows); the config half
 // is DERIVED from TIMER_MEMBER_CONFIG_DESCS, so a row added with a publish hook

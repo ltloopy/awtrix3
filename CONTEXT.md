@@ -120,6 +120,16 @@ run-state trio plus the member table's publish hooks (deduped, so the shared
 icons hook fires once). Because the config half is derived from the table, a new
 published row cannot be silently skipped by the refresh.
 
+The finished-mode select also carries a **JSON attribute**, `realert_interval`
+(PRD #17 / issue #51): the vendored ArduinoHA `HASelect` gained an opt-in
+`setJsonAttributes(bool)` capability, so the finished select's discovery config
+advertises a `json_attr_t` topic. The retained `{"realert_interval":N}` value
+then rides the wire seam to that topic via `TimerManager.publishFinishedAttributes()`
+— sourced through `timerFinishedAttrTopic()` → `formatTimerHaAttrTopic` (the
+json_attr_t sibling of `formatTimerHaDataTopic`, same byte-identity obligation).
+The refresh sites call it right after `publishAllWire()`, so the attribute is live
+the moment the entity comes online and (being retained) after an HA/broker restart.
+
 _Avoid_: publishing Timer MQTT output around the seam, or computing a wire topic
 anywhere but the TimerHa builders.
 
