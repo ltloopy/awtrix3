@@ -128,10 +128,53 @@ then rides the wire seam to that topic via `TimerManager.publishFinishedAttribut
 — sourced through `timerFinishedAttrTopic()` → `formatTimerHaAttrTopic` (the
 json_attr_t sibling of `formatTimerHaDataTopic`, same byte-identity obligation).
 The refresh sites call it right after `publishAllWire()`, so the attribute is live
-the moment the entity comes online and (being retained) after an HA/broker restart.
+the moment the entity comes online and (being retained) after an HA/broker restart;
+`parseCommand` republishes it again on any `realert_interval` edit — local or
+peer-propagated — so it always tracks the live value (catalogued under **Timer HA
+presence** below).
 
 _Avoid_: publishing Timer MQTT output around the seam, or computing a wire topic
 anywhere but the TimerHa builders.
+
+### Timer HA presence
+
+With `HA_DISCOVERY = true` and `SHOW_TIMER = true`, the Timer advertises **eight
+MQTT-discovery entities** — the HA face of its **control** and **observation
+surfaces**: the `{id}_timer_dur` text (discovery face of the `{prefix}/timer`
+control surface), the `{id}_timer_rem` / `{id}_timer_state` sensors (observation),
+the `{id}_timer_buz` / `{id}_timer_fin` selects, and the `start` / `pause` / `reset`
+buttons. Their ids, names, icons and option strings come from the
+`TIMER_HA_DESCRIPTORS` descriptor table — a member of the Timer descriptor-table
+family alongside `TIMER_SETTINGS_DESCS`, `TIMER_MEMBER_CONFIG_DESCS` and
+`TIMER_MENU_SLOTS` — and the full list lives in [timer.md](docs/timer.md). On the
+`SHOW_TIMER true → false` transition the firmware publishes empty retained discovery
+payloads so HA prunes the stale entities.
+
+**The `realert_interval` attribute.** The `{id}_timer_fin` finished-mode select is
+the only entity that carries more than its own state: a **read-only `realert_interval`
+JSON attribute** (PRD #17) holding the current `TIMER_REALERT_INTERVAL` in seconds —
+the HA-visible cadence of the `re-alert` finished mode. It is read-only from HA; the
+value changes only through the `realert_interval` config key, never the attribute. The
+retained `{"realert_interval":N}` payload rides the **Timer wire seam** to the select's
+`json_attr_t` topic via `publishFinishedAttributes()` and republishes at four moments,
+so HA never drifts from the device: **discovery-enable**, every **MQTT (re)connect**, a
+**local `realert_interval` edit**, and a **peer-propagated config snapshot** — the edit
+rides the **propagation surface** into each peer's `parseCommand`, which fires the same
+republish (issue #52). Being retained, the last value also survives an HA or broker
+restart with no extra publish.
+
+**Reusable opt-in capability.** JSON attributes are a generic, opt-in capability on the
+vendored ArduinoHA `HASelect`, not a Timer-specific hack: `setJsonAttributes(true)` adds
+the `json_attr_t` topic to that select's discovery config and `publishJsonAttributes(json)`
+sends a retained object. It defaults **off**, so every other select's discovery payload
+(the buzzer select, any future one) stays byte-for-byte unchanged. The finished-mode
+select is its first and only consumer today; another select can adopt attributes with no
+further library change.
+
+_Avoid_: calling `realert_interval` an HA *entity* (it is an attribute of the
+finished-mode select) or *writable from HA* (read-only — the config key is the only write
+path); implying the attributes capability is Timer-specific (it is a general `HASelect`
+opt-in).
 
 ### Propagation surface
 
