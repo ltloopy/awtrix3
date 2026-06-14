@@ -1688,7 +1688,9 @@ void test_S7_remote_realert_interval_republishes_finished_attribute(void) {
     TEST_ASSERT_EQUAL_UINT16(99, TIMER_REALERT_INTERVAL);   // remote snapshot applied
     const PublishCall *attr = fixture::last_publish(fixture::TIMER_FINISHED_ATTR_TOPIC);
     TEST_ASSERT_NOT_NULL(attr);
-    TEST_ASSERT_EQUAL_STRING("{\"realert_interval\":99}", attr->payload.c_str());
+    // The finished carrier's bag now folds realert_interval together with
+    // finished_hold (PRD #57); reset_all() leaves finished_hold at its default 10.
+    TEST_ASSERT_EQUAL_STRING("{\"realert_interval\":99,\"finished_hold\":10}", attr->payload.c_str());
     TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_FINISHED_ATTR_TOPIC));
     TEST_ASSERT_EQUAL_INT(0, fixture::sync_packet_count());  // one-hop: applied, never relayed
 }
@@ -2290,6 +2292,88 @@ void test_T10_codec_roundtrip_aliases_and_case(void) {
 }
 
 // ============================================================================
+// Attribute-group projection (PRD #57 / issue #58). The shared per-row emit, the
+// key->carrier attribute-group table, and the carrier bag builder. Pure data +
+// pure functions, asserted on the host without ArduinoHA.
+// ============================================================================
+
+// T11 — the shared "storage -> JSON value" emit (timerSettingEmitValue) writes
+// each row's live value under its cmdKey, dispatched by type, IGNORING snapshot
+// membership (so the state bag can later mix snapshot and non-snapshot rows).
+// This is the single helper both the config snapshot and the attribute builder
+// reuse, so the two can never disagree about a value. Pins by-type serialization
+// once: uint (U16/U32), bool, string.
+void test_T11_setting_emit_value_by_type(void) {
+    TIMER_REALERT_INTERVAL = 42;   // U16
+    TIMER_MAX_DURATION     = 7200; // U32
+    TIMER_ICON_ENABLED     = false;// Bool
+    TIMER_MELODY_TICK      = "tick_a"; // Str
+    TIMER_SYNC_TARGETS     = "all";    // Str, inSnapshot=false (membership ignored)
+
+    StaticJsonDocument<256> doc;
+    timerSettingEmitValue(*timerSettingByCmdKey("realert_interval"), doc);
+    timerSettingEmitValue(*timerSettingByCmdKey("max_duration"),     doc);
+    timerSettingEmitValue(*timerSettingByCmdKey("icon_enabled"),     doc);
+    timerSettingEmitValue(*timerSettingByCmdKey("melody_tick"),      doc);
+    timerSettingEmitValue(*timerSettingByCmdKey("sync_targets"),     doc);
+
+    TEST_ASSERT_EQUAL_UINT32(42,   doc["realert_interval"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(7200, doc["max_duration"].as<uint32_t>());
+    TEST_ASSERT_FALSE(doc["icon_enabled"].as<bool>());
+    TEST_ASSERT_TRUE(doc["icon_enabled"].is<bool>());   // bool stays a JSON bool
+    TEST_ASSERT_EQUAL_STRING("tick_a", doc["melody_tick"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("all",    doc["sync_targets"].as<const char *>());
+}
+
+// T12 — the finished-select carrier's attribute bag (timerBuildAttributeGroup):
+// exactly {realert_interval, finished_hold}, carrying the live values, and NOTHING
+// else (no buzzer keys cross over). realert_interval is first so the folded payload
+// is a superset of the legacy {"realert_interval":N} (PRD #57: realert_interval
+// unchanged from the user's perspective).
+void test_T12_attribute_group_finished_bag(void) {
+    TIMER_REALERT_INTERVAL = 99;
+    TIMER_FINISHED_HOLD    = 7;
+
+    StaticJsonDocument<256> doc;
+    timerBuildAttributeGroup(TimerHaEntity::Finished, doc);
+
+    TEST_ASSERT_EQUAL_UINT32(99, doc["realert_interval"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(7,  doc["finished_hold"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_INT(2, (int)doc.as<JsonObjectConst>().size());
+}
+
+// T13 — the buzzer-select carrier's attribute bag: exactly {countdown_seconds,
+// melody_tick, melody_end} with live values, and only those (no finished keys).
+void test_T13_attribute_group_buzzer_bag(void) {
+    TIMER_COUNTDOWN_SECONDS = 5;
+    TIMER_MELODY_TICK       = "tk";
+    TIMER_MELODY_END        = "nd";
+
+    StaticJsonDocument<256> doc;
+    timerBuildAttributeGroup(TimerHaEntity::Buzzer, doc);
+
+    TEST_ASSERT_EQUAL_UINT32(5, doc["countdown_seconds"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_STRING("tk", doc["melody_tick"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("nd", doc["melody_end"].as<const char *>());
+    TEST_ASSERT_EQUAL_INT(3, (int)doc.as<JsonObjectConst>().size());
+}
+
+// T14 — the attribute-group table is well-formed: every row maps to a real
+// settings row (the cmdKey resolves via timerSettingByCmdKey), and the two
+// lit-up carriers in this slice are exactly the buzzer and finished selects.
+void test_T14_attribute_group_table_well_formed(void) {
+    TEST_ASSERT_TRUE(TIMER_ATTR_GROUP_DESC_COUNT >= 5);
+    for (size_t i = 0; i < TIMER_ATTR_GROUP_DESC_COUNT; ++i) {
+        const TimerAttrGroupDesc &g = TIMER_ATTR_GROUP_DESCS[i];
+        TEST_ASSERT_NOT_NULL(g.cmdKey);
+        TEST_ASSERT_NOT_NULL_MESSAGE(timerSettingByCmdKey(g.cmdKey), g.cmdKey);
+        // This slice only lights up the two HASelect carriers.
+        TEST_ASSERT_TRUE(g.carrier == TimerHaEntity::Buzzer ||
+                         g.carrier == TimerHaEntity::Finished);
+    }
+}
+
+// ============================================================================
 // TimerConfigEditor — direct-drive tests for the extracted duration editor.
 // These exercise the pure value object in isolation (no TimerManager singleton,
 // no DisplayManager). The cap math reads the TIMER_MAX_DURATION global, so each
@@ -2733,57 +2817,112 @@ void test_W12_publishAllWire_each_artifact_exactly_once(void) {
 }
 
 // ============================================================================
-// W13 — finished-mode JSON attributes (issue #51 / PRD #17): the finished
-// select carries the re-alert cadence as a read-only HA attribute.
-// publishFinishedAttributes() puts a well-formed {"realert_interval":N} — the
-// CURRENT TIMER_REALERT_INTERVAL, not a hardcoded default — on the select's
-// json_attr_t topic via the wire seam. The expected topic is the fixture
-// literal (the json_attr_t sibling of TIMER_FINISHED_TOPIC), spelled
-// independently of the TimerHa builders, so a wrong-topic regression fails here.
+// W13 — the finished carrier's attribute bag on the wire (PRD #57, generalizing
+// issue #51): publishAttributeGroup(Finished) puts the folded
+// {realert_interval, finished_hold} object — live values, not defaults — on the
+// select's json_attr_t topic via the wire seam. realert_interval is preserved
+// (PRD #57: unchanged from the user's perspective). The expected topic is the
+// fixture literal, spelled independently of the TimerHa builders.
 // ============================================================================
-void test_W13_publishFinishedAttributes_emits_current_realert_interval(void) {
-    TIMER_REALERT_INTERVAL = 42;  // a non-default value, to prove it's read live
+void test_W13_publish_finished_group_folds_realert_and_hold(void) {
+    TIMER_REALERT_INTERVAL = 42;   // non-default values, to prove they read live
+    TIMER_FINISHED_HOLD    = 7;
 
-    TimerManager.publishFinishedAttributes();
+    TimerManager.publishAttributeGroup(TimerHaEntity::Finished);
 
     const PublishCall *attr = fixture::last_publish(fixture::TIMER_FINISHED_ATTR_TOPIC);
     TEST_ASSERT_NOT_NULL(attr);
-    TEST_ASSERT_EQUAL_STRING("{\"realert_interval\":42}", attr->payload.c_str());
-    // Exactly one publish, and only on the attributes topic.
+    TEST_ASSERT_EQUAL_STRING("{\"realert_interval\":42,\"finished_hold\":7}", attr->payload.c_str());
+    // Exactly one publish, and only on the attributes topic (not the state topic).
     TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_FINISHED_ATTR_TOPIC));
     TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_FINISHED_TOPIC));
 }
 
 // ============================================================================
-// W14 — realert_interval change republishes the finished-mode attribute
-// (issue #52 / PRD #17): a config command carrying a new realert_interval makes
-// parseCommand fire publishFinishedAttributes(), so HA's view of the cadence
-// tracks the device. The attribute payload reflects the JUST-applied value
-// (read live from TIMER_REALERT_INTERVAL after the table store), proving the
-// republish happens after the apply, not before. Same parseCommand-driven
-// validate→apply→publish chain W6/W7 exercise for the enum keys.
+// W14 — editing a finished-carrier key republishes EXACTLY that carrier's bag
+// (PRD #57, generalizing issue #52): a config command carrying realert_interval
+// makes parseCommand republish the finished attribute object, reflecting the
+// JUST-applied value (republish after apply, not before), and touches no other
+// attribute topic. Same parseCommand-driven validate→apply→publish chain as W6.
 // ============================================================================
-void test_W14_realert_interval_change_republishes_finished_attribute(void) {
+void test_W14_realert_interval_change_republishes_finished_group(void) {
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
         static_cast<int>(TimerManager.parseCommand("{\"realert_interval\":42}")));
 
     const PublishCall *attr = fixture::last_publish(fixture::TIMER_FINISHED_ATTR_TOPIC);
     TEST_ASSERT_NOT_NULL(attr);
-    TEST_ASSERT_EQUAL_STRING("{\"realert_interval\":42}", attr->payload.c_str());
+    TEST_ASSERT_EQUAL_STRING("{\"realert_interval\":42,\"finished_hold\":10}", attr->payload.c_str());
     TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_FINISHED_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_BUZZER_ATTR_TOPIC));
 }
 
 // ============================================================================
-// W15 — the attribute republish is keyed precisely on realert_interval (issue
-// #52): a config command that edits OTHER keys — including the finished-mode
-// select and its sibling tuning row finished_hold — leaves the attribute topic
-// silent. Pins that the trigger is "realert_interval applied", not "any config
-// change", so unrelated edits don't churn the retained attribute.
+// W15 — the republish is keyed precisely on a mapped attribute key (PRD #57): a
+// config command that edits only keys NOT projected as attributes (here a
+// duration run-state edit) leaves BOTH carriers' attribute topics silent. Pins
+// that the trigger is "a mapped key applied", not "any config change", so
+// unrelated edits don't churn the retained attributes.
 // ============================================================================
-void test_W15_config_without_realert_interval_does_not_republish_attribute(void) {
+void test_W15_edit_without_attribute_key_republishes_nothing(void) {
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
-        static_cast<int>(TimerManager.parseCommand("{\"finished\":\"hold\",\"finished_hold\":42}")));
+        static_cast<int>(TimerManager.parseCommand("{\"duration\":120}")));
 
+    TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_FINISHED_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_BUZZER_ATTR_TOPIC));
+}
+
+// ============================================================================
+// W16 — the buzzer carrier's attribute bag on the wire (PRD #57 / issue #58):
+// publishAttributeGroup(Buzzer) puts {countdown_seconds, melody_tick, melody_end}
+// — live values — on the buzzer select's json_attr_t topic, and only there.
+// ============================================================================
+void test_W16_publish_buzzer_group_emits_countdown_and_melodies(void) {
+    TIMER_COUNTDOWN_SECONDS = 5;
+    TIMER_MELODY_TICK       = "tk";
+    TIMER_MELODY_END        = "nd";
+
+    TimerManager.publishAttributeGroup(TimerHaEntity::Buzzer);
+
+    const PublishCall *attr = fixture::last_publish(fixture::TIMER_BUZZER_ATTR_TOPIC);
+    TEST_ASSERT_NOT_NULL(attr);
+    TEST_ASSERT_EQUAL_STRING(
+        "{\"countdown_seconds\":5,\"melody_tick\":\"tk\",\"melody_end\":\"nd\"}",
+        attr->payload.c_str());
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_BUZZER_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_BUZZER_TOPIC));
+}
+
+// ============================================================================
+// W17 — the full attribute refresh (PRD #57 / issue #58): publishAllAttributeGroups()
+// publishes every distinct carrier's bag EXACTLY once on its json_attr_t topic.
+// This is what the discovery-enable and reconnect paths call right after the wire
+// refresh, so HA never sees an entity with missing attributes. "Each once" pins
+// the carrier dedupe; the count pins that nothing else rides along.
+// ============================================================================
+void test_W17_publishAllAttributeGroups_each_carrier_once(void) {
+    TimerManager.publishAllAttributeGroups();
+
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_FINISHED_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_BUZZER_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(2, (int)MQTTManager.recorded.size());   // exactly the two carriers
+}
+
+// ============================================================================
+// W18 — editing a buzzer-carrier key republishes EXACTLY the buzzer bag (PRD
+// #57 / issue #58): a config command carrying countdown_seconds (or a melody)
+// republishes the buzzer attribute object and leaves the finished topic silent.
+// Together with W14 this pins per-carrier isolation through parseCommand.
+// ============================================================================
+void test_W18_countdown_change_republishes_buzzer_group_only(void) {
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.parseCommand("{\"countdown_seconds\":9}")));
+
+    const PublishCall *attr = fixture::last_publish(fixture::TIMER_BUZZER_ATTR_TOPIC);
+    TEST_ASSERT_NOT_NULL(attr);
+    TEST_ASSERT_EQUAL_STRING(
+        "{\"countdown_seconds\":9,\"melody_tick\":\"timer_tick\",\"melody_end\":\"timer_end\"}",
+        attr->payload.c_str());
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_BUZZER_ATTR_TOPIC));
     TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_FINISHED_ATTR_TOPIC));
 }
 
@@ -2880,6 +3019,10 @@ int main(int, char **) {
     RUN_TEST(test_M9_menu_commit_one_persistbatch_flushes_both_namespaces);
     RUN_TEST(test_T9_codec_tables_well_formed);
     RUN_TEST(test_T10_codec_roundtrip_aliases_and_case);
+    RUN_TEST(test_T11_setting_emit_value_by_type);
+    RUN_TEST(test_T12_attribute_group_finished_bag);
+    RUN_TEST(test_T13_attribute_group_buzzer_bag);
+    RUN_TEST(test_T14_attribute_group_table_well_formed);
     RUN_TEST(test_CE1_enter_decomposes_and_activates);
     RUN_TEST(test_CE2_adjust_default_cap_wraps_HH_at_23);
     RUN_TEST(test_CE3_adjust_tight_cap_recomputes_per_field);
@@ -2904,8 +3047,11 @@ int main(int, char **) {
     RUN_TEST(test_W10_icon_change_publishes_aggregate_json_on_icons_topic);
     RUN_TEST(test_W11_noop_duration_and_icon_sets_do_not_publish);
     RUN_TEST(test_W12_publishAllWire_each_artifact_exactly_once);
-    RUN_TEST(test_W13_publishFinishedAttributes_emits_current_realert_interval);
-    RUN_TEST(test_W14_realert_interval_change_republishes_finished_attribute);
-    RUN_TEST(test_W15_config_without_realert_interval_does_not_republish_attribute);
+    RUN_TEST(test_W13_publish_finished_group_folds_realert_and_hold);
+    RUN_TEST(test_W14_realert_interval_change_republishes_finished_group);
+    RUN_TEST(test_W15_edit_without_attribute_key_republishes_nothing);
+    RUN_TEST(test_W16_publish_buzzer_group_emits_countdown_and_melodies);
+    RUN_TEST(test_W17_publishAllAttributeGroups_each_carrier_once);
+    RUN_TEST(test_W18_countdown_change_republishes_buzzer_group_only);
     return UNITY_END();
 }

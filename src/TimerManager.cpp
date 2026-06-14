@@ -665,7 +665,6 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     //    publish-aware setters. --
     bool snapshotChanged = false;   // any config-block (inSnapshot) table key -> broadcastConfig()
     bool melodyChanged   = false;
-    bool realertChanged  = false;   // realert_interval -> finished-mode attribute republish
     {
         PersistBatch batch(*this);
         for (size_t i = 0; i < TIMER_SETTINGS_DESC_COUNT; ++i)
@@ -675,7 +674,6 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
             if (timerSettingStore(d, tableStaged[i])) batch.markTableDirty();
             if (d.inSnapshot) snapshotChanged = true;
             if (strcmp(d.cmdKey, "melody_tick") == 0 || strcmp(d.cmdKey, "melody_end") == 0) melodyChanged = true;
-            if (strcmp(d.cmdKey, "realert_interval") == 0) realertChanged = true;
         }
         if (haveDuration) setDuration(durSecs);   // pre-validated in range
         for (size_t i = 0; i < TIMER_MEMBER_CONFIG_DESC_COUNT; ++i)
@@ -683,11 +681,20 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     }
 
     if (melodyChanged) loadMelodiesCached();
-    // The re-alert cadence is a JSON attribute of the finished-mode select (issue
-    // #51), not a wire row with its own setter, so republish it here when the key
-    // applied. Fires on the remote-apply path too (it is not _remoteApply-gated),
-    // keeping each synced peer's HA attribute consistent with no extra code (#52).
-    if (realertChanged) publishFinishedAttributes();
+    // Settings projected as read-only HA attributes (PRD #57) are not wire rows
+    // with their own setters, so republish each affected carrier's bag here when
+    // any of its mapped keys was in the command. Table-driven, so a multi-carrier
+    // key republishes every carrier; deduped so a carrier publishes at most once.
+    // Fires on the remote-apply path too (not _remoteApply-gated), keeping each
+    // synced peer's HA attributes consistent with no extra code (generalizes #52).
+    bool attrCarrierDirty[(size_t)TimerHaEntity::COUNT] = {false};
+    for (size_t i = 0; i < TIMER_ATTR_GROUP_DESC_COUNT; ++i)
+    {
+        const TimerAttrGroupDesc &g = TIMER_ATTR_GROUP_DESCS[i];
+        if (doc.containsKey(g.cmdKey)) attrCarrierDirty[(size_t)g.carrier] = true;
+    }
+    for (size_t c = 0; c < (size_t)TimerHaEntity::COUNT; ++c)
+        if (attrCarrierDirty[c]) publishAttributeGroup((TimerHaEntity)c);
 
     if (haveAction)
     {
@@ -773,19 +780,36 @@ void TimerManager_::publishDuration()
 void TimerManager_::publishBuzzerMode()   { timerMemberConfigPublish("buzzer"); }
 void TimerManager_::publishFinishedMode() { timerMemberConfigPublish("finished"); }
 
-// The finished-mode select's JSON attributes (issue #51 / PRD #17): a retained
-// {"realert_interval":N} built from the live TIMER_REALERT_INTERVAL, onto the
-// select's json_attr_t topic via the wire seam — the same path every other Timer
-// value takes. HA reads it because createTimerHAEntities opted the finished
-// select into json attributes (setJsonAttributes), so the discovery config
-// advertises this topic. Retained means HA repopulates after a restart for free.
-void TimerManager_::publishFinishedAttributes()
+// A carrier's read-only JSON attribute object (PRD #57 / issue #58): the bag is
+// built table-driven by timerBuildAttributeGroup, serialized, and ridden onto the
+// carrier's json_attr_t topic by the wire seam — the same path every other Timer
+// value takes. HA reads it because createTimerHAEntities opted the carrier select
+// into json attributes (setJsonAttributes), so the discovery config advertises
+// this topic. Retained means HA repopulates after a restart for free. A carrier
+// with no mapped rows yields an empty bag and publishes nothing.
+void TimerManager_::publishAttributeGroup(TimerHaEntity carrier)
 {
-    DynamicJsonDocument doc(64);
-    doc["realert_interval"] = TIMER_REALERT_INTERVAL;
+    DynamicJsonDocument doc(256);
+    timerBuildAttributeGroup(carrier, doc);
+    if (doc.as<JsonObjectConst>().size() == 0) return;
     String payload;
     serializeJson(doc, payload);
-    MQTTManager.publishTimerWire(MQTTManager.timerFinishedAttrTopic().c_str(), payload.c_str());
+    MQTTManager.publishTimerWire(MQTTManager.timerWireAttrTopic(carrier).c_str(), payload.c_str());
+}
+
+// Every distinct carrier's attribute object, each published once. Carriers are
+// deduped by first appearance in the attribute-group table (a carrier owns
+// several rows), mirroring publishAllWire's hook dedupe.
+void TimerManager_::publishAllAttributeGroups()
+{
+    for (size_t i = 0; i < TIMER_ATTR_GROUP_DESC_COUNT; ++i)
+    {
+        TimerHaEntity carrier = TIMER_ATTR_GROUP_DESCS[i].carrier;
+        bool seen = false;
+        for (size_t j = 0; j < i && !seen; ++j)
+            seen = (TIMER_ATTR_GROUP_DESCS[j].carrier == carrier);
+        if (!seen) publishAttributeGroup(carrier);
+    }
 }
 
 // Full wire refresh (issue #41, closing PRD #28). The run-state trio is a fixed

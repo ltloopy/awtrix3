@@ -213,19 +213,24 @@ void timerSettingsLoadDevJson(JsonObjectConst obj)
     }
 }
 
+void timerSettingEmitValue(const TimerSettingDesc &d, JsonDocument &doc)
+{
+    switch (d.type)
+    {
+        case TcType::U16:  doc[d.cmdKey] = *static_cast<uint16_t *>(d.storage); break;
+        case TcType::U32:  doc[d.cmdKey] = *static_cast<uint32_t *>(d.storage); break;
+        case TcType::Bool: doc[d.cmdKey] = *static_cast<bool *>    (d.storage); break;
+        case TcType::Str:  doc[d.cmdKey] = *static_cast<String *>  (d.storage); break;
+    }
+}
+
 void timerSettingsBuildSnapshot(JsonDocument &doc)
 {
     for (size_t i = 0; i < TIMER_SETTINGS_DESC_COUNT; ++i)
     {
         const TimerSettingDesc &d = TIMER_SETTINGS_DESCS[i];
         if (!d.inSnapshot) continue;
-        switch (d.type)
-        {
-            case TcType::U16:  doc[d.cmdKey] = *static_cast<uint16_t *>(d.storage); break;
-            case TcType::U32:  doc[d.cmdKey] = *static_cast<uint32_t *>(d.storage); break;
-            case TcType::Bool: doc[d.cmdKey] = *static_cast<bool *>    (d.storage); break;
-            case TcType::Str:  doc[d.cmdKey] = *static_cast<String *>  (d.storage); break;
-        }
+        timerSettingEmitValue(d, doc);
     }
 }
 
@@ -235,6 +240,38 @@ const TimerSettingDesc *timerSettingByCmdKey(const char *cmdKey)
         if (strcmp(TIMER_SETTINGS_DESCS[i].cmdKey, cmdKey) == 0)
             return &TIMER_SETTINGS_DESCS[i];
     return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// HA attribute-group projection (PRD #57 / issue #58). This slice lights up the
+// two carriers that already support JSON attributes (the buzzer + finished
+// HASelects), so no ArduinoHA change is needed yet. realert_interval is listed
+// first on the finished carrier so the folded payload is a superset of the
+// legacy bespoke {"realert_interval":N}. All formatters are nullptr this slice
+// (bar_color's "#RRGGBB" formatter arrives with the state-sensor carrier).
+//   carrier, cmdKey, format
+const TimerAttrGroupDesc TIMER_ATTR_GROUP_DESCS[] = {
+    {TimerHaEntity::Finished, "realert_interval",  nullptr},
+    {TimerHaEntity::Finished, "finished_hold",     nullptr},
+    {TimerHaEntity::Buzzer,   "countdown_seconds", nullptr},
+    {TimerHaEntity::Buzzer,   "melody_tick",       nullptr},
+    {TimerHaEntity::Buzzer,   "melody_end",        nullptr},
+};
+
+const size_t TIMER_ATTR_GROUP_DESC_COUNT =
+    sizeof(TIMER_ATTR_GROUP_DESCS) / sizeof(TIMER_ATTR_GROUP_DESCS[0]);
+
+void timerBuildAttributeGroup(TimerHaEntity carrier, JsonDocument &doc)
+{
+    for (size_t i = 0; i < TIMER_ATTR_GROUP_DESC_COUNT; ++i)
+    {
+        const TimerAttrGroupDesc &g = TIMER_ATTR_GROUP_DESCS[i];
+        if (g.carrier != carrier) continue;
+        const TimerSettingDesc *d = timerSettingByCmdKey(g.cmdKey);
+        if (!d) continue;   // table self-consistency is pinned by test T14
+        if (g.format) g.format(*d, doc);
+        else          timerSettingEmitValue(*d, doc);
+    }
 }
 
 // ===========================================================================

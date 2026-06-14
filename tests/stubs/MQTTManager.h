@@ -49,12 +49,13 @@ public:
     // to String(uniqueID) = the fixture data prefix).
     String timerIconsTopic() { return String(TEST_WIRE_DATA_PREFIX "/timer/icons"); }
 
-    // The finished-mode select's JSON-attributes data topic (issue #51), built
-    // through the REAL formatTimerHaEntityId + formatTimerHaAttrTopic so the
-    // json_attr_t topic construction is itself under test.
-    String timerFinishedAttrTopic() {
+    // A Timer HA entity slot's JSON-attributes data topic (PRD #57, generalizing
+    // the issue-#51 finished-only topic), built through the REAL
+    // formatTimerHaEntityId + formatTimerHaAttrTopic so the json_attr_t topic
+    // construction is itself under test for every carrier.
+    String timerWireAttrTopic(TimerHaEntity slot) {
         char id[48];
-        formatTimerHaEntityId(timerHaDescriptor(TimerHaEntity::Finished), TEST_WIRE_MAC_SUFFIX, id, sizeof(id));
+        formatTimerHaEntityId(timerHaDescriptor(slot), TEST_WIRE_MAC_SUFFIX, id, sizeof(id));
         char topic[160];
         formatTimerHaAttrTopic(TEST_WIRE_DATA_PREFIX, TEST_WIRE_DEVICE_ID, id, topic, sizeof(topic));
         return String(topic);

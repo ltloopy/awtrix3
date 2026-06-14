@@ -97,6 +97,10 @@ inline const char *TIMER_FINISHED_TOPIC = "awtrix_self/a1b2c3d4e5f6/d4e5f6_timer
 // same id as TIMER_FINISHED_TOPIC but the json_attr_t suffix HASelect advertises.
 inline const char *TIMER_FINISHED_ATTR_TOPIC = "awtrix_self/a1b2c3d4e5f6/d4e5f6_timer_fin/json_attr_t";
 
+// The buzzer-select's JSON-attributes topic (PRD #57 / issue #58): the json_attr_t
+// sibling of TIMER_BUZZER_TOPIC, spelled independently of the TimerHa builders.
+inline const char *TIMER_BUZZER_ATTR_TOPIC = "awtrix_self/a1b2c3d4e5f6/d4e5f6_timer_buz/json_attr_t";
+
 // Duration text entity (issue #34), id per TimerHa.cpp's HAtimerDurID "%s_timer_dur".
 inline const char *TIMER_DURATION_TOPIC = "awtrix_self/a1b2c3d4e5f6/d4e5f6_timer_dur/stat_t";
 
