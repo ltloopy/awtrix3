@@ -102,10 +102,18 @@ void MQTTManager_::createTimerHAEntities()
     timerRemaining->setUnitOfMeasurement(dRem.unit);
     timerRemaining->setDeviceClass(dRem.deviceClass);
     timerRemaining->setCurrentValue((uint32_t)TimerManager.getRemaining());
+    // Opt the remaining sensor into JSON attributes (HASensorNumber inherits the
+    // opt-in from HASensor): its retained {remaining_publish_interval} object rides
+    // the wire seam to json_attr_t (PRD #57 / issue #59). No descriptor change.
+    timerRemaining->setJsonAttributes(true);
 
     timerStateSensor = new HASensor(timerHaId(TimerHaEntity::State));
     timerStateSensor->setIcon(dState.icon);
     timerStateSensor->setName(dState.name);
+    // Opt the state sensor into JSON attributes so its discovery config advertises
+    // json_attr_t; the retained config-view object (max_duration, bar_color as
+    // "#RRGGBB", sync roles, …) rides the wire seam to that topic (issue #59).
+    timerStateSensor->setJsonAttributes(true);
 
     timerBuzzer = new HASelect(timerHaId(TimerHaEntity::Buzzer));
     timerBuzzer->setOptions(dBuz.options);

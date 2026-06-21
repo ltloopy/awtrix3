@@ -789,7 +789,9 @@ void TimerManager_::publishFinishedMode() { timerMemberConfigPublish("finished")
 // with no mapped rows yields an empty bag and publishes nothing.
 void TimerManager_::publishAttributeGroup(TimerHaEntity carrier)
 {
-    DynamicJsonDocument doc(256);
+    // 512: the state sensor's bag is the largest (eight config-view keys incl.
+    // two strings), which overflows 256 on a 64-bit host (issue #59).
+    DynamicJsonDocument doc(512);
     timerBuildAttributeGroup(carrier, doc);
     if (doc.as<JsonObjectConst>().size() == 0) return;
     String payload;
