@@ -113,6 +113,10 @@ void MQTTManager_::createTimerHAEntities()
     timerBuzzer->setIcon(dBuz.icon);
     timerBuzzer->setName(dBuz.name);
     timerBuzzer->setState((uint8_t)TimerManager.getBuzzerMode(), true);
+    // Opt the buzzer select into JSON attributes so its discovery config advertises
+    // json_attr_t; its retained {countdown_seconds, melody_tick, melody_end} object
+    // rides the wire seam to that topic (PRD #57 / issue #58). No descriptor change.
+    timerBuzzer->setJsonAttributes(true);
 
     timerFinishedSel = new HASelect(timerHaId(TimerHaEntity::Finished));
     timerFinishedSel->setOptions(dFin.options);
@@ -157,7 +161,7 @@ void MQTTManager_::enableTimerHADiscovery()
         mqtt.publishConfigForDeviceType(dt);
 
     TimerManager.publishAllWire();   // every wire artifact, derived from the member table (issue #41)
-    TimerManager.publishFinishedAttributes();   // realert_interval attribute (issue #51)
+    TimerManager.publishAllAttributeGroups();   // every carrier's read-only attribute object (PRD #57)
 }
 
 void MQTTManager_::removeTimerHAEntities()
@@ -658,7 +662,7 @@ void onMqttConnected()
         if (SHOW_TIMER)
         {
             TimerManager.publishAllWire();   // every wire artifact, derived from the member table (issue #41)
-            TimerManager.publishFinishedAttributes();   // realert_interval attribute (issue #51)
+            TimerManager.publishAllAttributeGroups();   // every carrier's read-only attribute object (PRD #57)
         }
     }
 
@@ -1024,17 +1028,17 @@ String MQTTManager_::timerWireTopic(TimerHaEntity slot)
     return String(topic);
 }
 
-// The finished-mode select's JSON-attributes topic (issue #51): same inputs as
-// timerWireTopic but the json_attr_t suffix, so it matches the topic HASelect
-// advertised in discovery via setJsonAttributes. The retained attribute value
-// rides the wire seam to here.
-String MQTTManager_::timerFinishedAttrTopic()
+// A carrier entity's JSON-attributes topic (PRD #57, generalizing the issue-#51
+// finished-only topic): same inputs as timerWireTopic but the json_attr_t suffix,
+// so it matches the topic the carrier's HASelect advertised in discovery via
+// setJsonAttributes. The retained attribute value rides the wire seam to here.
+String MQTTManager_::timerWireAttrTopic(TimerHaEntity slot)
 {
     const char *deviceUniqueId = device.getUniqueId();
     if (!deviceUniqueId) return String();
     char topic[160];
     formatTimerHaAttrTopic(MQTT_PREFIX.c_str(), deviceUniqueId,
-                           timerHaId(TimerHaEntity::Finished), topic, sizeof(topic));
+                           timerHaId(slot), topic, sizeof(topic));
     return String(topic);
 }
 

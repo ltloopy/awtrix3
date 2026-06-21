@@ -40,17 +40,17 @@ returns the read-only snapshot. `dev.json` keys override NVS on **every boot**
 
 | Item | API / MQTT key | dev.json | Home Assistant | On-device |
 |------|----------------|----------|----------------|-----------|
-| Finished hold (1–300 s, dflt 10) | `finished_hold` ✅ | `timer_finished_hold` ✅ | — | `TIMER` menu (`CLEAR`) ✅ |
+| Finished hold (1–300 s, dflt 10) | `finished_hold` ✅ | `timer_finished_hold` ✅ | 👁 attr on finished select | `TIMER` menu (`CLEAR`) ✅ |
 | Re-alert interval (5–300 s, dflt 15) | `realert_interval` ✅ | `timer_realert_interval` ✅ | 👁 attr on finished select | `TIMER` menu (`ALERT`) ✅ |
-| Countdown window (0–30 s, dflt 3) | `countdown_seconds` ✅ | `timer_countdown_seconds` ✅ | — | `TIMER` menu (`CDOWN`) ✅ |
+| Countdown window (0–30 s, dflt 3) | `countdown_seconds` ✅ | `timer_countdown_seconds` ✅ | 👁 attr on buzzer select | `TIMER` menu (`CDOWN`) ✅ |
 | Max duration (1–604800 s, dflt 86400) | `max_duration` ✅ | `timer_max_duration` ✅ | — | — (caps config editor) |
 | Remaining publish interval (1–60 s, dflt 1) | `remaining_publish_interval` ✅ | `timer_remaining_publish_interval` ✅ | — (governs sensor cadence) | — |
 | App config timeout (5–300 s, dflt 30) | `app_config_timeout` ✅ | `timer_app_config_timeout` ✅ | — | — (governs editor idle) |
 | Icon enabled (dflt true) | `icon_enabled` ✅ | `timer_icon_enabled` ✅ | — | `TIMER` menu (`ICON`) ✅ |
 | Bar enabled (dflt true) | `bar_enabled` ✅ | `timer_bar_enabled` ✅ | — | `TIMER` menu (`BAR`) ✅ |
 | Bar color (hex / `#RRGGBB`, dflt 0 = text color) | `bar_color` ✅ | `timer_bar_color` ✅ | — | — |
-| Tick melody (dflt `timer_tick`) | `melody_tick` ✅ | `timer_melody_tick` ✅ | — | — |
-| End melody (dflt `timer_end`) | `melody_end` ✅ | `timer_melody_end` ✅ | — | — |
+| Tick melody (dflt `timer_tick`) | `melody_tick` ✅ | `timer_melody_tick` ✅ | 👁 attr on buzzer select | — |
+| End melody (dflt `timer_end`) | `melody_end` ✅ | `timer_melody_end` ✅ | 👁 attr on buzzer select | — |
 
 ### Multi-device sync (local identity; never propagated to peers)
 
@@ -278,8 +278,8 @@ With `HA_DISCOVERY=true`, the firmware advertises eight entities:
 | `{id}_timer_dur`   | `text`        | Timer duration as a clock string `HH:MM:SS` (writable; accepts `MM:SS` and bare seconds too). Invalid input (malformed or out-of-range) reverts to the previous valid time. |
 | `{id}_timer_rem`   | `sensor`      | Seconds remaining (read-only, updates every `TIMER_PUBLISH_INTERVAL` s while running). |
 | `{id}_timer_state` | `sensor`      | One of `idle` / `running` / `paused` / `finished`. |
-| `{id}_timer_buz`   | `select`      | Buzzer mode. |
-| `{id}_timer_fin`   | `select`      | Finished mode. Carries a read-only `realert_interval` JSON attribute (the current `TIMER_REALERT_INTERVAL`, in seconds) so the re-alert cadence is visible in HA without leaving the entity. |
+| `{id}_timer_buz`   | `select`      | Buzzer mode. Carries a read-only JSON attribute object `{countdown_seconds, melody_tick, melody_end}` so the beep window and both melodies are visible in HA without leaving the entity. |
+| `{id}_timer_fin`   | `select`      | Finished mode. Carries a read-only JSON attribute object `{realert_interval, finished_hold}` so the re-alert cadence and auto-clear hold are visible in HA without leaving the entity. |
 | `{id}_timer_start` | `button`      | Equivalent to `{"action":"start"}`. |
 | `{id}_timer_pause` | `button`      | Equivalent to `{"action":"pause"}`. |
 | `{id}_timer_reset` | `button`      | Equivalent to `{"action":"reset"}`. |
@@ -287,21 +287,31 @@ With `HA_DISCOVERY=true`, the firmware advertises eight entities:
 When the timer is started from `Idle` (and no game is active, no
 blocking-nav app is on screen), the display auto-switches to the Timer app.
 
-### Finished-mode attributes (`realert_interval`)
+### Read-only attribute groups
 
-The finished-mode select opts into a `json_attributes_topic`
-(`{prefix}/{deviceId}/{id}_timer_fin/json_attr_t`) — an opt-in capability added
-to the vendored ArduinoHA `HASelect` (see [PRD #17](https://github.com/ltloopy/awtrix3/issues/17)).
-A retained `{"realert_interval":N}` is published to that topic, so HA surfaces
-the configured re-alert cadence as an attribute on the finished-mode entity. It
-goes out at discovery-enable and on every MQTT (re)connect, right after the
-finished-mode value, and is republished promptly whenever the `realert_interval`
-command key is applied — locally or via a synced peer's propagated config
-snapshot — so HA always reflects the device's real cadence; being retained, it
-also survives an HA or broker restart with no extra publish. The value tracks
-`TIMER_REALERT_INTERVAL` (only meaningful while finished mode is `re-alert`); it
-is read-only from HA — change the interval via the `realert_interval` command
-key, `dev.json`, or the on-device `TIMER` menu.
+Carrier entities surface persisted settings as **read-only JSON attribute
+objects**, so a user can read the device's live configuration from inside HA
+without an MQTT/HTTP query (see [PRD #57](https://github.com/ltloopy/awtrix3/issues/57),
+generalizing the single `realert_interval` attribute of
+[PRD #17](https://github.com/ltloopy/awtrix3/issues/17)). Which settings key
+rides which carrier is one table (`TIMER_ATTR_GROUP_DESCS`); the two carriers
+lit up today are both selects, each opting into a `json_attributes_topic`
+(`{prefix}/{deviceId}/{id}/json_attr_t`) via the vendored ArduinoHA `HASelect`'s
+opt-in capability:
+
+| Carrier | Attribute object |
+| --- | --- |
+| `{id}_timer_fin` (finished select) | `{"realert_interval":N, "finished_hold":N}` |
+| `{id}_timer_buz` (buzzer select)   | `{"countdown_seconds":N, "melody_tick":"…", "melody_end":"…"}` |
+
+Each carrier's retained object goes out at discovery-enable and on every MQTT
+(re)connect, right after the wire refresh, and is republished promptly whenever
+any of its mapped keys is applied — locally or via a synced peer's propagated
+config snapshot — so HA always reflects the device's real configuration; being
+retained, it also survives an HA or broker restart with no extra publish. The
+values are **read-only from HA** — change them via their command keys, `dev.json`,
+or (where applicable) the on-device `TIMER` menu; the attribute is observation
+only. `realert_interval` is only meaningful while finished mode is `re-alert`.
 
 ---
 

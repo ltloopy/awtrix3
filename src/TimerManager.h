@@ -6,6 +6,7 @@
 
 #include "TimerEnums.h"          // TimerState + BuzzerMode / FinishedMode + their codec tables (ADR-0010)
 #include "TimerConfigEditor.h"   // display-free duration editor; owns the config-mode working state (ADR-0011)
+#include "TimerHa.h"             // TimerHaEntity (the HA carrier publishAttributeGroup targets)
 
 // Result of parseCommand. All control surfaces share one validation policy
 // (reject invalid input atomically); only the HTTP API surfaces this as a
@@ -188,13 +189,17 @@ public:
     // The single call the connect / discovery-enable republish sites make.
     void publishAllWire();
 
-    // Publish the finished-mode select's JSON attributes — a retained
-    // {"realert_interval":N} carrying the current TIMER_REALERT_INTERVAL — onto
-    // the select's json_attr_t topic via the wire seam (issue #51 / PRD #17).
-    // Called right after the finished-mode publish on the connect and
-    // discovery-enable paths so HA shows the interval the moment the entity
-    // comes online and after any HA/broker restart.
-    void publishFinishedAttributes();
+    // Publish one HA carrier's read-only JSON attribute object — the carrier's
+    // mapped settings keys built via timerBuildAttributeGroup — onto its
+    // json_attr_t topic via the wire seam (PRD #57 / issue #58, generalizing the
+    // bespoke realert_interval publish of issue #51). Retained, so HA repopulates
+    // after a restart for free. No-op for a carrier with no mapped keys.
+    void publishAttributeGroup(TimerHaEntity carrier);
+
+    // Publish every distinct carrier's attribute object once. The single call the
+    // discovery-enable / reconnect paths make right after publishAllWire(), so HA
+    // never sees an entity with missing attributes.
+    void publishAllAttributeGroups();
 
     TimerCmdResult parseCommand(const char *json);
 

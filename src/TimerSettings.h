@@ -4,6 +4,8 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
+#include "TimerHa.h"   // TimerHaEntity (the HA carrier each attribute group rides)
+
 // Persisted Timer settings: the single descriptor table that drives validation,
 // apply, NVS persistence, dev.json overrides and the propagated config snapshot
 // for the value-config Timer keys. Modelled on TimerHa.h ("one table, no drift").
@@ -68,11 +70,42 @@ void timerSettingsSaveNvs(class Preferences &prefs);
 // valid, skip-and-continue otherwise -- NOT atomic; dev.json is a boot override layer).
 void timerSettingsLoadDevJson(JsonObjectConst obj);
 
+// Emit ONE row's live value into `doc` under its cmdKey, dispatched by `type` and
+// IGNORING snapshot membership. The single "storage -> JSON value" helper shared by
+// the config snapshot (inSnapshot rows) and the HA attribute builder, so the two can
+// never disagree about a value (PRD #57).
+void timerSettingEmitValue(const TimerSettingDesc &d, JsonDocument &doc);
+
 // Emit the inSnapshot rows into `doc` (the propagated config block, table half).
 void timerSettingsBuildSnapshot(JsonDocument &doc);
 
 // Lookup by command key (used by MenuManager to reuse a row's range bounds).
 const TimerSettingDesc *timerSettingByCmdKey(const char *cmdKey);
+
+// ---------------------------------------------------------------------------
+// HA attribute-group projection (PRD #57) -- the descriptor-table family's fifth
+// member. One row per (carrier entity, settings key) projection: a persisted
+// settings value surfaced as a read-only JSON attribute on the HA entity it is
+// semantically about. A key may map to MULTIPLE carriers (one row each). The
+// optional `format` hook overrides the raw emit for rows whose attribute
+// representation deliberately differs from the config-snapshot one (e.g.
+// bar_color's "#RRGGBB" string); nullptr means emit the raw live value via
+// timerSettingEmitValue. One table, one generic builder -- adding or moving a
+// knob's HA projection is a one-row change with no drift across publish paths.
+struct TimerAttrGroupDesc
+{
+    TimerHaEntity carrier;   // the HA entity that carries this attribute
+    const char   *cmdKey;    // joins TIMER_SETTINGS_DESCS by cmdKey (the attribute key, verbatim)
+    void        (*format)(const TimerSettingDesc &d, JsonDocument &doc);  // nullptr = raw emit
+};
+
+extern const TimerAttrGroupDesc TIMER_ATTR_GROUP_DESCS[];
+extern const size_t             TIMER_ATTR_GROUP_DESC_COUNT;
+
+// Build one carrier's attribute object into `doc`: every table row mapped to
+// `carrier`, emitted under its cmdKey (via the row's formatter, else the shared
+// timerSettingEmitValue). `doc` is left empty for a carrier with no mapped rows.
+void timerBuildAttributeGroup(TimerHaEntity carrier, JsonDocument &doc);
 
 // ---------------------------------------------------------------------------
 // The config block's SECOND table: the member-backed half (B1, ADR-0007/0009).
