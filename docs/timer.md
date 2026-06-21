@@ -305,10 +305,15 @@ opt-in capability:
 | `{id}_timer_buz` (buzzer select)   | `{"countdown_seconds":N, "melody_tick":"…", "melody_end":"…"}` |
 
 Each carrier's retained object goes out at discovery-enable and on every MQTT
-(re)connect, right after the wire refresh, and is republished promptly whenever
-any of its mapped keys is applied — locally or via a synced peer's propagated
+(re)connect, right after the wire refresh, on the on-device `TIMER`-menu
+long-press commit (after its peer broadcast — it refreshes every carrier, not
+just the changed one, since the commit does not track which knob moved), and is
+republished promptly whenever any of its mapped keys is applied — locally or via a synced peer's propagated
 config snapshot — so HA always reflects the device's real configuration; being
-retained, it also survives an HA or broker restart with no extra publish. The
+retained, it also survives an HA or broker restart with no extra publish.
+Disabling the Timer (`SHOW_TIMER` true to false) clears each carrier's retained
+`json_attr_t` object alongside pruning the discovery entities, so the broker is
+left holding no orphaned attribute payload (issue #60). The
 values are **read-only from HA** — change them via their command keys, `dev.json`,
 or (where applicable) the on-device `TIMER` menu; the attribute is observation
 only. `realert_interval` is only meaningful while finished mode is `re-alert`.

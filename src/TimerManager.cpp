@@ -814,6 +814,25 @@ void TimerManager_::publishAllAttributeGroups()
     }
 }
 
+// Teardown mirror of publishAllAttributeGroups: empty the retained json_attr_t
+// topic of every distinct carrier so disabling the Timer (discovery teardown,
+// issue #60) leaves no orphaned attribute object on the broker. Same carrier
+// dedupe and same wire seam — an empty retained payload is the MQTT clear.
+// publishTimerWire's creation-sentinel gate makes this no-op when no entity ever
+// existed (nothing was advertised, so nothing to clear).
+void TimerManager_::clearAllAttributeGroups()
+{
+    for (size_t i = 0; i < TIMER_ATTR_GROUP_DESC_COUNT; ++i)
+    {
+        TimerHaEntity carrier = TIMER_ATTR_GROUP_DESCS[i].carrier;
+        bool seen = false;
+        for (size_t j = 0; j < i && !seen; ++j)
+            seen = (TIMER_ATTR_GROUP_DESCS[j].carrier == carrier);
+        if (!seen)
+            MQTTManager.publishTimerWire(MQTTManager.timerWireAttrTopic(carrier).c_str(), "");
+    }
+}
+
 // Full wire refresh (issue #41, closing PRD #28). The run-state trio is a fixed
 // set (state/remaining/duration are run-state, not table rows); the config half
 // is DERIVED from TIMER_MEMBER_CONFIG_DESCS, so a row added with a publish hook

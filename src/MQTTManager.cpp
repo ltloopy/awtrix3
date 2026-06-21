@@ -184,6 +184,10 @@ void MQTTManager_::removeTimerHAEntities()
                  HA_PREFIX.c_str(), d.component, deviceUniqueId, timerHaId(d.slot));
         mqtt.publish(topic, "", true);
     }
+    // Clear each carrier's retained json_attr_t object too, so pruning the
+    // discovery config does not leave an orphaned attribute payload behind on the
+    // broker (issue #60). Rides the same wire seam the attribute publish does.
+    TimerManager.clearAllAttributeGroups();
 }
 long previousMillis_Stats;
 std::map<String, String> mqttValues;

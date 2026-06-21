@@ -152,7 +152,10 @@ buttons. Their ids, names, icons and option strings come from the
 family alongside `TIMER_SETTINGS_DESCS`, `TIMER_MEMBER_CONFIG_DESCS`,
 `TIMER_MENU_SLOTS` and `TIMER_ATTR_GROUP_DESCS` — and the full list lives in
 [timer.md](docs/timer.md). On the `SHOW_TIMER true → false` transition the firmware
-publishes empty retained discovery payloads so HA prunes the stale entities.
+publishes empty retained discovery payloads so HA prunes the stale entities, and
+clears each attribute carrier's retained `json_attr_t` object
+(`clearAllAttributeGroups()`) so the broker is left holding no orphaned attribute
+payload (issue #60).
 
 **Read-only attribute groups.** Beyond its own state, a carrier entity can carry a
 **read-only JSON attribute object** projecting persisted settings, so a user can read
@@ -169,7 +172,10 @@ never drifts from the device: at **discovery-enable** and every **MQTT (re)conne
 (`publishAllAttributeGroups()`, right after the wire refresh), and on any **edit of a
 mapped key** — `parseCommand` republishes exactly the affected carrier(s), on **local
 and peer-propagated** edits alike (the edit rides the **propagation surface** into each
-peer's `parseCommand`, which fires the same republish). Being retained, the last value
+peer's `parseCommand`, which fires the same republish). The **on-device `TIMER`-menu long-press commit**
+also refreshes every carrier (`publishAllAttributeGroups()`, after its peer
+broadcast), since a menu commit does not track which knob changed (issue #60).
+Being retained, the last value
 survives an HA or broker restart with no extra publish.
 
 **Reusable opt-in capability.** JSON attributes are a generic, opt-in capability on the
