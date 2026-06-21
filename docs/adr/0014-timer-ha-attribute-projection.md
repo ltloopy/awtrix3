@@ -1,0 +1,122 @@
+# Project every Timer knob as a read-only Home Assistant attribute
+
+Status: accepted
+
+## Context
+
+From a Home Assistant user's view the Timer exposed **eight entities** but its
+*configuration* was almost entirely invisible. Only one tuning value — the re-alert
+interval — surfaced, as a read-only JSON attribute on the finished-mode select (PRD
+#17, then issues #51/#52). Everything else (auto-clear hold, countdown beep window,
+the two melodies, bar color, the display toggles, max duration, the remaining-sensor
+cadence, the on-device config-editor timeout, and the multi-device **sync identity**)
+could only be discovered by reading `dev.json`, issuing an MQTT/HTTP query, or walking
+the on-device menu. A user could not answer "what is this timer configured to do right
+now?" from inside HA.
+
+PRD #57 generalized the bespoke `realert_interval` attribute into a table-driven,
+multi-carrier projection of **every** persisted-settings row, delivered across three
+slices — table-driven groups on the two selects (#58), the `HASensor` opt-in lighting
+up the remaining and state sensors (#59), and the on-device-commit refresh plus
+retained-topic teardown (#60). This ADR records the four load-bearing design choices
+now that the implementation is complete. Terminology lives in
+[CONTEXT.md](../../CONTEXT.md); the user-facing surface in
+[timer.md](../timer.md).
+
+## Decision
+
+### 1. Read-only attributes, not new entities
+
+Each knob becomes observable as a retained `json_attr_t` object on the entity it is
+semantically about — it does **not** become a controllable entity. The knobs stay on
+the **observation surface** and out of the ADR-0001 **control surface** and its
+atomic-reject parity contract; the existing write paths (`{prefix}/timer` config keys,
+`dev.json`, the on-device `TIMER` menu) remain the only ways to change a value. The
+entity count stays **8**.
+
+- **vs. new `number` / `switch` / `select` control entities** — rejected: that would
+  drag every knob onto the control surface and oblige it to honor the atomic-reject
+  validation contract (ADR-0001), for values that have a perfectly good write path
+  already. The goal is *visibility*, not a second control surface.
+
+### 2. The JSON-attributes opt-in is per-type, not lifted into the base device type
+
+The capability is added **per subclass** — `HASelect` first (#58), then `HASensor`
+(#59); `HASensorNumber` inherits it, so the remaining sensor came for free. It is an
+opt-in (`setJsonAttributes(true)` adds the `json_attr_t` line to that type's discovery
+config; `publishJsonAttributes(json)` sends a retained object) that defaults **off**,
+so a type that has not opted in keeps its discovery payload byte-for-byte unchanged.
+
+- **vs. lifting the capability into the shared base device type** — rejected. The
+  `json_attr_t` **discovery-topic line is irreducibly per-subclass**: it must be
+  emitted where each type's serializer is constructed and sized, so a base-class lift
+  *cannot* remove the per-type line. It would only dedupe a trivial flag + setter +
+  publish method while touching the shared base and the already-shipped `HASelect` —
+  more blast radius for a smaller saving. Net negative.
+
+### 3. A table-driven key→carrier facet, joining the descriptor-table family
+
+`TIMER_ATTR_GROUP_DESCS` ([src/TimerSettings.cpp](../../src/TimerSettings.cpp)) holds
+one row per projection — `{carrier, settings-key, optional formatter}` — and joins the
+**Timer descriptor-table family** alongside `TIMER_HA_DESCRIPTORS`,
+`TIMER_SETTINGS_DESCS`, `TIMER_MEMBER_CONFIG_DESCS` and `TIMER_MENU_SLOTS`. One generic
+builder (`timerBuildAttributeGroup`) turns a carrier's rows into a JSON object, reusing
+the same `timerSettingEmitValue` the config snapshot uses, so an attribute and the
+snapshot can **never disagree** about a value. A key may map to **multiple carriers**
+(one row each — `remaining_publish_interval` rides both the remaining sensor, its own
+cadence, and the state sensor, a complete config view). The optional per-row
+**formatter** exists because the attribute representation deliberately differs from the
+snapshot's: `bar_color` formats as the human string `"default"` (0 = follow text color)
+or `"#RRGGBB"`, mirroring the persisted-settings table's optional `bespoke` validators.
+The four carriers and their bags:
+
+| Carrier | Type | Attribute object |
+| --- | --- | --- |
+| `{id}_timer_fin` | select | `{realert_interval, finished_hold}` |
+| `{id}_timer_buz` | select | `{countdown_seconds, melody_tick, melody_end}` |
+| `{id}_timer_rem` | sensor | `{remaining_publish_interval}` |
+| `{id}_timer_state` | sensor | `{max_duration, remaining_publish_interval, app_config_timeout, icon_enabled, bar_enabled, bar_color, sync_follow, sync_targets}` |
+
+- **vs. keeping per-key bespoke publish paths** (the PRD #17 `realert_interval` shape)
+  — rejected: it does not scale to thirteen knobs across four carriers without drift
+  between the publish, the full-refresh, and the per-edit republish. The table makes
+  adding or moving a knob's HA projection a one-row change, and the refresh/republish
+  derive from the same table, so a new row cannot be silently skipped.
+
+### 4. Read-only sync attributes do not reverse ADR-0006
+
+The two sync-role keys (`sync_follow` / `sync_targets`) are projected as read-only
+attributes on the state sensor — they become **visible** in HA. They remain
+**non-writable from HA** (the attribute is observation only) and, crucially, **never
+propagated** to peers: they are still the `inSnapshot == false` rows of
+`TIMER_SETTINGS_DESCS` (ADR-0007), deliberately excluded from the config snapshot so
+peers cannot hijack each other's targeting. Making a value *observable* is orthogonal
+to making it *propagated* or *writable*; [ADR-0006](0006-timer-multi-device-sync.md)
+stands unchanged.
+
+## Consequences
+
+- Adding or moving a knob's HA projection is now a **single row** in
+  `TIMER_ATTR_GROUP_DESCS`; the full wire refresh (`publishAllAttributeGroups()` at
+  discovery-enable and every MQTT reconnect) and the per-edit republish (locally and on
+  peer-propagated config edits alike) both derive from the table, so a new row is
+  picked up everywhere automatically. The on-device `TIMER`-menu long-press commit
+  refreshes every carrier after its peer broadcast (it does not track which knob
+  changed) — closing a staleness gap that existed for `realert_interval` (#60).
+- Teardown (`SHOW_TIMER` true→false) now clears each carrier's retained `json_attr_t`
+  object (`clearAllAttributeGroups()`) alongside pruning the discovery entities, so the
+  broker is not left holding orphaned attribute payloads — retroactively fixing the same
+  gap for the legacy `realert_interval` attribute (#60).
+- The `HASensor` opt-in is exercised on the host under the `native_ha` environment
+  (mirroring the `HASelect` attribute tests); the table + builder and the
+  publish/refresh/republish are covered by pure host tests and wire-seam stub tests in
+  `test/test_timer`. No device behavior changed outside the HA observation surface.
+- Documentation reconciled: CONTEXT.md's "Timer HA presence" / "Reusable opt-in
+  capability" and timer.md's "Home Assistant entities" / "Behavior-tuning knobs" now
+  describe all four carriers and the `HASensor` capability.
+
+Generalizes PRD #17; see [PRD #57](https://github.com/ltloopy/awtrix3/issues/57) and
+issues #58–#60. Related: [ADR-0001](0001-timer-command-validation-parity.md)
+(control vs. observation surface), [ADR-0006](0006-timer-multi-device-sync.md) (sync
+identity stays local), [ADR-0007](0007-timer-settings-descriptor-table.md) (the
+`inSnapshot` boundary and the descriptor-table family).

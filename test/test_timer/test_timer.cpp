@@ -2199,6 +2199,38 @@ void test_M9_menu_commit_one_persistbatch_flushes_both_namespaces(void) {
     TEST_ASSERT_EQUAL_UINT8((uint8_t)BuzzerMode::Countdown, (uint8_t)TimerManager.getBuzzerMode());
 }
 
+// M11 — the TIMER-menu long-press commit refreshes every HA attribute group
+// (issue #60): after the PersistBatch commit and the peer broadcast, the commit
+// republishes every carrier's attribute object, so an on-device edit of a menu
+// knob (finished_hold/realert_interval/countdown_seconds/icon/bar) refreshes its
+// HA attribute immediately instead of waiting for the next reconnect — closing
+// the staleness gap. Mirrors MenuManager's TimerConfigMenu commit seam (device-
+// only; reproduced here in production order), pinning the new attribute refresh.
+void test_M11_menu_commit_republishes_all_attribute_groups(void) {
+    TIMER_SYNC_TARGETS = "all";   // sync on, so the commit's peer broadcast actually emits
+
+    timerMenuAdjust(3, +1);   // finished_hold 10 -> 15: a menu knob, live in RAM, NVS deferred
+
+    {   // the long-press commit window, then broadcast, then the attribute refresh
+        TimerManager_::PersistBatch batch(TimerManager);
+        batch.markTableDirty();
+    }
+    TimerManager.broadcastConfig();
+    TimerManager.publishAllAttributeGroups();
+
+    // The peer broadcast went out ...
+    TEST_ASSERT_EQUAL_INT(1, fixture::sync_packet_count());
+    // ... and every carrier's attribute object was refreshed exactly once.
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_FINISHED_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_BUZZER_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_STATE_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_REMAINING_ATTR_TOPIC));
+    // The just-committed knob's new value is in its carrier's refreshed bag.
+    const PublishCall *fin = fixture::last_publish(fixture::TIMER_FINISHED_ATTR_TOPIC);
+    TEST_ASSERT_NOT_NULL(fin);
+    TEST_ASSERT_NOT_NULL(strstr(fin->payload.c_str(), "\"finished_hold\":15"));
+}
+
 // ============================================================================
 // TIMER per-enum codec table (src/TimerEnums.cpp). The fifth descriptor-table
 // family member: one row per enum value, indexed by the enum's numeric value,
@@ -3095,6 +3127,50 @@ void test_W23_sync_follow_edit_republishes_state_but_does_not_propagate(void) {
     TEST_ASSERT_EQUAL_INT(0, fixture::sync_packet_count());
 }
 
+// ============================================================================
+// W24 — teardown clears each carrier's retained attribute object (issue #60):
+// clearAllAttributeGroups() puts an EMPTY (retained) payload on every distinct
+// carrier's json_attr_t topic, exactly once, so disabling the Timer leaves no
+// orphaned attribute payload behind the pruned discovery config. The mirror of
+// publishAllAttributeGroups (W17): the same carriers, an empty payload instead
+// of a bag. removeTimerHAEntities() rides this through the wire seam alongside
+// the discovery-config teardown (device-only; the seam is asserted here).
+// ============================================================================
+void test_W24_clearAllAttributeGroups_empties_each_carrier(void) {
+    TimerManager.clearAllAttributeGroups();
+
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_FINISHED_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_BUZZER_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_STATE_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_REMAINING_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(4, (int)MQTTManager.recorded.size());   // exactly the four carriers
+
+    // Empty payload == a retained clear (the broker drops the retained object).
+    const PublishCall *st = fixture::last_publish(fixture::TIMER_STATE_ATTR_TOPIC);
+    TEST_ASSERT_NOT_NULL(st);
+    TEST_ASSERT_EQUAL_STRING("", st->payload.c_str());
+}
+
+// ============================================================================
+// W25 — re-enabling after teardown leaves no empty/stale attribute (issue #60,
+// acceptance criterion 3): a clear (the SHOW_TIMER true->false teardown) followed
+// by the existing refresh path (publishAllAttributeGroups, what enableTimerHA-
+// Discovery / reconnect run) overwrites each carrier's json_attr_t with a
+// populated bag, so the LAST retained value a late HA subscriber reads is the live
+// config, never the empty clear.
+// ============================================================================
+void test_W25_refresh_after_clear_repopulates_attributes(void) {
+    TimerManager.clearAllAttributeGroups();      // SHOW_TIMER true->false teardown
+    TimerManager.publishAllAttributeGroups();    // SHOW_TIMER false->true refresh
+
+    const PublishCall *st = fixture::last_publish(fixture::TIMER_STATE_ATTR_TOPIC);
+    TEST_ASSERT_NOT_NULL(st);
+    TEST_ASSERT_NOT_NULL(strstr(st->payload.c_str(), "\"max_duration\""));
+    const PublishCall *fin = fixture::last_publish(fixture::TIMER_FINISHED_ATTR_TOPIC);
+    TEST_ASSERT_NOT_NULL(fin);
+    TEST_ASSERT_NOT_NULL(strstr(fin->payload.c_str(), "\"realert_interval\""));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
@@ -3186,6 +3262,7 @@ int main(int, char **) {
     RUN_TEST(test_M7_enum_adjust_defers_persist_until_commit);
     RUN_TEST(test_M8_enum_labels_source_from_codec);
     RUN_TEST(test_M9_menu_commit_one_persistbatch_flushes_both_namespaces);
+    RUN_TEST(test_M11_menu_commit_republishes_all_attribute_groups);
     RUN_TEST(test_T9_codec_tables_well_formed);
     RUN_TEST(test_T10_codec_roundtrip_aliases_and_case);
     RUN_TEST(test_T11_setting_emit_value_by_type);
@@ -3230,5 +3307,7 @@ int main(int, char **) {
     RUN_TEST(test_W21_publish_interval_change_republishes_both_carriers);
     RUN_TEST(test_W22_bar_color_change_republishes_state_group_as_hex);
     RUN_TEST(test_W23_sync_follow_edit_republishes_state_but_does_not_propagate);
+    RUN_TEST(test_W24_clearAllAttributeGroups_empties_each_carrier);
+    RUN_TEST(test_W25_refresh_after_clear_repopulates_attributes);
     return UNITY_END();
 }

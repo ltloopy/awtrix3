@@ -201,6 +201,12 @@ public:
     // never sees an entity with missing attributes.
     void publishAllAttributeGroups();
 
+    // Clear (empty retained payload) every distinct carrier's json_attr_t topic —
+    // the teardown mirror of publishAllAttributeGroups(). The discovery teardown
+    // (removeTimerHAEntities, SHOW_TIMER true->false) calls this so disabling the
+    // Timer leaves no orphaned attribute object retained on the broker (issue #60).
+    void clearAllAttributeGroups();
+
     TimerCmdResult parseCommand(const char *json);
 
     // -- Propagation surface --
