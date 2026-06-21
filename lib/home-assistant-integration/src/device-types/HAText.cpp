@@ -8,7 +8,8 @@ HAText::HAText(const char* uniqueId) :
     HABaseDeviceType(AHATOFSTR(HAComponentText), uniqueId),
     _icon(nullptr),
     _retain(false),
-    _messageCallback(nullptr)
+    _messageCallback(nullptr),
+    _jsonAttributes(false)
 {
 
 }
@@ -18,13 +19,22 @@ bool HAText::setState(const char* value, bool force)
     return publishOnDataTopic(AHATOFSTR(HAStateTopic), value, true);
 }
 
+bool HAText::publishJsonAttributes(const char* json)
+{
+    if (!json) {
+        return false;
+    }
+
+    return publishOnDataTopic(AHATOFSTR(HAJsonAttributesTopic), json, true);
+}
+
 void HAText::buildSerializer()
 {
     if (_serializer || !uniqueId()) {
         return;
     }
 
-    _serializer = new HASerializer(this, 8);
+    _serializer = new HASerializer(this, 9); // 9 - max properties nb (incl. json_attr_t)
     _serializer->set(AHATOFSTR(HANameProperty), _name);
     _serializer->set(AHATOFSTR(HAUniqueIdProperty), _uniqueId);
     _serializer->set(AHATOFSTR(HAIconProperty), _icon);
@@ -41,6 +51,10 @@ void HAText::buildSerializer()
     _serializer->set(HASerializer::WithAvailability);
     _serializer->topic(AHATOFSTR(HAStateTopic));
     _serializer->topic(AHATOFSTR(HACommandTopic));
+
+    if (_jsonAttributes) {
+        _serializer->topic(AHATOFSTR(HAJsonAttributesTopic));
+    }
 }
 
 void HAText::onMqttConnected()
