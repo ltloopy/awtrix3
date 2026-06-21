@@ -2199,6 +2199,38 @@ void test_M9_menu_commit_one_persistbatch_flushes_both_namespaces(void) {
     TEST_ASSERT_EQUAL_UINT8((uint8_t)BuzzerMode::Countdown, (uint8_t)TimerManager.getBuzzerMode());
 }
 
+// M11 — the TIMER-menu long-press commit refreshes every HA attribute group
+// (issue #60): after the PersistBatch commit and the peer broadcast, the commit
+// republishes every carrier's attribute object, so an on-device edit of a menu
+// knob (finished_hold/realert_interval/countdown_seconds/icon/bar) refreshes its
+// HA attribute immediately instead of waiting for the next reconnect — closing
+// the staleness gap. Mirrors MenuManager's TimerConfigMenu commit seam (device-
+// only; reproduced here in production order), pinning the new attribute refresh.
+void test_M11_menu_commit_republishes_all_attribute_groups(void) {
+    TIMER_SYNC_TARGETS = "all";   // sync on, so the commit's peer broadcast actually emits
+
+    timerMenuAdjust(3, +1);   // finished_hold 10 -> 15: a menu knob, live in RAM, NVS deferred
+
+    {   // the long-press commit window, then broadcast, then the attribute refresh
+        TimerManager_::PersistBatch batch(TimerManager);
+        batch.markTableDirty();
+    }
+    TimerManager.broadcastConfig();
+    TimerManager.publishAllAttributeGroups();
+
+    // The peer broadcast went out ...
+    TEST_ASSERT_EQUAL_INT(1, fixture::sync_packet_count());
+    // ... and every carrier's attribute object was refreshed exactly once.
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_FINISHED_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_BUZZER_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_STATE_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_REMAINING_ATTR_TOPIC));
+    // The just-committed knob's new value is in its carrier's refreshed bag.
+    const PublishCall *fin = fixture::last_publish(fixture::TIMER_FINISHED_ATTR_TOPIC);
+    TEST_ASSERT_NOT_NULL(fin);
+    TEST_ASSERT_NOT_NULL(strstr(fin->payload.c_str(), "\"finished_hold\":15"));
+}
+
 // ============================================================================
 // TIMER per-enum codec table (src/TimerEnums.cpp). The fifth descriptor-table
 // family member: one row per enum value, indexed by the enum's numeric value,
@@ -2359,18 +2391,81 @@ void test_T13_attribute_group_buzzer_bag(void) {
 }
 
 // T14 — the attribute-group table is well-formed: every row maps to a real
-// settings row (the cmdKey resolves via timerSettingByCmdKey), and the two
-// lit-up carriers in this slice are exactly the buzzer and finished selects.
+// settings row (the cmdKey resolves via timerSettingByCmdKey), and the lit-up
+// carriers are exactly the buzzer/finished selects plus the state/remaining
+// sensors (PRD #57 / issue #59 extended the opt-in to HASensor).
 void test_T14_attribute_group_table_well_formed(void) {
     TEST_ASSERT_TRUE(TIMER_ATTR_GROUP_DESC_COUNT >= 5);
     for (size_t i = 0; i < TIMER_ATTR_GROUP_DESC_COUNT; ++i) {
         const TimerAttrGroupDesc &g = TIMER_ATTR_GROUP_DESCS[i];
         TEST_ASSERT_NOT_NULL(g.cmdKey);
         TEST_ASSERT_NOT_NULL_MESSAGE(timerSettingByCmdKey(g.cmdKey), g.cmdKey);
-        // This slice only lights up the two HASelect carriers.
-        TEST_ASSERT_TRUE(g.carrier == TimerHaEntity::Buzzer ||
-                         g.carrier == TimerHaEntity::Finished);
+        // The lit-up carriers: the two HASelects and the two HASensors.
+        TEST_ASSERT_TRUE(g.carrier == TimerHaEntity::Buzzer   ||
+                         g.carrier == TimerHaEntity::Finished ||
+                         g.carrier == TimerHaEntity::State    ||
+                         g.carrier == TimerHaEntity::Remaining);
     }
+}
+
+// T15 — the state-sensor carrier's attribute bag (timerBuildAttributeGroup):
+// exactly the eight config-view keys in table order, carrying live values, with
+// bar_color rendered as the human "#RRGGBB" string via the per-row formatter
+// (deliberately different from its raw-int config-snapshot form). sync_follow /
+// sync_targets ride here as read-only attributes despite inSnapshot=false.
+void test_T15_attribute_group_state_bag(void) {
+    TIMER_MAX_DURATION     = 7200;
+    TIMER_PUBLISH_INTERVAL = 5;
+    TIMER_CONFIG_TIMEOUT   = 45;
+    TIMER_ICON_ENABLED     = false;
+    TIMER_BAR_ENABLED      = true;
+    TIMER_BAR_COLOR        = 0xFF8800;
+    TIMER_SYNC_FOLLOW      = true;
+    TIMER_SYNC_TARGETS     = "all";
+
+    StaticJsonDocument<512> doc;
+    timerBuildAttributeGroup(TimerHaEntity::State, doc);
+
+    TEST_ASSERT_EQUAL_UINT32(7200, doc["max_duration"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(5,    doc["remaining_publish_interval"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(45,   doc["app_config_timeout"].as<uint32_t>());
+    TEST_ASSERT_FALSE(doc["icon_enabled"].as<bool>());
+    TEST_ASSERT_TRUE(doc["bar_enabled"].as<bool>());
+    TEST_ASSERT_EQUAL_STRING("#FF8800", doc["bar_color"].as<const char *>());
+    TEST_ASSERT_TRUE(doc["sync_follow"].as<bool>());
+    TEST_ASSERT_EQUAL_STRING("all", doc["sync_targets"].as<const char *>());
+    TEST_ASSERT_EQUAL_INT(8, (int)doc.as<JsonObjectConst>().size());
+}
+
+// T16 — the remaining-sensor carrier's attribute bag: exactly
+// {remaining_publish_interval} (that sensor's own cadence), live value, nothing
+// else. The key is shared with the state bag (T15) — one settings row, two carriers.
+void test_T16_attribute_group_remaining_bag(void) {
+    TIMER_PUBLISH_INTERVAL = 9;
+
+    StaticJsonDocument<256> doc;
+    timerBuildAttributeGroup(TimerHaEntity::Remaining, doc);
+
+    TEST_ASSERT_EQUAL_UINT32(9, doc["remaining_publish_interval"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_INT(1, (int)doc.as<JsonObjectConst>().size());
+}
+
+// T17 — the bar_color formatter renders the human attribute string: "default"
+// when 0 (follow text color, ADR-0004), else uppercase "#RRGGBB". This is the
+// only formatter row; it deliberately differs from the raw-int config snapshot.
+void test_T17_bar_color_formatter_renders_default_or_hex(void) {
+    const TimerSettingDesc *d = timerSettingByCmdKey("bar_color");
+    TEST_ASSERT_NOT_NULL(d);
+
+    TIMER_BAR_COLOR = 0;
+    StaticJsonDocument<512> off;
+    timerBuildAttributeGroup(TimerHaEntity::State, off);
+    TEST_ASSERT_EQUAL_STRING("default", off["bar_color"].as<const char *>());
+
+    TIMER_BAR_COLOR = 0x00FF00;
+    StaticJsonDocument<512> green;
+    timerBuildAttributeGroup(TimerHaEntity::State, green);
+    TEST_ASSERT_EQUAL_STRING("#00FF00", green["bar_color"].as<const char *>());
 }
 
 // ============================================================================
@@ -2904,7 +2999,9 @@ void test_W17_publishAllAttributeGroups_each_carrier_once(void) {
 
     TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_FINISHED_ATTR_TOPIC));
     TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_BUZZER_ATTR_TOPIC));
-    TEST_ASSERT_EQUAL_INT(2, (int)MQTTManager.recorded.size());   // exactly the two carriers
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_STATE_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_REMAINING_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(4, (int)MQTTManager.recorded.size());   // exactly the four carriers
 }
 
 // ============================================================================
@@ -2924,6 +3021,154 @@ void test_W18_countdown_change_republishes_buzzer_group_only(void) {
         attr->payload.c_str());
     TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_BUZZER_ATTR_TOPIC));
     TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_FINISHED_ATTR_TOPIC));
+}
+
+// ============================================================================
+// W19 — the state sensor's attribute bag on the wire (PRD #57 / issue #59):
+// publishAttributeGroup(State) puts the eight-key config view — live values,
+// bar_color as the "#RRGGBB" human string — on the state sensor's json_attr_t
+// topic, and only there. Proves the HASensor carrier rides the same wire seam.
+// ============================================================================
+void test_W19_publish_state_group_emits_full_config_view(void) {
+    TIMER_MAX_DURATION     = 7200;
+    TIMER_PUBLISH_INTERVAL = 5;
+    TIMER_CONFIG_TIMEOUT   = 45;
+    TIMER_ICON_ENABLED     = false;
+    TIMER_BAR_ENABLED      = true;
+    TIMER_BAR_COLOR        = 0xFF8800;
+    TIMER_SYNC_FOLLOW      = true;
+    TIMER_SYNC_TARGETS     = "all";
+
+    TimerManager.publishAttributeGroup(TimerHaEntity::State);
+
+    const PublishCall *attr = fixture::last_publish(fixture::TIMER_STATE_ATTR_TOPIC);
+    TEST_ASSERT_NOT_NULL(attr);
+    TEST_ASSERT_EQUAL_STRING(
+        "{\"max_duration\":7200,\"remaining_publish_interval\":5,"
+        "\"app_config_timeout\":45,\"icon_enabled\":false,\"bar_enabled\":true,"
+        "\"bar_color\":\"#FF8800\",\"sync_follow\":true,\"sync_targets\":\"all\"}",
+        attr->payload.c_str());
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_STATE_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_STATE_TOPIC));
+}
+
+// ============================================================================
+// W20 — the remaining sensor's attribute bag on the wire (PRD #57 / issue #59):
+// publishAttributeGroup(Remaining) puts {remaining_publish_interval} — that
+// sensor's own cadence — on the remaining sensor's json_attr_t topic, and only there.
+// ============================================================================
+void test_W20_publish_remaining_group_emits_publish_interval(void) {
+    TIMER_PUBLISH_INTERVAL = 9;
+
+    TimerManager.publishAttributeGroup(TimerHaEntity::Remaining);
+
+    const PublishCall *attr = fixture::last_publish(fixture::TIMER_REMAINING_ATTR_TOPIC);
+    TEST_ASSERT_NOT_NULL(attr);
+    TEST_ASSERT_EQUAL_STRING("{\"remaining_publish_interval\":9}", attr->payload.c_str());
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_REMAINING_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_REMAINING_TOPIC));
+}
+
+// ============================================================================
+// W21 — editing remaining_publish_interval republishes BOTH carriers that map it
+// (PRD #57 / issue #59): the key rides the remaining sensor (its cadence) and the
+// state sensor (complete config view), so a config command carrying it makes
+// parseCommand republish each carrier EXACTLY once, reflecting the just-applied
+// value. Pins the multi-carrier fan-out of the table-driven republish loop.
+// ============================================================================
+void test_W21_publish_interval_change_republishes_both_carriers(void) {
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.parseCommand("{\"remaining_publish_interval\":7}")));
+
+    const PublishCall *rem = fixture::last_publish(fixture::TIMER_REMAINING_ATTR_TOPIC);
+    const PublishCall *st  = fixture::last_publish(fixture::TIMER_STATE_ATTR_TOPIC);
+    TEST_ASSERT_NOT_NULL(rem);
+    TEST_ASSERT_NOT_NULL(st);
+    TEST_ASSERT_EQUAL_STRING("{\"remaining_publish_interval\":7}", rem->payload.c_str());
+    TEST_ASSERT_NOT_NULL(strstr(st->payload.c_str(), "\"remaining_publish_interval\":7"));
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_REMAINING_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_STATE_ATTR_TOPIC));
+    // No other carrier churns.
+    TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_FINISHED_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_BUZZER_ATTR_TOPIC));
+}
+
+// ============================================================================
+// W22 — editing bar_color republishes the state bag with the "#RRGGBB" human
+// string (PRD #57 / issue #59): the formatter is on the wire path too, not just
+// the bag builder. Proves the attribute representation differs from the raw-int
+// config snapshot end-to-end through parseCommand.
+// ============================================================================
+void test_W22_bar_color_change_republishes_state_group_as_hex(void) {
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.parseCommand("{\"bar_color\":\"#123ABC\"}")));
+
+    const PublishCall *st = fixture::last_publish(fixture::TIMER_STATE_ATTR_TOPIC);
+    TEST_ASSERT_NOT_NULL(st);
+    TEST_ASSERT_NOT_NULL(strstr(st->payload.c_str(), "\"bar_color\":\"#123ABC\""));
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_STATE_ATTR_TOPIC));
+}
+
+// ============================================================================
+// W23 — sync_follow / sync_targets are read-only state-sensor attributes that are
+// STILL never propagated to peers (PRD #57 / issue #59, preserving ADR-0006):
+// editing sync_follow republishes the state attribute bag (so HA stays current)
+// but, being inSnapshot=false local identity, broadcasts NOTHING to peers.
+// ============================================================================
+void test_W23_sync_follow_edit_republishes_state_but_does_not_propagate(void) {
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.parseCommand("{\"sync_follow\":true}")));
+
+    const PublishCall *st = fixture::last_publish(fixture::TIMER_STATE_ATTR_TOPIC);
+    TEST_ASSERT_NOT_NULL(st);
+    TEST_ASSERT_NOT_NULL(strstr(st->payload.c_str(), "\"sync_follow\":true"));
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_STATE_ATTR_TOPIC));
+    // Local identity: no config (or any) packet goes out to peers.
+    TEST_ASSERT_EQUAL_INT(0, fixture::sync_packet_count());
+}
+
+// ============================================================================
+// W24 — teardown clears each carrier's retained attribute object (issue #60):
+// clearAllAttributeGroups() puts an EMPTY (retained) payload on every distinct
+// carrier's json_attr_t topic, exactly once, so disabling the Timer leaves no
+// orphaned attribute payload behind the pruned discovery config. The mirror of
+// publishAllAttributeGroups (W17): the same carriers, an empty payload instead
+// of a bag. removeTimerHAEntities() rides this through the wire seam alongside
+// the discovery-config teardown (device-only; the seam is asserted here).
+// ============================================================================
+void test_W24_clearAllAttributeGroups_empties_each_carrier(void) {
+    TimerManager.clearAllAttributeGroups();
+
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_FINISHED_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_BUZZER_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_STATE_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_REMAINING_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(4, (int)MQTTManager.recorded.size());   // exactly the four carriers
+
+    // Empty payload == a retained clear (the broker drops the retained object).
+    const PublishCall *st = fixture::last_publish(fixture::TIMER_STATE_ATTR_TOPIC);
+    TEST_ASSERT_NOT_NULL(st);
+    TEST_ASSERT_EQUAL_STRING("", st->payload.c_str());
+}
+
+// ============================================================================
+// W25 — re-enabling after teardown leaves no empty/stale attribute (issue #60,
+// acceptance criterion 3): a clear (the SHOW_TIMER true->false teardown) followed
+// by the existing refresh path (publishAllAttributeGroups, what enableTimerHA-
+// Discovery / reconnect run) overwrites each carrier's json_attr_t with a
+// populated bag, so the LAST retained value a late HA subscriber reads is the live
+// config, never the empty clear.
+// ============================================================================
+void test_W25_refresh_after_clear_repopulates_attributes(void) {
+    TimerManager.clearAllAttributeGroups();      // SHOW_TIMER true->false teardown
+    TimerManager.publishAllAttributeGroups();    // SHOW_TIMER false->true refresh
+
+    const PublishCall *st = fixture::last_publish(fixture::TIMER_STATE_ATTR_TOPIC);
+    TEST_ASSERT_NOT_NULL(st);
+    TEST_ASSERT_NOT_NULL(strstr(st->payload.c_str(), "\"max_duration\""));
+    const PublishCall *fin = fixture::last_publish(fixture::TIMER_FINISHED_ATTR_TOPIC);
+    TEST_ASSERT_NOT_NULL(fin);
+    TEST_ASSERT_NOT_NULL(strstr(fin->payload.c_str(), "\"realert_interval\""));
 }
 
 int main(int, char **) {
@@ -3017,12 +3262,16 @@ int main(int, char **) {
     RUN_TEST(test_M7_enum_adjust_defers_persist_until_commit);
     RUN_TEST(test_M8_enum_labels_source_from_codec);
     RUN_TEST(test_M9_menu_commit_one_persistbatch_flushes_both_namespaces);
+    RUN_TEST(test_M11_menu_commit_republishes_all_attribute_groups);
     RUN_TEST(test_T9_codec_tables_well_formed);
     RUN_TEST(test_T10_codec_roundtrip_aliases_and_case);
     RUN_TEST(test_T11_setting_emit_value_by_type);
     RUN_TEST(test_T12_attribute_group_finished_bag);
     RUN_TEST(test_T13_attribute_group_buzzer_bag);
     RUN_TEST(test_T14_attribute_group_table_well_formed);
+    RUN_TEST(test_T15_attribute_group_state_bag);
+    RUN_TEST(test_T16_attribute_group_remaining_bag);
+    RUN_TEST(test_T17_bar_color_formatter_renders_default_or_hex);
     RUN_TEST(test_CE1_enter_decomposes_and_activates);
     RUN_TEST(test_CE2_adjust_default_cap_wraps_HH_at_23);
     RUN_TEST(test_CE3_adjust_tight_cap_recomputes_per_field);
@@ -3053,5 +3302,12 @@ int main(int, char **) {
     RUN_TEST(test_W16_publish_buzzer_group_emits_countdown_and_melodies);
     RUN_TEST(test_W17_publishAllAttributeGroups_each_carrier_once);
     RUN_TEST(test_W18_countdown_change_republishes_buzzer_group_only);
+    RUN_TEST(test_W19_publish_state_group_emits_full_config_view);
+    RUN_TEST(test_W20_publish_remaining_group_emits_publish_interval);
+    RUN_TEST(test_W21_publish_interval_change_republishes_both_carriers);
+    RUN_TEST(test_W22_bar_color_change_republishes_state_group_as_hex);
+    RUN_TEST(test_W23_sync_follow_edit_republishes_state_but_does_not_propagate);
+    RUN_TEST(test_W24_clearAllAttributeGroups_empties_each_carrier);
+    RUN_TEST(test_W25_refresh_after_clear_repopulates_attributes);
     return UNITY_END();
 }

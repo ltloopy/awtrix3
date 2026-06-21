@@ -26,6 +26,8 @@ Three numeric tunings, each only meaningful in one specific mode:
 
 Persisted in NVS namespace `"awtrix"` (keys `TFHOLD` / `TRALERT` / `TCDOWN`). `dev.json` overrides NVS on every boot. The accepted ranges and persistence for these — and for every value-config key below — are defined once in the persisted-settings table `TIMER_SETTINGS_DESCS` ([src/TimerSettings.h](src/TimerSettings.h)); each surface (`POST /api/timer` / `{prefix}/timer`, `dev.json`, NVS, the `TIMER` menu's clamp, the sync snapshot) is driven from that one table (ADR-0007).
 
+> **"Tuning knobs" — two senses, kept distinct.** The glossary reserves **"tuning knobs"** for *these three* per-mode timing knobs (the ADR-0003 sense) — that narrow reservation is **preserved**. timer.md's **"behavior-tuning knobs"** table is a broader *umbrella* over every persisted-settings row (`TIMER_SETTINGS_DESCS`), not the reserved three. As of PRD #57 / ADR-0014 **every persisted-settings row is additionally projected as a read-only HA attribute on its semantic carrier** (see **Timer HA presence** below); this changes only HA *visibility*, not the glossary's narrow reservation. _Avoid_: reading the umbrella table's name as the reserved three, or the reverse.
+
 ### Timer behavior parameters
 
 Three user-editable parameters that shape Timer behavior outside of the **per-mode timing knobs** above. **Each is a distinct category** — they are *not* "tuning knobs" in the ADR-0003 sense. Listed individually so future readers don't lump them. See ADR-0004.
@@ -36,7 +38,7 @@ Three user-editable parameters that shape Timer behavior outside of the **per-mo
 | **Remaining publish interval** | Output cadence | `TIMER_PUBLISH_INTERVAL` | 1 s | How often `timer_rem` republishes while Running (also drives the HA `{id}_timer_rem` sensor). |
 | **App config timeout** | UI timing | `TIMER_CONFIG_TIMEOUT` | 30 s | No-input idle window before **Timer-app config mode** auto-applies and exits to `Idle`. Does **not** apply to the **TIMER global menu**. |
 
-All three reach: `dev.json` (`timer_max_duration` / `timer_remaining_publish_interval` / `timer_app_config_timeout`), MQTT/HTTP `{prefix}/timer` (`max_duration` / `remaining_publish_interval` / `app_config_timeout`), NVS namespace `"awtrix"` (keys `TMAXD` / `TPUBI` / `TCFGT`). `dev.json` overrides NVS on every boot. No on-device menu; no HA entities.
+All three reach: `dev.json` (`timer_max_duration` / `timer_remaining_publish_interval` / `timer_app_config_timeout`), MQTT/HTTP `{prefix}/timer` (`max_duration` / `remaining_publish_interval` / `app_config_timeout`), NVS namespace `"awtrix"` (keys `TMAXD` / `TPUBI` / `TCFGT`). `dev.json` overrides NVS on every boot. No on-device menu; no HA *entity* — but all three are **observable** as read-only HA attributes (`max_duration` / `app_config_timeout` on the state sensor, `remaining_publish_interval` on the remaining + state sensors) per **Timer HA presence** below.
 
 _Avoid_: "tuning knobs" (reserved for the three per-mode knobs above); "compile-time globals" (they aren't — they're runtime-mutable as of ADR-0004).
 
@@ -120,11 +122,11 @@ run-state trio plus the member table's publish hooks (deduped, so the shared
 icons hook fires once). Because the config half is derived from the table, a new
 published row cannot be silently skipped by the refresh.
 
-Selects also carry read-only **JSON attribute groups** (PRD #57 / issue #58,
+Carrier entities also carry read-only **JSON attribute groups** (PRD #57 / ADR-0014,
 generalizing the bespoke `realert_interval` of PRD #17): the vendored ArduinoHA
-`HASelect` has an opt-in `setJsonAttributes(bool)` capability, so a carrier
-select's discovery config advertises a `json_attr_t` topic. Which settings key
-rides which carrier is a one-row fact in the `TIMER_ATTR_GROUP_DESCS` table; one
+`HASelect` (#58) and `HASensor` (#59) each have an opt-in `setJsonAttributes(bool)`
+capability, so a carrier's discovery config advertises a `json_attr_t` topic. Which
+settings key rides which carrier is a one-row fact in the `TIMER_ATTR_GROUP_DESCS` table; one
 generic builder (`timerBuildAttributeGroup`) turns a carrier's rows into a JSON
 object, reusing the same `timerSettingEmitValue` the config snapshot uses so the
 two can never disagree about a value. The retained object rides the wire seam to
@@ -152,37 +154,57 @@ buttons. Their ids, names, icons and option strings come from the
 family alongside `TIMER_SETTINGS_DESCS`, `TIMER_MEMBER_CONFIG_DESCS`,
 `TIMER_MENU_SLOTS` and `TIMER_ATTR_GROUP_DESCS` — and the full list lives in
 [timer.md](docs/timer.md). On the `SHOW_TIMER true → false` transition the firmware
-publishes empty retained discovery payloads so HA prunes the stale entities.
+publishes empty retained discovery payloads so HA prunes the stale entities, and
+clears each attribute carrier's retained `json_attr_t` object
+(`clearAllAttributeGroups()`) so the broker is left holding no orphaned attribute
+payload (issue #60).
 
 **Read-only attribute groups.** Beyond its own state, a carrier entity can carry a
 **read-only JSON attribute object** projecting persisted settings, so a user can read
-the device's live configuration from inside HA (PRD #57). Which key rides which carrier
-is the `TIMER_ATTR_GROUP_DESCS` table (the descriptor-table family's fifth member),
-each row a `{carrier, settings-key, optional formatter}`; a key may map to multiple
-carriers. The two carriers lit up today are both `HASelect`s: the `{id}_timer_fin`
-finished select carries `{realert_interval, finished_hold}` ("what happens at zero"),
-and the `{id}_timer_buz` buzzer select carries `{countdown_seconds, melody_tick,
-melody_end}`. Values are read-only from HA; they change only through their config keys,
-never the attribute. Each carrier's retained object rides the **Timer wire seam** to
+the device's live configuration from inside HA (PRD #57, ADR-0014). Which key rides
+which carrier is the `TIMER_ATTR_GROUP_DESCS` table (the descriptor-table family's
+fifth member), each row a `{carrier, settings-key, optional formatter}`; a key may map
+to multiple carriers (one row each). **All four carriers** are lit up today — two
+`HASelect`s and two `HASensor`s (#58 lit the selects, #59 the sensors): the
+`{id}_timer_fin` finished select carries `{realert_interval, finished_hold}` ("what
+happens at zero"), the `{id}_timer_buz` buzzer select carries `{countdown_seconds,
+melody_tick, melody_end}`, the `{id}_timer_rem` remaining sensor carries
+`{remaining_publish_interval}` (its own cadence), and the `{id}_timer_state` state
+sensor carries the full config bag `{max_duration, remaining_publish_interval,
+app_config_timeout, icon_enabled, bar_enabled, bar_color, sync_follow, sync_targets}`.
+`remaining_publish_interval` rides **two** carriers (one settings row, two table rows);
+`bar_color` carries a per-row formatter so it renders as `"default"`/`"#RRGGBB"` rather
+than its raw-int snapshot form. Values are read-only from HA; they change only through
+their config keys, never the attribute. Each carrier's retained object rides the
+**Timer wire seam** to
 its `json_attr_t` topic via `publishAttributeGroup(carrier)` and is (re)published so HA
 never drifts from the device: at **discovery-enable** and every **MQTT (re)connect**
 (`publishAllAttributeGroups()`, right after the wire refresh), and on any **edit of a
 mapped key** — `parseCommand` republishes exactly the affected carrier(s), on **local
 and peer-propagated** edits alike (the edit rides the **propagation surface** into each
-peer's `parseCommand`, which fires the same republish). Being retained, the last value
+peer's `parseCommand`, which fires the same republish). The **on-device `TIMER`-menu long-press commit**
+also refreshes every carrier (`publishAllAttributeGroups()`, after its peer
+broadcast), since a menu commit does not track which knob changed (issue #60).
+Being retained, the last value
 survives an HA or broker restart with no extra publish.
 
 **Reusable opt-in capability.** JSON attributes are a generic, opt-in capability on the
-vendored ArduinoHA `HASelect`, not a Timer-specific hack: `setJsonAttributes(true)` adds
-the `json_attr_t` topic to that select's discovery config and `publishJsonAttributes(json)`
-sends a retained object. It defaults **off**, so a select that has not opted in keeps its
-discovery payload byte-for-byte unchanged. The buzzer and finished selects are today's
-consumers; another select can adopt attributes with no further library change (extending
-the capability to `HASensor` for the remaining/state sensors is a later PRD-#57 slice).
+vendored ArduinoHA device types, not a Timer-specific hack: `setJsonAttributes(true)`
+adds the `json_attr_t` topic to that entity's discovery config and
+`publishJsonAttributes(json)` sends a retained object. It defaults **off**, so an entity
+that has not opted in keeps its discovery payload byte-for-byte unchanged. The capability
+is **per-type, not base-lifted**: it lives on `HASelect` (#58) and `HASensor` (#59) —
+`HASensorNumber` inherits it, so the remaining sensor came for free — because the
+`json_attr_t` discovery-topic line is irreducibly per-subclass (it must be emitted where
+each type's serializer is built and sized), so a base-class lift could not remove it and
+would only touch more code (ADR-0014). All four carriers (the buzzer/finished selects and
+the remaining/state sensors) are today's consumers; another entity type can adopt
+attributes by opting in, with no shared-base change.
 
 _Avoid_: calling an attribute key an HA *entity* (it is an attribute of its carrier
-select) or *writable from HA* (read-only — the config key is the only write path);
-implying the attributes capability is Timer-specific (it is a general `HASelect` opt-in).
+entity) or *writable from HA* (read-only — the config key is the only write path);
+implying the attributes capability is Timer-specific (it is a general per-type opt-in on
+`HASelect`/`HASensor`) or that it should be lifted into the base device type.
 
 ### Propagation surface
 

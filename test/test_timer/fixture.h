@@ -101,6 +101,12 @@ inline const char *TIMER_FINISHED_ATTR_TOPIC = "awtrix_self/a1b2c3d4e5f6/d4e5f6_
 // sibling of TIMER_BUZZER_TOPIC, spelled independently of the TimerHa builders.
 inline const char *TIMER_BUZZER_ATTR_TOPIC = "awtrix_self/a1b2c3d4e5f6/d4e5f6_timer_buz/json_attr_t";
 
+// The state + remaining sensors' JSON-attributes topics (PRD #57 / issue #59):
+// the json_attr_t siblings of TIMER_STATE_TOPIC / TIMER_REMAINING_TOPIC, now that
+// HASensor carries the opt-in too. Spelled independently of the TimerHa builders.
+inline const char *TIMER_STATE_ATTR_TOPIC     = "awtrix_self/a1b2c3d4e5f6/d4e5f6_timer_state/json_attr_t";
+inline const char *TIMER_REMAINING_ATTR_TOPIC = "awtrix_self/a1b2c3d4e5f6/d4e5f6_timer_rem/json_attr_t";
+
 // Duration text entity (issue #34), id per TimerHa.cpp's HAtimerDurID "%s_timer_dur".
 inline const char *TIMER_DURATION_TOPIC = "awtrix_self/a1b2c3d4e5f6/d4e5f6_timer_dur/stat_t";
 

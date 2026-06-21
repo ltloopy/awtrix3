@@ -66,6 +66,24 @@ namespace
         return false;
     }
 
+    // bar_color HA-attribute formatter (PRD #57 / issue #59): renders the stored
+    // 0xRRGGBB int as the human string HA shows -- "default" when 0 (follow the
+    // text color, ADR-0004), else uppercase "#RRGGBB" (matching DisplayManager's
+    // "#%02X%02X%02X" spelling). Deliberately different from the raw-int form the
+    // config snapshot emits via timerSettingEmitValue, which is why it needs a hook.
+    void formatBarColor(const TimerSettingDesc &d, JsonDocument &doc)
+    {
+        uint32_t v = *static_cast<uint32_t *>(d.storage);
+        if (v == 0)
+        {
+            doc[d.cmdKey] = "default";
+            return;
+        }
+        char buf[8];
+        snprintf(buf, sizeof(buf), "#%06X", (unsigned)(v & 0xFFFFFFu));
+        doc[d.cmdKey] = buf;
+    }
+
     // sync_targets: strict string type, then the comma-list rule above.
     bool parseSyncTargets(JsonVariantConst v, TcValue &out)
     {
@@ -243,19 +261,30 @@ const TimerSettingDesc *timerSettingByCmdKey(const char *cmdKey)
 }
 
 // ---------------------------------------------------------------------------
-// HA attribute-group projection (PRD #57 / issue #58). This slice lights up the
-// two carriers that already support JSON attributes (the buzzer + finished
-// HASelects), so no ArduinoHA change is needed yet. realert_interval is listed
-// first on the finished carrier so the folded payload is a superset of the
-// legacy bespoke {"realert_interval":N}. All formatters are nullptr this slice
-// (bar_color's "#RRGGBB" formatter arrives with the state-sensor carrier).
+// HA attribute-group projection (PRD #57 / issues #58, #59). The buzzer + finished
+// HASelects were lit up first (#58); #59 extended the JSON-attributes opt-in to
+// HASensor, lighting up the remaining + state sensors. realert_interval is listed
+// first on the finished carrier so the folded payload is a superset of the legacy
+// bespoke {"realert_interval":N}. remaining_publish_interval rides BOTH the
+// remaining sensor (its own cadence) and the state sensor (a complete config view)
+// -- one settings row, two carrier rows. bar_color carries the per-row formatter
+// so it renders as "default"/"#RRGGBB" rather than its raw-int snapshot form.
 //   carrier, cmdKey, format
 const TimerAttrGroupDesc TIMER_ATTR_GROUP_DESCS[] = {
-    {TimerHaEntity::Finished, "realert_interval",  nullptr},
-    {TimerHaEntity::Finished, "finished_hold",     nullptr},
-    {TimerHaEntity::Buzzer,   "countdown_seconds", nullptr},
-    {TimerHaEntity::Buzzer,   "melody_tick",       nullptr},
-    {TimerHaEntity::Buzzer,   "melody_end",        nullptr},
+    {TimerHaEntity::Finished,  "realert_interval",           nullptr},
+    {TimerHaEntity::Finished,  "finished_hold",              nullptr},
+    {TimerHaEntity::Buzzer,    "countdown_seconds",          nullptr},
+    {TimerHaEntity::Buzzer,    "melody_tick",                nullptr},
+    {TimerHaEntity::Buzzer,    "melody_end",                 nullptr},
+    {TimerHaEntity::Remaining, "remaining_publish_interval", nullptr},
+    {TimerHaEntity::State,     "max_duration",               nullptr},
+    {TimerHaEntity::State,     "remaining_publish_interval", nullptr},
+    {TimerHaEntity::State,     "app_config_timeout",         nullptr},
+    {TimerHaEntity::State,     "icon_enabled",               nullptr},
+    {TimerHaEntity::State,     "bar_enabled",                nullptr},
+    {TimerHaEntity::State,     "bar_color",                  formatBarColor},
+    {TimerHaEntity::State,     "sync_follow",                nullptr},
+    {TimerHaEntity::State,     "sync_targets",               nullptr},
 };
 
 const size_t TIMER_ATTR_GROUP_DESC_COUNT =

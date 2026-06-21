@@ -507,7 +507,8 @@ void MenuManager_::selectButtonLong()
                 TimerManager_::PersistBatch batch(TimerManager);
                 batch.markTableDirty();
             }
-            TimerManager.broadcastConfig();   // propagate the committed timer config to peers
+            TimerManager.broadcastConfig();             // propagate the committed timer config to peers
+            TimerManager.publishAllAttributeGroups();   // refresh every carrier's HA attribute object (issue #60)
             break;
         default:
             break;
