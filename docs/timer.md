@@ -43,12 +43,12 @@ returns the read-only snapshot. `dev.json` keys override NVS on **every boot**
 | Finished hold (1–300 s, dflt 10) | `finished_hold` ✅ | `timer_finished_hold` ✅ | 👁 attr on finished select | `TIMER` menu (`CLEAR`) ✅ |
 | Re-alert interval (5–300 s, dflt 15) | `realert_interval` ✅ | `timer_realert_interval` ✅ | 👁 attr on finished select | `TIMER` menu (`ALERT`) ✅ |
 | Countdown window (0–30 s, dflt 3) | `countdown_seconds` ✅ | `timer_countdown_seconds` ✅ | 👁 attr on buzzer select | `TIMER` menu (`CDOWN`) ✅ |
-| Max duration (1–604800 s, dflt 86400) | `max_duration` ✅ | `timer_max_duration` ✅ | — | — (caps config editor) |
-| Remaining publish interval (1–60 s, dflt 1) | `remaining_publish_interval` ✅ | `timer_remaining_publish_interval` ✅ | — (governs sensor cadence) | — |
-| App config timeout (5–300 s, dflt 30) | `app_config_timeout` ✅ | `timer_app_config_timeout` ✅ | — | — (governs editor idle) |
-| Icon enabled (dflt true) | `icon_enabled` ✅ | `timer_icon_enabled` ✅ | — | `TIMER` menu (`ICON`) ✅ |
-| Bar enabled (dflt true) | `bar_enabled` ✅ | `timer_bar_enabled` ✅ | — | `TIMER` menu (`BAR`) ✅ |
-| Bar color (hex / `#RRGGBB`, dflt 0 = text color) | `bar_color` ✅ | `timer_bar_color` ✅ | — | — |
+| Max duration (1–604800 s, dflt 86400) | `max_duration` ✅ | `timer_max_duration` ✅ | 👁 attr on state sensor | — (caps config editor) |
+| Remaining publish interval (1–60 s, dflt 1) | `remaining_publish_interval` ✅ | `timer_remaining_publish_interval` ✅ | 👁 attr on remaining + state sensors (also governs sensor cadence) | — |
+| App config timeout (5–300 s, dflt 30) | `app_config_timeout` ✅ | `timer_app_config_timeout` ✅ | 👁 attr on state sensor | — (governs editor idle) |
+| Icon enabled (dflt true) | `icon_enabled` ✅ | `timer_icon_enabled` ✅ | 👁 attr on state sensor | `TIMER` menu (`ICON`) ✅ |
+| Bar enabled (dflt true) | `bar_enabled` ✅ | `timer_bar_enabled` ✅ | 👁 attr on state sensor | `TIMER` menu (`BAR`) ✅ |
+| Bar color (hex / `#RRGGBB`, dflt 0 = text color) | `bar_color` ✅ | `timer_bar_color` ✅ | 👁 attr on state sensor (as `"default"`/`"#RRGGBB"`) | — |
 | Tick melody (dflt `timer_tick`) | `melody_tick` ✅ | `timer_melody_tick` ✅ | 👁 attr on buzzer select | — |
 | End melody (dflt `timer_end`) | `melody_end` ✅ | `timer_melody_end` ✅ | 👁 attr on buzzer select | — |
 
@@ -56,8 +56,8 @@ returns the read-only snapshot. `dev.json` keys override NVS on **every boot**
 
 | Item | API / MQTT key | dev.json | Home Assistant | On-device |
 |------|----------------|----------|----------------|-----------|
-| Sync follow (dflt false) | `sync_follow` ✅ | `timer_sync_follow` ✅ | — | — |
-| Sync targets (`all` / CSV, dflt empty) | `sync_targets` ✅ | `timer_sync_targets` ✅ | — | — |
+| Sync follow (dflt false) | `sync_follow` ✅ | `timer_sync_follow` ✅ | 👁 attr on state sensor | — |
+| Sync targets (`all` / CSV, dflt empty) | `sync_targets` ✅ | `timer_sync_targets` ✅ | 👁 attr on state sensor | — |
 
 ### Master enable
 
@@ -276,8 +276,8 @@ With `HA_DISCOVERY=true`, the firmware advertises eight entities:
 | Entity | Type | Purpose |
 | --- | --- | --- |
 | `{id}_timer_dur`   | `text`        | Timer duration as a clock string `HH:MM:SS` (writable; accepts `MM:SS` and bare seconds too). Invalid input (malformed or out-of-range) reverts to the previous valid time. |
-| `{id}_timer_rem`   | `sensor`      | Seconds remaining (read-only, updates every `TIMER_PUBLISH_INTERVAL` s while running). |
-| `{id}_timer_state` | `sensor`      | One of `idle` / `running` / `paused` / `finished`. |
+| `{id}_timer_rem`   | `sensor`      | Seconds remaining (read-only, updates every `TIMER_PUBLISH_INTERVAL` s while running). Carries a read-only JSON attribute object `{remaining_publish_interval}` — this sensor's own update cadence. |
+| `{id}_timer_state` | `sensor`      | One of `idle` / `running` / `paused` / `finished`. Carries the full-config read-only JSON attribute bag `{max_duration, remaining_publish_interval, app_config_timeout, icon_enabled, bar_enabled, bar_color, sync_follow, sync_targets}` so the whole configuration is readable from one entity. |
 | `{id}_timer_buz`   | `select`      | Buzzer mode. Carries a read-only JSON attribute object `{countdown_seconds, melody_tick, melody_end}` so the beep window and both melodies are visible in HA without leaving the entity. |
 | `{id}_timer_fin`   | `select`      | Finished mode. Carries a read-only JSON attribute object `{realert_interval, finished_hold}` so the re-alert cadence and auto-clear hold are visible in HA without leaving the entity. |
 | `{id}_timer_start` | `button`      | Equivalent to `{"action":"start"}`. |
@@ -291,18 +291,29 @@ blocking-nav app is on screen), the display auto-switches to the Timer app.
 
 Carrier entities surface persisted settings as **read-only JSON attribute
 objects**, so a user can read the device's live configuration from inside HA
-without an MQTT/HTTP query (see [PRD #57](https://github.com/ltloopy/awtrix3/issues/57),
-generalizing the single `realert_interval` attribute of
+without an MQTT/HTTP query (see [PRD #57](https://github.com/ltloopy/awtrix3/issues/57)
+and [ADR-0014](adr/0014-timer-ha-attribute-projection.md), generalizing the single
+`realert_interval` attribute of
 [PRD #17](https://github.com/ltloopy/awtrix3/issues/17)). Which settings key
-rides which carrier is one table (`TIMER_ATTR_GROUP_DESCS`); the two carriers
-lit up today are both selects, each opting into a `json_attributes_topic`
-(`{prefix}/{deviceId}/{id}/json_attr_t`) via the vendored ArduinoHA `HASelect`'s
-opt-in capability:
+rides which carrier is one table (`TIMER_ATTR_GROUP_DESCS`). **All four carriers**
+are lit up today — two selects and two sensors — each opting into a
+`json_attributes_topic` (`{prefix}/{deviceId}/{id}/json_attr_t`) via the vendored
+ArduinoHA per-type opt-in: the `HASelect` capability (issue #58) lit the selects, and
+extending the same opt-in to `HASensor` (issue #59; `HASensorNumber` inherits it) lit
+the sensors. Every persisted-settings knob is projected onto the entity it is
+semantically about:
 
 | Carrier | Attribute object |
 | --- | --- |
 | `{id}_timer_fin` (finished select) | `{"realert_interval":N, "finished_hold":N}` |
 | `{id}_timer_buz` (buzzer select)   | `{"countdown_seconds":N, "melody_tick":"…", "melody_end":"…"}` |
+| `{id}_timer_rem` (remaining sensor) | `{"remaining_publish_interval":N}` |
+| `{id}_timer_state` (state sensor)  | `{"max_duration":N, "remaining_publish_interval":N, "app_config_timeout":N, "icon_enabled":bool, "bar_enabled":bool, "bar_color":"default"\|"#RRGGBB", "sync_follow":bool, "sync_targets":"…"}` |
+
+`remaining_publish_interval` deliberately rides **two** carriers (the remaining sensor,
+its own cadence, and the state sensor, for a complete single-entity config view).
+`bar_color` is rendered as the human string `"default"` (when 0 = follow the text color)
+or `"#RRGGBB"`, not its raw integer.
 
 Each carrier's retained object goes out at discovery-enable and on every MQTT
 (re)connect, right after the wire refresh, on the on-device `TIMER`-menu
@@ -316,7 +327,10 @@ Disabling the Timer (`SHOW_TIMER` true to false) clears each carrier's retained
 left holding no orphaned attribute payload (issue #60). The
 values are **read-only from HA** — change them via their command keys, `dev.json`,
 or (where applicable) the on-device `TIMER` menu; the attribute is observation
-only. `realert_interval` is only meaningful while finished mode is `re-alert`.
+only. `realert_interval` is only meaningful while finished mode is `re-alert`. The
+sync rows (`sync_follow` / `sync_targets`) are **visible** here but stay **local
+identity** — never writable from HA and never propagated to peers (ADR-0006 is
+unchanged; see **Multi-device sync** below).
 
 ---
 
@@ -399,12 +413,15 @@ The remaining ADR-0004 behavior parameters (`TIMER_MAX_DURATION`,
 `TIMER_PUBLISH_INTERVAL`, `TIMER_CONFIG_TIMEOUT`) and the
 melody/color options (`TIMER_MELODY_TICK`, `TIMER_MELODY_END`,
 `TIMER_BAR_COLOR`) reach the timer only via the `{prefix}/timer` /
-`POST /api/timer` / dev.json surfaces — no on-device menu, no HA entities.
-The two display toggles `TIMER_ICON_ENABLED` (ADR-0005) and
+`POST /api/timer` / dev.json surfaces — no on-device menu, no HA *control*
+entity. The two display toggles `TIMER_ICON_ENABLED` (ADR-0005) and
 `TIMER_BAR_ENABLED` (ADR-0004) reach the timer via those same three surfaces
 **and** the on-device `TIMER` menu's `ICON` / `BAR` slots — still no HA
-entities. All persist to NVS namespace `"awtrix"`; any matching `dev.json`
-key still overrides NVS on every boot.
+control entity. All persist to NVS namespace `"awtrix"`; any matching `dev.json`
+key still overrides NVS on every boot. Most of these are, however, **observable**
+in HA as read-only JSON attributes on a carrier entity (PRD #57 / ADR-0014) — see
+[Read-only attribute groups](#read-only-attribute-groups); the attribute is
+observation only and never a write path.
 
 | Global | Default | Effect |
 | --- | --- | --- |
@@ -469,7 +486,10 @@ every clock to `sync_targets=all` and `sync_follow=true`.
 - A clock with `SHOW_TIMER = false` ignores inbound sync (its `parseCommand` is disabled).
 - Reachable as `sync_follow` / `sync_targets` on `POST /api/timer` and `{prefix}/timer`
   MQTT, and as `timer_sync_follow` / `timer_sync_targets` in `dev.json`. No on-device
-  menu, no HA entity (consistent with the other ADR-0004/0005 config flags).
+  menu. Both are surfaced as **read-only HA attributes** on the `{id}_timer_state`
+  sensor (PRD #57 / ADR-0014) — still no HA *entity*, and still **never propagated** to
+  peers: HA *visibility* does not make them writable-from-HA or part of the config
+  snapshot (ADR-0006 unchanged).
 
 ---
 
