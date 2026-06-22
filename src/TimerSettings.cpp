@@ -84,6 +84,20 @@ namespace
         doc[d.cmdKey] = buf;
     }
 
+    // max_duration carrier-native HA-attribute formatter (PRD #66 / issue #68):
+    // renders the stored cap (raw seconds, a U32) as the trimmed H:MM:SS clock
+    // string the Duration text entity's OWN state speaks, by reusing the exact
+    // formatHMS the Duration state uses ("24:00:00", "1:00:00", "0:45"). This is
+    // the first key whose attribute representation differs PER CARRIER: the state
+    // sensor keeps the raw-seconds number (no formatter), while the Duration
+    // carrier renders this clock string — each carrier in its native form, over
+    // the same persisted storage, so the underlying value cannot drift.
+    void formatMaxDurationHMS(const TimerSettingDesc &d, JsonDocument &doc)
+    {
+        uint32_t v = *static_cast<uint32_t *>(d.storage);
+        doc[d.cmdKey] = TimerManager_::formatHMS(v);
+    }
+
     // sync_targets: strict string type, then the comma-list rule above.
     bool parseSyncTargets(JsonVariantConst v, TcValue &out)
     {
@@ -269,8 +283,14 @@ const TimerSettingDesc *timerSettingByCmdKey(const char *cmdKey)
 // remaining sensor (its own cadence) and the state sensor (a complete config view)
 // -- one settings row, two carrier rows. bar_color carries the per-row formatter
 // so it renders as "default"/"#RRGGBB" rather than its raw-int snapshot form.
+// max_duration (PRD #66 / issue #68) is the first MULTI-CARRIER key whose
+// representation differs PER CARRIER: it rides the Duration text entity in
+// carrier-native clock form (formatMaxDurationHMS -> "24:00:00") AND the state
+// sensor in raw seconds (no formatter -> 86400) -- one settings row, two carrier
+// rows, two representations over the same persisted storage.
 //   carrier, cmdKey, format
 const TimerAttrGroupDesc TIMER_ATTR_GROUP_DESCS[] = {
+    {TimerHaEntity::Duration,  "max_duration",               formatMaxDurationHMS},
     {TimerHaEntity::Finished,  "realert_interval",           nullptr},
     {TimerHaEntity::Finished,  "finished_hold",              nullptr},
     {TimerHaEntity::Buzzer,    "countdown_seconds",          nullptr},

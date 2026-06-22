@@ -110,6 +110,12 @@ inline const char *TIMER_REMAINING_ATTR_TOPIC = "awtrix_self/a1b2c3d4e5f6/d4e5f6
 // Duration text entity (issue #34), id per TimerHa.cpp's HAtimerDurID "%s_timer_dur".
 inline const char *TIMER_DURATION_TOPIC = "awtrix_self/a1b2c3d4e5f6/d4e5f6_timer_dur/stat_t";
 
+// The Duration text entity's JSON-attributes topic (PRD #66 / issue #68): the
+// json_attr_t sibling of TIMER_DURATION_TOPIC, now that HAText carries the opt-in
+// too (issue #67). Spelled independently of the TimerHa builders. Carries the
+// carrier-native max_duration clock string ("24:00:00").
+inline const char *TIMER_DURATION_ATTR_TOPIC = "awtrix_self/a1b2c3d4e5f6/d4e5f6_timer_dur/json_attr_t";
+
 // The aggregate icons JSON rides a plain prefix topic, not an HA entity data
 // topic: {MQTT_PREFIX}/timer/icons (MQTT_PREFIX defaults to uniqueID on device).
 inline const char *TIMER_ICONS_TOPIC = "awtrix_self/timer/icons";

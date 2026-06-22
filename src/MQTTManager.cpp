@@ -95,6 +95,11 @@ void MQTTManager_::createTimerHAEntities()
     timerDuration->setRetain(true);
     timerDuration->onMessage(onTimerDurationMessage);
     timerDuration->setState(TimerManager_::formatHMS(TimerManager.getDuration()).c_str(), true);
+    // Opt the Duration text entity into JSON attributes (HAText opt-in, issue #67)
+    // so its discovery config advertises json_attr_t; its retained {max_duration}
+    // object — the cap in carrier-native clock form ("24:00:00") — rides the wire
+    // seam to that topic (PRD #66 / issue #68). No TIMER_HA_DESCRIPTORS change.
+    timerDuration->setJsonAttributes(true);
 
     timerRemaining = new HASensorNumber(timerHaId(TimerHaEntity::Remaining), HASensorNumber::PrecisionP0);
     timerRemaining->setIcon(dRem.icon);
