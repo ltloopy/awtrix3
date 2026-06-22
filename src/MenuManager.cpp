@@ -23,11 +23,11 @@ enum MenuState
     DateFormatMenu,
     WeekdayMenu,
     TempMenu,
+    TimerConfigMenu,
     Appmenu,
     SoundMenu,
     VolumeMenu,
     UpdateMenu,
-    TimerConfigMenu,
     MaxMenu
 };
 
@@ -41,11 +41,11 @@ const char *menuItems[] PROGMEM = {
     "DATE",
     "WEEKDAY",
     "TEMP",
+    "TIMER",
     "APPS",
     "SOUND",
     "VOLUME",
-    "UPDATE",
-    "TIMER"};
+    "UPDATE"};
 
 int8_t menuIndex = 0;
 uint8_t menuItemCount = MaxMenu - 1;
