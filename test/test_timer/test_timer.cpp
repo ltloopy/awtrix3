@@ -2578,6 +2578,73 @@ void test_T19_full_config_mirrors_every_persisted_key(void) {
     TEST_ASSERT_FALSE(cfg.containsKey("action"));
 }
 
+// T20 (#75) — the two deliberate carrier-native renderings on the GET config
+// mirror, following this endpoint's raw+_str duration precedent. bar_color is
+// rendered as the human string ("default" when 0 / follow text color, ADR-0004,
+// else uppercase "#RRGGBB") instead of the raw int. max_duration keeps its raw
+// seconds AND gains a sibling max_duration_str in the trimmed clock form (reusing
+// formatHMS, hours group kept). Every other key stays raw.
+void test_T20_full_config_carrier_native_renderings(void) {
+    // bar_color: "default" when 0.
+    TIMER_BAR_COLOR = 0;
+    {
+        DynamicJsonDocument cfg(2048);
+        timerBuildFullConfig(cfg);
+        TEST_ASSERT_TRUE(cfg["bar_color"].is<const char *>());
+        TEST_ASSERT_EQUAL_STRING("default", cfg["bar_color"].as<const char *>());
+    }
+    // bar_color: uppercase "#RRGGBB" when set.
+    TIMER_BAR_COLOR = 0x00FF00;
+    {
+        DynamicJsonDocument cfg(2048);
+        timerBuildFullConfig(cfg);
+        TEST_ASSERT_EQUAL_STRING("#00FF00", cfg["bar_color"].as<const char *>());
+    }
+    // max_duration: raw seconds kept, plus the trimmed clock-string sibling.
+    TIMER_MAX_DURATION = 86400;
+    {
+        DynamicJsonDocument cfg(2048);
+        timerBuildFullConfig(cfg);
+        TEST_ASSERT_FALSE(cfg["max_duration"].is<const char *>());   // still a number
+        TEST_ASSERT_EQUAL_UINT32(86400, cfg["max_duration"].as<uint32_t>());
+        TEST_ASSERT_EQUAL_STRING("24:00:00", cfg["max_duration_str"].as<const char *>());
+    }
+    // Edge value: 3600 s -> "1:00:00" (hours group kept), raw unchanged.
+    TIMER_MAX_DURATION = 3600;
+    {
+        DynamicJsonDocument cfg(2048);
+        timerBuildFullConfig(cfg);
+        TEST_ASSERT_EQUAL_UINT32(3600, cfg["max_duration"].as<uint32_t>());
+        TEST_ASSERT_EQUAL_STRING("1:00:00", cfg["max_duration_str"].as<const char *>());
+    }
+}
+
+// T21 (#75) — value spot-check round-trip: set representative knobs via
+// parseCommand (a number, a color, a CSV sync target, an icon, a melody, a
+// toggle) then GET them back under config. Proves the read-after-write contract
+// over HTTP alone, including both carrier-native renderings. sync_targets and
+// the melody/icon read back as their raw strings; the toggle as a raw bool.
+void test_T21_get_config_value_spotchecks_via_parsecommand(void) {
+    SHOW_TIMER = true;
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.parseCommand(
+            "{\"max_duration\":7200,\"bar_color\":\"#112233\",\"sync_targets\":\"abc,def\","
+            "\"icon_running\":\"run\",\"melody_tick\":\"tick2\",\"bar_enabled\":false}")));
+
+    DynamicJsonDocument doc(2048);
+    TEST_ASSERT_FALSE(deserializeJson(doc, TimerManager.getStateJson()));
+    JsonObject c = doc["config"].as<JsonObject>();
+    TEST_ASSERT_FALSE(c.isNull());
+
+    TEST_ASSERT_EQUAL_UINT32(7200, c["max_duration"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_STRING("2:00:00", c["max_duration_str"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("#112233", c["bar_color"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("abc,def", c["sync_targets"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("run", c["icon_running"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("tick2", c["melody_tick"].as<const char *>());
+    TEST_ASSERT_FALSE(c["bar_enabled"].as<bool>());
+}
+
 // ============================================================================
 // TimerConfigEditor — direct-drive tests for the extracted duration editor.
 // These exercise the pure value object in isolation (no TimerManager singleton,
@@ -3426,6 +3493,8 @@ int main(int, char **) {
     RUN_TEST(test_T16_attribute_group_remaining_bag);
     RUN_TEST(test_T17_bar_color_formatter_renders_default_or_hex);
     RUN_TEST(test_T19_full_config_mirrors_every_persisted_key);
+    RUN_TEST(test_T20_full_config_carrier_native_renderings);
+    RUN_TEST(test_T21_get_config_value_spotchecks_via_parsecommand);
     RUN_TEST(test_CE1_enter_decomposes_and_activates);
     RUN_TEST(test_CE2_adjust_default_cap_wraps_HH_at_23);
     RUN_TEST(test_CE3_adjust_tight_cap_recomputes_per_field);
