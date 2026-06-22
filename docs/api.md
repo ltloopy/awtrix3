@@ -455,9 +455,33 @@ Clear an override so the slot falls back to the Idle icon:
   "duration": 300,
   "duration_str": "5:00",
   "buzzer": "end",
-  "finished": "auto-clear"
+  "finished": "auto-clear",
+  "config": {
+    "finished_hold": 10,
+    "realert_interval": 15,
+    "countdown_seconds": 3,
+    "max_duration": 86400,
+    "max_duration_str": "24:00:00",
+    "remaining_publish_interval": 1,
+    "app_config_timeout": 30,
+    "icon_enabled": true,
+    "bar_enabled": true,
+    "bar_color": "default",
+    "melody_tick": "timer_tick",
+    "melody_end": "timer_end",
+    "sync_follow": false,
+    "sync_targets": "",
+    "buzzer": "end",
+    "finished": "auto-clear",
+    "icon_idle": "",
+    "icon_running": "",
+    "icon_paused": "",
+    "icon_finished": ""
+  }
 }
 ```
+
+The response has two parts: the stable top-level **run-state summary** (the eight fields below, byte-compatible with earlier firmware) and a nested **`config`** object mirroring the full persisted configuration.
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -465,18 +489,49 @@ Clear an override so the slot falls back to the Idle icon:
 | `enabled` | bool | Mirrors the `TIMER` master enable (`SHOW_TIMER`). When `false` the timer is forced to `idle`; the snapshot is still returned. |
 | `remaining` | integer | Seconds remaining, computed live at request time (wall-clock accurate). Frozen while `paused`; `0` while `finished`. |
 | `remaining_str` | string | `remaining` as a trimmed clock string (same format as `duration_str`, e.g. `174` → `2:54`). |
-| `duration` | integer | Configured duration in seconds. |
+| `duration` | integer | Configured duration in seconds. **Run-state, not config** — it stays top-level only and is deliberately absent from `config`. |
 | `duration_str` | string | `duration` as a trimmed clock string (`300` → `5:00`, hours dropped when zero). |
-| `buzzer` | string | Buzzer mode: `off` / `end` / `countdown`. |
-| `finished` | string | Finished mode: `auto-clear` / `hold` / `re-alert`. |
+| `buzzer` | string | Buzzer mode: `off` / `end` / `countdown`. Also mirrored inside `config`. |
+| `finished` | string | Finished mode: `auto-clear` / `hold` / `re-alert`. Also mirrored inside `config`. |
 
 The `buzzer` / `finished` strings are the **canonical output spellings** (hyphenated, lowercase). The `POST` command parser additionally tolerates aliases on input (e.g. `autoclear`, `realert`), but the read endpoint always reports the canonical form.
+
+##### `config` — persisted configuration mirror
+
+The `config` object reports **every persisted Timer configuration key** — exactly the keys you can write via `POST /api/timer` — so an HTTP-only integrator can read the device's live configuration (and confirm a write applied) without Home Assistant or an MQTT subscription. It is projected from the same descriptor tables that drive the control surface and the HA attribute groups, so the read surface cannot drift from what is writable: adding a new persisted config key automatically makes it readable here.
+
+Values are **raw** by default (interval seconds as integers, melodies and `sync_targets` as strings, toggles as booleans), with two deliberate carrier-native renderings that follow this endpoint's own raw+`_str` duration precedent:
+
+- **`bar_color`** is rendered as `"#RRGGBB"` (uppercase) or `"default"` when it follows the text color, rather than a raw 24-bit integer.
+- **`max_duration`** is reported **both** raw (`86400`) **and** as `max_duration_str` (`"24:00:00"`, trimmed clock form).
+
+| `config` key | Type | Notes |
+| --- | --- | --- |
+| `finished_hold` | integer | Seconds the finished screen holds (hold mode). |
+| `realert_interval` | integer | Seconds between re-alerts (re-alert mode). |
+| `countdown_seconds` | integer | Length of the pre-end countdown tick window. |
+| `max_duration` | integer | Maximum settable duration, raw seconds. |
+| `max_duration_str` | string | `max_duration` as a trimmed clock string (carrier-native). |
+| `remaining_publish_interval` | integer | Seconds between `remaining` MQTT pushes. |
+| `app_config_timeout` | integer | Idle window before the on-device config menu auto-applies and exits. |
+| `icon_enabled` | bool | Whether per-state icons are shown. |
+| `bar_enabled` | bool | Whether the progress bar is shown. |
+| `bar_color` | string | `"#RRGGBB"` or `"default"` (carrier-native; not the raw integer). |
+| `melody_tick` | string | RTTTL melody name for countdown ticks. |
+| `melody_end` | string | RTTTL melody name played at finish. |
+| `sync_follow` | bool | Whether this clock follows synced peers (observable only; never HA-writable or propagated). |
+| `sync_targets` | string | Multi-device sync targets: `""` (off), `all`, or a comma list of device IDs (observable only). |
+| `buzzer` | string | Buzzer mode — mirrored here for completeness (also top-level). |
+| `finished` | string | Finished mode — mirrored here for completeness (also top-level). |
+| `icon_idle` / `icon_running` / `icon_paused` / `icon_finished` | string | The four per-state icon names (empty string = falls back to the Idle icon). |
+
+`config` never contains `duration` (run-state, reported top-level only) or `action` (a transient command verb, not persisted). The endpoint stays a pure observation read regardless: always `200 OK`, never mutating, no `409`. See [ADR 0015](adr/0015-http-observation-mirrors-full-config.md).
 
 > **Note on freshness vs. Home Assistant:** `remaining` here is computed at the moment of the request, so during `running` it can read a second or two lower than the HA `{id}_timer_rem` sensor, which is push-throttled to `remaining_publish_interval` (default 1 s). This is expected — the polled HTTP read is simply fresher than the throttled push sensor; the two are not in disagreement.
 
 When `HA_DISCOVERY` is enabled, Home Assistant also receives live updates of all timer properties via MQTT discovery sensors — an alternative path for observing the timer remotely.
 
-The current icon configuration is also published as a retained JSON message to `[PREFIX]/timer/icons` whenever it changes (and on MQTT connect). Subscribe to that topic to read back current icon slots without HA. Payload shape: `{"idle": "...", "running": "...", "paused": "...", "finished": "..."}`.
+The current icon configuration is also published as a retained JSON message to `[PREFIX]/timer/icons` whenever it changes (and on MQTT connect). Subscribe to that topic to read back current icon slots without HA. Payload shape: `{"idle": "...", "running": "...", "paused": "...", "finished": "..."}`. The same four icon names are now also readable over HTTP under `config.icon_*` (above) — Home Assistant deliberately has no icon read path, since it cannot usefully render an AWTRIX icon file.
 
 
 ## Change Settings
