@@ -404,14 +404,18 @@ The Timer app is always present in the rotation regardless of state.
 Per state, the renderer looks up the configured slot (`icon_idle` /
 `icon_running` / `icon_paused` / `icon_finished`). If that slot is empty
 it falls back to `icon_idle`. If `icon_idle` is also empty (or the
-configured file isn't on the filesystem), the original 8 × 8 icon is drawn.
+configured file isn't on the filesystem), the built-in `icon_timer`
+hourglass bitmap (`src/icons.h`) is drawn — the same glyph the on-device
+menu uses for the Timer entry.
 
 The configured value is a **bare name** (no extension). The loader
 checks `/ICONS/<name>.jpg` first, then `/ICONS/<name>.gif`, and uses
 whichever exists. Animated GIFs Just Work: whenever the resolved icon
 changes (state transition or setter mid-run) the GIF restarts at frame 0
 and the previous file handle is released. Icon files are uploaded via
-the existing web UI — nothing about icons is bundled in firmware.
+the existing web UI — no *user-named* icons are bundled in firmware. The
+sole exception is the built-in `icon_timer` hourglass used as the default
+fallback (see above).
 
 ---
 

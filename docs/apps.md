@@ -117,7 +117,7 @@ The Timer app counts down a configurable duration with on-device and remote cont
 
 #### Display
 
-- 8×8 icon on the left (a built-in hourglass; override by placing an 8×8 `/ICONS/timer.jpg` in the file manager).
+- 8×8 icon on the left (the built-in colour `icon_timer` hourglass, the same glyph shown in the on-device menu; override by placing an 8×8 `/ICONS/timer.jpg` in the file manager).
 - Time text in the middle: `MM:SS` for durations under one hour, `H:MM` between 1h and 10h, `HH:MM` for 10h+.
 - A 1-pixel depleting progress bar across the bottom row (x=9..31) reflects `remaining / duration`.
 - In the `Hold` and `Re-alert` finished modes the time text blinks at ~1 Hz to signal that user action is required.

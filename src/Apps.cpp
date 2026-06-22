@@ -425,7 +425,7 @@ namespace {
     constexpr int     kTimerConfigUnderlineStep = 10;  // px between config fields
 }
 
-static void drawTimerIcon(FastLED_NeoMatrix *matrix, int16_t x, int16_t y, uint32_t color, TimerState state, GifPlayer *gifPlayer)
+static void drawTimerIcon(FastLED_NeoMatrix *matrix, int16_t x, int16_t y, TimerState state, GifPlayer *gifPlayer)
 {
     static String     cachedName    = "\x01";
     static uint32_t   cachedEpoch   = 0;
@@ -482,14 +482,11 @@ static void drawTimerIcon(FastLED_NeoMatrix *matrix, int16_t x, int16_t y, uint3
         }
     }
 
-    matrix->drawFastHLine(x + 0, y + 0, 8, color);
-    matrix->drawFastHLine(x + 1, y + 1, 6, color);
-    matrix->drawFastHLine(x + 2, y + 2, 4, color);
-    matrix->drawFastHLine(x + 3, y + 3, 2, color);
-    matrix->drawFastHLine(x + 3, y + 4, 2, color);
-    matrix->drawFastHLine(x + 2, y + 5, 4, color);
-    matrix->drawFastHLine(x + 1, y + 6, 6, color);
-    matrix->drawFastHLine(x + 0, y + 7, 8, color);
+    // No configured/resolvable icon for this state: fall back to the built-in
+    // colour hourglass bitmap (src/icons.h), the same glyph the on-device menu
+    // uses for the Timer entry. Drawn at logical (x, y) via drawRGBBitmap to
+    // match the JPG path's coordinate convention (jpg_output in DisplayManager).
+    matrix->drawRGBBitmap(x, y, icon_timer, 8, 8);
 }
 
 void TimerApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x, int16_t y, GifPlayer *gifPlayer)
@@ -520,7 +517,7 @@ void TimerApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x,
     // Icon on every screen except Config (which centers text over the full panel),
     // and only when icon_enabled is on. view.showIcon folds both conditions in.
     if (view.showIcon)
-        drawTimerIcon(matrix, x, y, TEXTCOLOR_888, TimerManager.getState(), gifPlayer);
+        drawTimerIcon(matrix, x, y, TimerManager.getState(), gifPlayer);
 
     // Text, centered within the view's region. getTextWidth (font metrics) is
     // the one display dependency that stays painter-side.
