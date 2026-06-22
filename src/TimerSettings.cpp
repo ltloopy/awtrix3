@@ -446,9 +446,29 @@ void timerBuildFullConfig(JsonDocument &doc)
 {
     // Table half: EVERY settings row, ignoring inSnapshot, so the sync-role keys
     // (sync_follow/sync_targets) are part of the read mirror even though they are
-    // never propagated. Raw value per row via the shared single-row emitter.
+    // never propagated. Raw value per row via the shared single-row emitter, with
+    // the two deliberate carrier-native overrides (PRD #73 D2) reusing the
+    // file-local formatters beside them -- diverging from the raw propagation
+    // snapshot by design, yet never able to disagree in value (same storage).
     for (size_t i = 0; i < TIMER_SETTINGS_DESC_COUNT; ++i)
-        timerSettingEmitValue(TIMER_SETTINGS_DESCS[i], doc);
+    {
+        const TimerSettingDesc &d = TIMER_SETTINGS_DESCS[i];
+        if (strcmp(d.cmdKey, "bar_color") == 0)
+        {
+            formatBarColor(d, doc);          // "default" / uppercase "#RRGGBB", not the raw int
+        }
+        else if (strcmp(d.cmdKey, "max_duration") == 0)
+        {
+            timerSettingEmitValue(d, doc);   // raw seconds kept (e.g. 86400)
+            // ...plus a trimmed clock-string sibling, this endpoint's raw+_str
+            // duration precedent, reusing the exact formatHMS the duration fields use.
+            doc["max_duration_str"] = TimerManager_::formatHMS(*static_cast<uint32_t *>(d.storage));
+        }
+        else
+        {
+            timerSettingEmitValue(d, doc);
+        }
+    }
 
     // Member-backed half: buzzer/finished + the four icon_* live values.
     timerMemberConfigBuildSnapshot(doc);
