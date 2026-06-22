@@ -43,7 +43,7 @@ returns the read-only snapshot. `dev.json` keys override NVS on **every boot**
 | Finished hold (1–300 s, dflt 10) | `finished_hold` ✅ | `timer_finished_hold` ✅ | 👁 attr on finished select | `TIMER` menu (`CLEAR`) ✅ |
 | Re-alert interval (5–300 s, dflt 15) | `realert_interval` ✅ | `timer_realert_interval` ✅ | 👁 attr on finished select | `TIMER` menu (`ALERT`) ✅ |
 | Countdown window (0–30 s, dflt 3) | `countdown_seconds` ✅ | `timer_countdown_seconds` ✅ | 👁 attr on buzzer select | `TIMER` menu (`CDOWN`) ✅ |
-| Max duration (1–604800 s, dflt 86400) | `max_duration` ✅ | `timer_max_duration` ✅ | 👁 attr on state sensor | — (caps config editor) |
+| Max duration (1–604800 s, dflt 86400) | `max_duration` ✅ | `timer_max_duration` ✅ | 👁 attr on state sensor (raw seconds) + Duration entity (clock form) | — (caps config editor) |
 | Remaining publish interval (1–60 s, dflt 1) | `remaining_publish_interval` ✅ | `timer_remaining_publish_interval` ✅ | 👁 attr on remaining + state sensors (also governs sensor cadence) | — |
 | App config timeout (5–300 s, dflt 30) | `app_config_timeout` ✅ | `timer_app_config_timeout` ✅ | 👁 attr on state sensor | — (governs editor idle) |
 | Icon enabled (dflt true) | `icon_enabled` ✅ | `timer_icon_enabled` ✅ | 👁 attr on state sensor | `TIMER` menu (`ICON`) ✅ |
@@ -275,7 +275,7 @@ With `HA_DISCOVERY=true`, the firmware advertises eight entities:
 
 | Entity | Type | Purpose |
 | --- | --- | --- |
-| `{id}_timer_dur`   | `text`        | Timer duration as a clock string `HH:MM:SS` (writable; accepts `MM:SS` and bare seconds too). Invalid input (malformed or out-of-range) reverts to the previous valid time. |
+| `{id}_timer_dur`   | `text`        | Timer duration as a clock string `HH:MM:SS` (writable; accepts `MM:SS` and bare seconds too). Invalid input (malformed or out-of-range) reverts to the previous valid time. Carries a read-only JSON attribute object `{max_duration}` in the same `H:MM:SS` clock form (e.g. `"24:00:00"`), so the largest duration the timer will accept is visible at the point of entry. The cap is **read-only**; only the duration *state* is writable. |
 | `{id}_timer_rem`   | `sensor`      | Seconds remaining (read-only, updates every `TIMER_PUBLISH_INTERVAL` s while running). Carries a read-only JSON attribute object `{remaining_publish_interval}` — this sensor's own update cadence. |
 | `{id}_timer_state` | `sensor`      | One of `idle` / `running` / `paused` / `finished`. Carries the full-config read-only JSON attribute bag `{max_duration, remaining_publish_interval, app_config_timeout, icon_enabled, bar_enabled, bar_color, sync_follow, sync_targets}` so the whole configuration is readable from one entity. |
 | `{id}_timer_buz`   | `select`      | Buzzer mode. Carries a read-only JSON attribute object `{countdown_seconds, melody_tick, melody_end}` so the beep window and both melodies are visible in HA without leaving the entity. |
@@ -295,25 +295,33 @@ without an MQTT/HTTP query (see [PRD #57](https://github.com/ltloopy/awtrix3/iss
 and [ADR-0014](adr/0014-timer-ha-attribute-projection.md), generalizing the single
 `realert_interval` attribute of
 [PRD #17](https://github.com/ltloopy/awtrix3/issues/17)). Which settings key
-rides which carrier is one table (`TIMER_ATTR_GROUP_DESCS`). **All four carriers**
-are lit up today — two selects and two sensors — each opting into a
+rides which carrier is one table (`TIMER_ATTR_GROUP_DESCS`). **All five carriers**
+are lit up today — one text, two selects and two sensors — each opting into a
 `json_attributes_topic` (`{prefix}/{deviceId}/{id}/json_attr_t`) via the vendored
-ArduinoHA per-type opt-in: the `HASelect` capability (issue #58) lit the selects, and
+ArduinoHA per-type opt-in: the `HASelect` capability (issue #58) lit the selects,
 extending the same opt-in to `HASensor` (issue #59; `HASensorNumber` inherits it) lit
-the sensors. Every persisted-settings knob is projected onto the entity it is
-semantically about:
+the sensors, and extending it to `HAText` (issue #67) lit the Duration entity. Every
+persisted-settings knob is projected onto the entity it is semantically about:
 
 | Carrier | Attribute object |
 | --- | --- |
+| `{id}_timer_dur` (Duration text)   | `{"max_duration":"24:00:00"}` — clock form |
 | `{id}_timer_fin` (finished select) | `{"realert_interval":N, "finished_hold":N}` |
 | `{id}_timer_buz` (buzzer select)   | `{"countdown_seconds":N, "melody_tick":"…", "melody_end":"…"}` |
 | `{id}_timer_rem` (remaining sensor) | `{"remaining_publish_interval":N}` |
 | `{id}_timer_state` (state sensor)  | `{"max_duration":N, "remaining_publish_interval":N, "app_config_timeout":N, "icon_enabled":bool, "bar_enabled":bool, "bar_color":"default"\|"#RRGGBB", "sync_follow":bool, "sync_targets":"…"}` |
 
-`remaining_publish_interval` deliberately rides **two** carriers (the remaining sensor,
-its own cadence, and the state sensor, for a complete single-entity config view).
-`bar_color` is rendered as the human string `"default"` (when 0 = follow the text color)
-or `"#RRGGBB"`, not its raw integer.
+`remaining_publish_interval` and `max_duration` each deliberately ride **two** carriers.
+`remaining_publish_interval` rides the remaining sensor (its own cadence) and the state
+sensor (a complete single-entity config view). `max_duration` rides the state sensor
+**and** the Duration entity — and is the first key whose representation differs **per
+carrier**: the state sensor keeps **raw seconds** (`86400`), while the Duration entity
+renders the **same value** in the `H:MM:SS` **clock form** its own state speaks
+(`"24:00:00"`, via the same `formatHMS` trimming — `"24:00:00"`, `"1:00:00"`, `"0:45"`).
+The two never contradict: both read the same persisted `max_duration`, so they always
+describe the same underlying value. `bar_color` is likewise rendered as the human string
+`"default"` (when 0 = follow the text color) or `"#RRGGBB"`, not its raw integer — an
+attribute renders in its carrier's native representation.
 
 Each carrier's retained object goes out at discovery-enable and on every MQTT
 (re)connect, right after the wire refresh, on the on-device `TIMER`-menu
