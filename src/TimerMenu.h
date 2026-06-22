@@ -6,11 +6,12 @@
 #include "TimerEnums.h"
 
 // TIMER menu slot table: the data model behind the on-device TIMER global menu's
-// seven slots (the third member of the Timer descriptor-table family, alongside
-// TIMER_SETTINGS_DESCS and TIMER_HA_DESCRIPTORS). One row per slot; MenuManager
-// walks the table for label / adjust and keeps only the drawing. This header is
-// display-free (no DisplayManager) so the label/clamp/wrap logic is host-testable.
-// See CONTEXT.md ("TIMER menu slot table") and docs/adr/0008.
+// drill-in list (the third member of the Timer descriptor-table family, alongside
+// TIMER_SETTINGS_DESCS and TIMER_HA_DESCRIPTORS). One row per list item; the
+// TimerMenuNav state machine walks it and MenuManager keeps only the drawing +
+// commit. This header is display-free (no DisplayManager) so the name/value/adjust
+// logic is host-testable. See CONTEXT.md ("TIMER menu slot table"), docs/adr/0008
+// and docs/adr/0016 (drill-in navigation).
 //
 // Two slot families, mirroring the B1 boundary (ADR-0007):
 //   * table-backed slots (SteppedRange / BoolToggle) reuse their TIMER_SETTINGS_DESCS
@@ -19,15 +20,18 @@
 //     getEnum/setEnum hooks (like the settings table's `bespoke` fn pointers). Their
 //     setEnum defers the NVS write to the menu commit (setBuzzerMode(m, persist=false)).
 
-enum class TimerMenuKind : uint8_t { EnumCycle, SteppedRange, BoolToggle };
+// Slot kinds. The value kinds (EnumCycle / SteppedRange / BoolToggle) drill into a
+// leaf editor; Navigation is the lone non-value row (MAIN) that walks the device
+// back to the main menu (PRD #83).
+enum class TimerMenuKind : uint8_t { EnumCycle, SteppedRange, BoolToggle, Navigation };
 
 struct TimerMenuSlot
 {
     TimerMenuKind      kind;
+    const char        *name;         // list label (the item name): "BUZZER", "COUNTDOWN", "MAIN"
     const char        *cmdKey;       // SteppedRange/BoolToggle: -> TIMER_SETTINGS_DESCS (storage + lo/hi)
-    const char        *prefix;       // SteppedRange/BoolToggle label prefix ("CLEAR ", "ICON ")
     uint16_t           step;         // SteppedRange step
-    const TimerEnumCodec *codec;     // EnumCycle: codec table; .menu column is the label
+    const TimerEnumCodec *codec;     // EnumCycle: codec table; .menu column is the bare leaf value
     uint8_t            labelCount;   // EnumCycle modulus
     uint8_t          (*getEnum)();   // EnumCycle only
     void             (*setEnum)(uint8_t);  // EnumCycle only (routes via TimerManager setter)
@@ -36,13 +40,19 @@ struct TimerMenuSlot
 extern const TimerMenuSlot TIMER_MENU_SLOTS[];
 extern const size_t        TIMER_MENU_SLOT_COUNT;
 
-// The slot's display string, e.g. "CLEAR 10", "BZR END", "ICON ON". Returns "" for
-// an out-of-range slot index.
-String timerMenuLabel(uint8_t slot);
+// The slot's LIST LABEL (the item name shown while walking the list), e.g.
+// "BUZZER", "COUNTDOWN", "MAIN". Returns "" for an out-of-range slot index.
+String timerMenuName(uint8_t slot);
+
+// The slot's BARE LEAF VALUE (shown while editing the leaf), e.g. "END", "10",
+// "ON". The item name already gives the context, so no prefix. Navigation rows
+// (MAIN) have no value and return "". Returns "" for an out-of-range index.
+String timerMenuValue(uint8_t slot);
 
 // Adjust the slot by one step in the given direction (dir > 0 = right/increment,
 // dir <= 0 = left/decrement). Stepped ranges saturate at the descriptor's lo/hi;
-// enums wrap; bools toggle (either direction). No-op for an out-of-range index.
+// enums wrap; bools toggle (either direction). No-op for a Navigation row or an
+// out-of-range index.
 void timerMenuAdjust(uint8_t slot, int dir);
 
 #endif

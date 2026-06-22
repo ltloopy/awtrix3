@@ -111,3 +111,15 @@ unchanged; only the commit endpoint moved. The "stateful bracket spanning the me
 rejected above stays rejected: the guard's window is the commit itself, not the session —
 scroll edits still ride the stateless per-call flag, with the dirty bit recording that a
 flush is owed.
+
+**Addendum — drill-in navigation; commit on the list → main transition (PRD #83, ADR-0016).**
+The `TIMER` menu becomes a drill-in navigable list (left/right walks named items, short
+press drills into a leaf), driven by a new display-free `TimerMenuNav` state machine; see
+ADR-0016. The slot descriptor here gains a `name` (list-label) column and drops the value
+`prefix`, gains a fourth `Navigation` kind for the `MAIN` row (last in the table), and
+`timerMenuLabel` splits into `timerMenuName` (the item name shown in the list) and
+`timerMenuValue` (the bare leaf value shown while editing). The `PersistBatch` commit
+window above is unchanged in *mechanism*, but its **trigger** narrows: it fires on the
+**Timer-list → main-menu transition** (a long-press out of the list, or selecting `MAIN`),
+no longer on a long-press *inside a leaf* (which now just steps back to the list, value
+already live in RAM).

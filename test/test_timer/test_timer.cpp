@@ -14,6 +14,7 @@
 #include "../../src/TimerView.h"
 #include "../../src/TimerSettings.h"
 #include "../../src/TimerMenu.h"
+#include "../../src/TimerMenuNav.h"
 #include "../../src/TimerConfigEditor.h"
 #include "Preferences.h"
 
@@ -2025,22 +2026,22 @@ void test_T8_member_config_validate_and_snapshot_roundtrip(void) {
 }
 
 // ============================================================================
-// TIMER menu slot table (src/TimerMenu.cpp). The on-device menu's label/adjust
+// TIMER menu slot table (src/TimerMenu.cpp). The on-device menu's name/value/adjust
 // logic, host-testable for the first time (MenuManager itself isn't host-built).
-// Slot order: 0 buzzer, 1 countdown, 2 finished, 3 clear(hold), 4 alert(realert),
-// 5 icon, 6 bar. See docs/adr/0008.
+// Slot order: 0 buzzer, 1 countdown, 2 finished, 3 autoclear(hold), 4 realert,
+// 5 icon, 6 bar, 7 MAIN (navigation). See docs/adr/0008 and docs/adr/0016.
 // ============================================================================
 
 // Shared cmdKey-resolution guard for the slot-table integrity tests (issue #49):
 // resolves a table-backed slot's cmdKey exactly the way the production menu code
 // does (timerSettingByCmdKey); on a miss, formats a diagnostic into msg naming
-// the slot index, its label prefix, and the unresolved key.
+// the slot index, its item name, and the unresolved key.
 static const TimerSettingDesc *resolveSlotCmdKey(const TimerMenuSlot &s, size_t idx,
                                                  char *msg, size_t msgLen) {
     const TimerSettingDesc *d = s.cmdKey ? timerSettingByCmdKey(s.cmdKey) : nullptr;
     if (!d)
         snprintf(msg, msgLen, "slot %u (%s): cmdKey \"%s\" not in TIMER_SETTINGS_DESCS",
-                 (unsigned)idx, s.prefix ? s.prefix : "?", s.cmdKey ? s.cmdKey : "(null)");
+                 (unsigned)idx, s.name ? s.name : "?", s.cmdKey ? s.cmdKey : "(null)");
     return d;
 }
 
@@ -2048,9 +2049,10 @@ static const TimerSettingDesc *resolveSlotCmdKey(const TimerMenuSlot &s, size_t 
 // slot's cmdKey resolves to a descriptor whose type matches the slot kind (so the
 // menu can't reference a key the settings table doesn't back, ADR-0007).
 void test_M1_slot_table_well_formed(void) {
-    TEST_ASSERT_EQUAL_UINT32(7, (uint32_t)TIMER_MENU_SLOT_COUNT);
+    TEST_ASSERT_EQUAL_UINT32(8, (uint32_t)TIMER_MENU_SLOT_COUNT);
     for (uint8_t i = 0; i < TIMER_MENU_SLOT_COUNT; ++i) {
-        TEST_ASSERT_TRUE(timerMenuLabel(i).length() > 0);
+        // Every list row has a non-empty name (the list label).
+        TEST_ASSERT_TRUE(timerMenuName(i).length() > 0);
         const TimerMenuSlot &s = TIMER_MENU_SLOTS[i];
         switch (s.kind) {
             case TimerMenuKind::EnumCycle:
@@ -2058,6 +2060,7 @@ void test_M1_slot_table_well_formed(void) {
                 TEST_ASSERT_TRUE(s.labelCount > 0);
                 TEST_ASSERT_NOT_NULL((void *)s.getEnum);
                 TEST_ASSERT_NOT_NULL((void *)s.setEnum);
+                TEST_ASSERT_TRUE(timerMenuValue(i).length() > 0);
                 break;
             case TimerMenuKind::SteppedRange: {
                 char msg[120];
@@ -2074,8 +2077,19 @@ void test_M1_slot_table_well_formed(void) {
                 TEST_ASSERT_TRUE(d->type == TcType::Bool);
                 break;
             }
+            case TimerMenuKind::Navigation:
+                // The MAIN row carries no value and no cmdKey/codec.
+                TEST_ASSERT_EQUAL_STRING("", timerMenuValue(i).c_str());
+                TEST_ASSERT_NULL(s.cmdKey);
+                TEST_ASSERT_NULL(s.codec);
+                break;
         }
     }
+    // The lone Navigation row (MAIN) sits last -- the TimerMenuNav back-to-main
+    // invariant the device relies on.
+    TEST_ASSERT_TRUE(TIMER_MENU_SLOTS[TIMER_MENU_SLOT_COUNT - 1].kind ==
+                     TimerMenuKind::Navigation);
+    TEST_ASSERT_EQUAL_STRING("MAIN", timerMenuName(TIMER_MENU_SLOT_COUNT - 1).c_str());
 }
 
 // M10 — negative proof for the M1 resolution guard (issue #49): a deliberately
@@ -2083,7 +2097,7 @@ void test_M1_slot_table_well_formed(void) {
 // walk uses, and the diagnostic names the slot (index + label prefix) and the
 // offending key. The synthetic slot lives only here; TIMER_MENU_SLOTS is untouched.
 void test_M10_unresolved_cmdkey_guard_fires_and_names_slot(void) {
-    const TimerMenuSlot bogus = {TimerMenuKind::BoolToggle, "no_such_key", "BOGUS ",
+    const TimerMenuSlot bogus = {TimerMenuKind::BoolToggle, "BOGUS", "no_such_key",
                                  0, nullptr, 0, nullptr, nullptr};
     char msg[120] = "";
     const TimerSettingDesc *d = resolveSlotCmdKey(bogus, 99, msg, sizeof(msg));
@@ -2181,16 +2195,28 @@ void test_M5_stepped_clamps_to_descriptor_bounds(void) {
     }
 }
 
-// M6 — label formatting matches the on-screen strings.
-void test_M6_label_formatting(void) {
+// M6 — the name vs bare-value accessors. The list shows the item NAME; the leaf
+// shows the BARE value only (no prefix), per PRD #83.
+void test_M6_name_and_bare_value(void) {
+    // Names are the list labels.
+    TEST_ASSERT_EQUAL_STRING("BUZZER",    timerMenuName(0).c_str());
+    TEST_ASSERT_EQUAL_STRING("COUNTDOWN", timerMenuName(1).c_str());
+    TEST_ASSERT_EQUAL_STRING("FINISH",    timerMenuName(2).c_str());
+    TEST_ASSERT_EQUAL_STRING("AUTOCLEAR", timerMenuName(3).c_str());
+    TEST_ASSERT_EQUAL_STRING("REALERT",   timerMenuName(4).c_str());
+    TEST_ASSERT_EQUAL_STRING("ICON",      timerMenuName(5).c_str());
+    TEST_ASSERT_EQUAL_STRING("BAR",       timerMenuName(6).c_str());
+    TEST_ASSERT_EQUAL_STRING("MAIN",      timerMenuName(7).c_str());
+
+    // Bare values: no prefix.
     TIMER_FINISHED_HOLD = 10;
-    TEST_ASSERT_EQUAL_STRING("CLEAR 10", timerMenuLabel(3).c_str());
+    TEST_ASSERT_EQUAL_STRING("10", timerMenuValue(3).c_str());
     TimerManager.setBuzzerMode(BuzzerMode::End);
-    TEST_ASSERT_EQUAL_STRING("BZR END", timerMenuLabel(0).c_str());
+    TEST_ASSERT_EQUAL_STRING("END", timerMenuValue(0).c_str());
     TIMER_ICON_ENABLED = true;
-    TEST_ASSERT_EQUAL_STRING("ICON ON", timerMenuLabel(5).c_str());
+    TEST_ASSERT_EQUAL_STRING("ON", timerMenuValue(5).c_str());
     TIMER_COUNTDOWN_SECONDS = 3;
-    TEST_ASSERT_EQUAL_STRING("CDOWN 3", timerMenuLabel(1).c_str());
+    TEST_ASSERT_EQUAL_STRING("3", timerMenuValue(1).c_str());
 }
 
 // M7 — an enum adjust applies + publishes live but DEFERS the NVS write; the write
@@ -2217,12 +2243,15 @@ void test_M7_enum_adjust_defers_persist_until_commit(void) {
 void test_M8_enum_labels_source_from_codec(void) {
     for (uint8_t i = 0; i < (uint8_t)BuzzerMode::COUNT; ++i) {
         TimerManager.setBuzzerMode((BuzzerMode)i);
-        TEST_ASSERT_EQUAL_STRING(TIMER_BUZZER_CODEC[i].menu, timerMenuLabel(0).c_str());
+        TEST_ASSERT_EQUAL_STRING(TIMER_BUZZER_CODEC[i].menu, timerMenuValue(0).c_str());
     }
     for (uint8_t i = 0; i < (uint8_t)FinishedMode::COUNT; ++i) {
         TimerManager.setFinishedMode((FinishedMode)i);
-        TEST_ASSERT_EQUAL_STRING(TIMER_FINISHED_CODEC[i].menu, timerMenuLabel(2).c_str());
+        TEST_ASSERT_EQUAL_STRING(TIMER_FINISHED_CODEC[i].menu, timerMenuValue(2).c_str());
     }
+    // The codec menu column is now the BARE value (no "BZR "/"FIN " prefix).
+    TEST_ASSERT_EQUAL_STRING("END",  TIMER_BUZZER_CODEC[(int)BuzzerMode::End].menu);
+    TEST_ASSERT_EQUAL_STRING("AUTO", TIMER_FINISHED_CODEC[(int)FinishedMode::AutoClear].menu);
 }
 
 // M9 — the TIMER-menu long-press commit is ONE PersistBatch window (#45): enum
@@ -2287,11 +2316,133 @@ void test_M11_menu_commit_republishes_all_attribute_groups(void) {
 }
 
 // ============================================================================
+// TIMER menu navigation state machine (src/TimerMenuNav.cpp). The display-free
+// drill-in interaction model: list/leaf focus, selected index with wrap, and the
+// input->outcome mapping the device layer acts on (PRD #83 / issue #85). The eight
+// list rows are the eight slots (7 value rows + MAIN at index 7). See docs/adr/0016.
+// ============================================================================
+
+// The on-screen label the device renders for the current cursor: the item NAME in
+// List focus, the BARE VALUE in Editing focus -- mirrors MenuManager.menutext().
+static String navCurrentLabel(const TimerMenuNav &nav) {
+    return nav.focus() == TimerNavFocus::List
+               ? timerMenuName(nav.index())
+               : timerMenuValue(nav.index());
+}
+
+// N1 — list navigation walks every row and WRAPS in both directions; focus stays
+// List throughout and the reported label is the item name.
+void test_N1_list_navigation_wraps(void) {
+    TimerMenuNav nav(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1);
+    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::List);
+    TEST_ASSERT_EQUAL_UINT8(0, nav.index());
+    TEST_ASSERT_EQUAL_STRING("BUZZER", navCurrentLabel(nav).c_str());
+
+    // Walk right through all eight rows and wrap back to 0.
+    for (uint8_t i = 1; i < TIMER_MENU_SLOT_COUNT; ++i) {
+        TEST_ASSERT_TRUE(nav.navigate(+1) == TimerNavOutcome::None);
+        TEST_ASSERT_EQUAL_UINT8(i, nav.index());
+        TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::List);
+    }
+    TEST_ASSERT_EQUAL_STRING("MAIN", navCurrentLabel(nav).c_str());  // last row
+    nav.navigate(+1);
+    TEST_ASSERT_EQUAL_UINT8(0, nav.index());                        // wrapped
+
+    // Left from the first row lands on the last (MAIN).
+    nav.navigate(-1);
+    TEST_ASSERT_EQUAL_UINT8(TIMER_MENU_SLOT_COUNT - 1, nav.index());
+}
+
+// N2 — short press on a value row drills into its leaf (focus -> Editing); the
+// reported label switches from the item name to the bare value.
+void test_N2_select_value_row_enters_leaf(void) {
+    TimerManager.setBuzzerMode(BuzzerMode::End);
+    TimerMenuNav nav(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1);
+    TEST_ASSERT_EQUAL_STRING("BUZZER", navCurrentLabel(nav).c_str());
+
+    TEST_ASSERT_TRUE(nav.select() == TimerNavOutcome::EnterLeaf);
+    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::Editing);
+    TEST_ASSERT_EQUAL_UINT8(0, nav.index());
+    TEST_ASSERT_EQUAL_STRING("END", navCurrentLabel(nav).c_str());  // bare value
+}
+
+// N3 — inside a leaf, left/right yields AdjustValue (the caller mutates the value
+// via timerMenuAdjust) and the cursor index does NOT move.
+void test_N3_leaf_navigate_adjusts_value(void) {
+    TimerMenuNav nav(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1);
+    nav.navigate(+1);          // to COUNTDOWN (slot 1)
+    nav.select();              // enter leaf
+    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::Editing);
+
+    TEST_ASSERT_TRUE(nav.navigate(+1) == TimerNavOutcome::AdjustValue);
+    TEST_ASSERT_EQUAL_UINT8(1, nav.index());   // still on COUNTDOWN
+    TEST_ASSERT_TRUE(nav.navigate(-1) == TimerNavOutcome::AdjustValue);
+    TEST_ASSERT_EQUAL_UINT8(1, nav.index());
+}
+
+// N4 — short press inside a leaf confirms and returns to the list (focus -> List).
+void test_N4_leaf_select_confirms_back_to_list(void) {
+    TimerMenuNav nav(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1);
+    nav.select();              // enter BUZZER leaf
+    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::Editing);
+
+    TEST_ASSERT_TRUE(nav.select() == TimerNavOutcome::ConfirmBackToList);
+    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::List);
+    TEST_ASSERT_EQUAL_UINT8(0, nav.index());
+}
+
+// N5 — long press inside a leaf saves and returns to the list (focus -> List); the
+// value is already live in RAM so no separate commit happens here.
+void test_N5_leaf_back_returns_to_list(void) {
+    TimerMenuNav nav(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1);
+    nav.select();              // enter BUZZER leaf
+    TEST_ASSERT_TRUE(nav.back() == TimerNavOutcome::BackToList);
+    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::List);
+}
+
+// N6 — short press on MAIN returns to the main menu (and commits), from any origin.
+void test_N6_select_main_goes_to_main_menu(void) {
+    TimerMenuNav nav(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1);
+    // walk to MAIN (last row)
+    for (uint8_t i = 0; i < TIMER_MENU_SLOT_COUNT - 1; ++i) nav.navigate(+1);
+    TEST_ASSERT_TRUE(nav.onMain());
+    TEST_ASSERT_TRUE(nav.select() == TimerNavOutcome::GoToMainMenu);
+    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::List);  // not a leaf
+}
+
+// N7 — long press OUT of the list is context-aware by entry origin: Menu -> back
+// to the main menu, App -> exit the menu (back to the Timer app).
+void test_N7_list_back_is_context_aware(void) {
+    TimerMenuNav fromMenu(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1,
+                          TimerNavOrigin::Menu);
+    TEST_ASSERT_TRUE(fromMenu.back() == TimerNavOutcome::GoToMainMenu);
+
+    TimerMenuNav fromApp(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1,
+                         TimerNavOrigin::App);
+    TEST_ASSERT_TRUE(fromApp.back() == TimerNavOutcome::ExitMenu);
+}
+
+// N8 — enter() (re)opens the list: List focus, index 0, fresh origin -- the device
+// uses it whenever the TIMER menu is opened, even after a prior leaf edit.
+void test_N8_enter_resets_to_list_top(void) {
+    TimerMenuNav nav(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1,
+                     TimerNavOrigin::Menu);
+    nav.navigate(+1);
+    nav.select();              // now Editing on COUNTDOWN
+    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::Editing);
+
+    nav.enter(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1, TimerNavOrigin::App);
+    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::List);
+    TEST_ASSERT_EQUAL_UINT8(0, nav.index());
+    TEST_ASSERT_TRUE(nav.origin() == TimerNavOrigin::App);
+}
+
+// ============================================================================
 // TIMER per-enum codec table (src/TimerEnums.cpp). The fifth descriptor-table
 // family member: one row per enum value, indexed by the enum's numeric value,
 // carrying {wire, menu, ha, aliases}. The wire column is the MQTT/HTTP/sync
 // contract consumed by parse*/toString in TimerManager; menu/ha columns are
-// rewired by the two follow-up issues. See docs/adr/0010.
+// the bare on-device leaf value and the HA option label. See docs/adr/0010.
 // ============================================================================
 
 // T9 — both codec tables are well-formed: exactly COUNT rows (also a static_assert
@@ -3477,11 +3628,19 @@ int main(int, char **) {
     RUN_TEST(test_M3_stepped_range_saturates);
     RUN_TEST(test_M4_bool_toggle_flips_both_directions);
     RUN_TEST(test_M5_stepped_clamps_to_descriptor_bounds);
-    RUN_TEST(test_M6_label_formatting);
+    RUN_TEST(test_M6_name_and_bare_value);
     RUN_TEST(test_M7_enum_adjust_defers_persist_until_commit);
     RUN_TEST(test_M8_enum_labels_source_from_codec);
     RUN_TEST(test_M9_menu_commit_one_persistbatch_flushes_both_namespaces);
     RUN_TEST(test_M11_menu_commit_republishes_all_attribute_groups);
+    RUN_TEST(test_N1_list_navigation_wraps);
+    RUN_TEST(test_N2_select_value_row_enters_leaf);
+    RUN_TEST(test_N3_leaf_navigate_adjusts_value);
+    RUN_TEST(test_N4_leaf_select_confirms_back_to_list);
+    RUN_TEST(test_N5_leaf_back_returns_to_list);
+    RUN_TEST(test_N6_select_main_goes_to_main_menu);
+    RUN_TEST(test_N7_list_back_is_context_aware);
+    RUN_TEST(test_N8_enter_resets_to_list_top);
     RUN_TEST(test_T9_codec_tables_well_formed);
     RUN_TEST(test_T10_codec_roundtrip_aliases_and_case);
     RUN_TEST(test_T11_setting_emit_value_by_type);

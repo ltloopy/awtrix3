@@ -20,9 +20,9 @@ Three numeric tunings, each only meaningful in one specific mode:
 
 | Knob | Variable | Relevant when | Editable via |
 |---|---|---|---|
-| Auto-clear delay | `TIMER_FINISHED_HOLD` | `finished mode = auto-clear` | `dev.json` (`timer_finished_hold`), MQTT/HTTP `{prefix}/timer` (`finished_hold`), `TIMER` top menu (`CLEAR` slot) |
-| Re-alert interval | `TIMER_REALERT_INTERVAL` | `finished mode = re-alert` | `dev.json` (`timer_realert_interval`), MQTT/HTTP `{prefix}/timer` (`realert_interval`), `TIMER` top menu (`ALERT` slot) |
-| Countdown beep window | `TIMER_COUNTDOWN_SECONDS` | `buzzer mode = countdown` | `dev.json` (`timer_countdown_seconds`), MQTT/HTTP `{prefix}/timer` (`countdown_seconds`), `TIMER` top menu (`CDOWN` slot) |
+| Auto-clear delay | `TIMER_FINISHED_HOLD` | `finished mode = auto-clear` | `dev.json` (`timer_finished_hold`), MQTT/HTTP `{prefix}/timer` (`finished_hold`), `TIMER` menu (`AUTOCLEAR` item) |
+| Re-alert interval | `TIMER_REALERT_INTERVAL` | `finished mode = re-alert` | `dev.json` (`timer_realert_interval`), MQTT/HTTP `{prefix}/timer` (`realert_interval`), `TIMER` menu (`REALERT` item) |
+| Countdown beep window | `TIMER_COUNTDOWN_SECONDS` | `buzzer mode = countdown` | `dev.json` (`timer_countdown_seconds`), MQTT/HTTP `{prefix}/timer` (`countdown_seconds`), `TIMER` menu (`COUNTDOWN` item) |
 
 Persisted in NVS namespace `"awtrix"` (keys `TFHOLD` / `TRALERT` / `TCDOWN`). `dev.json` overrides NVS on every boot. The accepted ranges and persistence for these — and for every value-config key below — are defined once in the persisted-settings table `TIMER_SETTINGS_DESCS` ([src/TimerSettings.h](src/TimerSettings.h)); each surface (`POST /api/timer` / `{prefix}/timer`, `dev.json`, NVS, the `TIMER` menu's clamp, the sync snapshot) is driven from that one table (ADR-0007).
 
@@ -56,34 +56,47 @@ _Avoid_: reading `icon_enabled` as "enable the idle icon" or as a member of the 
 There are two physically distinct on-device places to configure the Timer; use the right name for the right one.
 
 - **Timer-app config mode** — long-press middle from `Idle` while the Timer app is on screen. Edits **duration only** (HH/MM/SS wheels, auto-repeat on hold, 30 s no-input auto-applies). The display-free editor — field cursor, the three edit buffers, the cap-aware adjust math, and the config-mode timing (the 30 s auto-apply timeout and the button hold-to-repeat, via `tick(nowMs, buttonState)` with injected time + button state) — lives in `TimerConfigEditor` ([TimerConfigEditor.cpp](src/TimerConfigEditor.cpp)); `TimerManager` keeps thin forwarders (`enterConfigMode`/`exitConfigMode`/`configCycleField`/`configAdjust`), feeds the editor button presses from its `tick()`, and commits the edited duration through `setDuration`. See [ADR-0011](docs/adr/0011-timer-config-editor-extraction.md) (extraction) and [ADR-0012](docs/adr/0012-timer-config-timing-in-editor.md) (timing).
-- **TIMER global menu** — long-press middle from any app to open the global menu, navigate to the `TIMER` top entry. A seven-slot field walker that edits **buzzer mode, finished mode, the three per-mode timing knobs, and the two display-element toggles** (`ICON` / `BAR`, see below). Lives in `MenuManager` ([MenuManager.cpp](src/MenuManager.cpp)).
+- **TIMER global menu** — long-press middle from any app to open the global menu, navigate to the `TIMER` top entry (which now sits **before** `APPS`). A **drill-in navigable list** (ADR-0016, consistent with every other on-device menu): left/right walks the named items and a short press drills into the highlighted item's editor. It edits **buzzer mode, finished mode, the three per-mode timing knobs, and the two display-element toggles** (`ICON` / `BAR`, see below), plus a `MAIN` item back to the main menu. Lives in `MenuManager` ([MenuManager.cpp](src/MenuManager.cpp)) over the `TimerMenuNav` state machine ([TimerMenuNav.cpp](src/TimerMenuNav.cpp)).
 
 ADR-0001 originally named "the on-device config buttons" as the timer's single on-device control surface — that referred to the Timer-app config mode. With the global `TIMER` menu added, on-device timer configuration now spans both surfaces; ADR-0003 documents the addition.
 
 ### TIMER menu slot table
 
-The data model behind the **TIMER global menu**'s seven slots: the table `TIMER_MENU_SLOTS`
+The data model behind the **TIMER global menu**'s drill-in list: the table `TIMER_MENU_SLOTS`
 ([src/TimerMenu.h](src/TimerMenu.h)), a member of the Timer descriptor-table family
 alongside `TIMER_SETTINGS_DESCS`, `TIMER_MEMBER_CONFIG_DESCS` and `TIMER_HA_DESCRIPTORS`.
-`MenuManager` walks it for
-label and adjust (`timerMenuLabel` / `timerMenuAdjust`) and keeps only the drawing; the
-module is display-free, so the label/clamp/wrap/cycle logic is host-tested. Three slot
-kinds:
+The eight rows are the seven value settings plus the `MAIN` (back-to-main) row, last. Two
+accessors split the old label: `timerMenuName(slot)` returns the **list label** (the item
+name, e.g. `BUZZER`, shown while walking the list) and `timerMenuValue(slot)` returns the
+**bare leaf value** (e.g. `END`, `30`, `ON`, shown while editing). `MenuManager` keeps only
+the drawing + commit; the module is display-free, so the name/value/clamp/wrap/cycle logic
+is host-tested. Four slot kinds:
 
 - **Table-backed slots** (`SteppedRange`, `BoolToggle`) carry only a `cmdKey`; the dispatch
   reads both *storage* and *range* (`lo`/`hi`) from the matching `TIMER_SETTINGS_DESCS` row.
   The menu reuses the settings table's pointer and bounds, so it cannot drift from it.
 - **Enum slots** (buzzer, finished) are member-backed (the B1 boundary, ADR-0007): they
   carry bespoke `getEnum`/`setEnum` hooks, like the settings table's `bespoke` validators.
+  Their bare value comes from the per-enum codec's `menu` column (now bare, ADR-0010/0016).
+- **Navigation slot** (`MAIN`) carries no storage or value; selecting it returns to the
+  main menu.
 
-All seven slots share one commit model (ADR-0008, superseding ADR-0003's split): each slot
-**applies to RAM live** while scrolling — and enum slots also **publish** live, so HA
-reflects them — but the **NVS write and the peer broadcast happen only on the long-press
-commit**: one `PersistBatch` window (the same commit seam `parseCommand` uses, PRD #29)
-whose scope exit flushes deferred enum edits to the `"timer"` namespace and the table half
-to `"awtrix"` (`saveSettings()`), then `broadcastConfig()`. Enum slots defer their NVS
-write via the `persist=false` argument on `setBuzzerMode`/`setFinishedMode` (sibling to
-`setIcon*`'s `publish` flag).
+The interaction model lives in a separate display-free state machine, `TimerMenuNav`
+([src/TimerMenuNav.h](src/TimerMenuNav.h), ADR-0016): `{focus ∈ List|Editing,
+selectedIndex, origin ∈ Menu|App}`, mapping button inputs to outcomes the device acts on
+(navigate-with-wrap, drill-in `EnterLeaf`, `ConfirmBackToList`/`BackToList`, `GoToMainMenu`,
+`ExitMenu`). Host-tested `test_N1`..`test_N8`.
+
+All value slots share one commit model (ADR-0008/0016, superseding ADR-0003's split): each
+slot **applies to RAM live** while editing — and enum slots also **publish** live, so HA
+reflects them — but the **NVS write and the peer broadcast happen only on the list →
+main-menu transition** (a long-press out of the list, or selecting `MAIN`): one
+`PersistBatch` window (the same commit seam `parseCommand` uses, PRD #29) whose scope exit
+flushes deferred enum edits to the `"timer"` namespace and the table half to `"awtrix"`
+(`saveSettings()`), then `broadcastConfig()` + the HA attribute republish (#60). A
+long-press *inside a leaf* just steps back to the list (value already live in RAM); it does
+not commit. Enum slots defer their NVS write via the `persist=false` argument on
+`setBuzzerMode`/`setFinishedMode` (sibling to `setIcon*`'s `publish` flag).
 
 _Avoid_: calling this the "Timer-app config mode" (that is the separate HH/MM/SS duration
 editor) or implying enum edits persist per-press (they no longer do, per ADR-0008).

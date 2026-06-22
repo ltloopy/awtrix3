@@ -5,17 +5,17 @@
 // on-device and Home Assistant labels; aliases are extra accepted input spellings
 // (parse only -- never emitted). See docs/adr/0010.
 const TimerEnumCodec TIMER_BUZZER_CODEC[] = {
-    {"off",       "BZR OFF", "Off",       nullptr},
-    {"end",       "BZR END", "End",       nullptr},
-    {"countdown", "BZR CDN", "Countdown", nullptr},
+    {"off",       "OFF", "Off",       nullptr},
+    {"end",       "END", "End",       nullptr},
+    {"countdown", "CDN", "Countdown", nullptr},
 };
 const size_t TIMER_BUZZER_CODEC_COUNT =
     sizeof(TIMER_BUZZER_CODEC) / sizeof(TIMER_BUZZER_CODEC[0]);
 
 const TimerEnumCodec TIMER_FINISHED_CODEC[] = {
-    {"auto-clear", "FIN AUTO", "Auto-clear", "autoclear"},
-    {"hold",       "FIN HOLD", "Hold",       nullptr},
-    {"re-alert",   "FIN RALT", "Re-alert",   "realert"},
+    {"auto-clear", "AUTO", "Auto-clear", "autoclear"},
+    {"hold",       "HOLD", "Hold",       nullptr},
+    {"re-alert",   "RALT", "Re-alert",   "realert"},
 };
 const size_t TIMER_FINISHED_CODEC_COUNT =
     sizeof(TIMER_FINISHED_CODEC) / sizeof(TIMER_FINISHED_CODEC[0]);

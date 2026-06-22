@@ -15,23 +15,33 @@ namespace
     void    setFinished(uint8_t v) { TimerManager.setFinishedMode((FinishedMode)v, /*persist=*/false); }
 }
 
-// idx order is the on-screen slot order (selectButton cycles through it).
-//   kind, cmdKey, prefix, step, codec, labelCount, getEnum, setEnum
-// The two EnumCycle slots read their labels from the per-enum codec table's menu
-// column (ADR-0010) -- no private label copy to drift from it.
+// idx order is the on-screen list order (left/right walks it, wrapping). MAIN is
+// the lone Navigation row and sits last (the device reads it as the back-to-main
+// item; PRD #83). DURATION is prepended by a later slice.
+//   kind, name, cmdKey, step, codec, labelCount, getEnum, setEnum
+// The two EnumCycle slots read their bare leaf value from the per-enum codec
+// table's menu column (ADR-0010) -- no private label copy to drift from it.
 const TimerMenuSlot TIMER_MENU_SLOTS[] = {
-    {TimerMenuKind::EnumCycle,    nullptr,             nullptr,  0, TIMER_BUZZER_CODEC,   (uint8_t)BuzzerMode::COUNT,   getBuzzer,   setBuzzer},
-    {TimerMenuKind::SteppedRange, "countdown_seconds", "CDOWN ", 1, nullptr,              0, nullptr,     nullptr},
-    {TimerMenuKind::EnumCycle,    nullptr,             nullptr,  0, TIMER_FINISHED_CODEC, (uint8_t)FinishedMode::COUNT, getFinished, setFinished},
-    {TimerMenuKind::SteppedRange, "finished_hold",     "CLEAR ", 5, nullptr,              0, nullptr,     nullptr},
-    {TimerMenuKind::SteppedRange, "realert_interval",  "ALERT ", 5, nullptr,              0, nullptr,     nullptr},
-    {TimerMenuKind::BoolToggle,   "icon_enabled",      "ICON ",  0, nullptr,              0, nullptr,     nullptr},
-    {TimerMenuKind::BoolToggle,   "bar_enabled",       "BAR ",   0, nullptr,              0, nullptr,     nullptr},
+    {TimerMenuKind::EnumCycle,    "BUZZER",    nullptr,             0, TIMER_BUZZER_CODEC,   (uint8_t)BuzzerMode::COUNT,   getBuzzer,   setBuzzer},
+    {TimerMenuKind::SteppedRange, "COUNTDOWN", "countdown_seconds", 1, nullptr,              0, nullptr,     nullptr},
+    {TimerMenuKind::EnumCycle,    "FINISH",    nullptr,             0, TIMER_FINISHED_CODEC, (uint8_t)FinishedMode::COUNT, getFinished, setFinished},
+    {TimerMenuKind::SteppedRange, "AUTOCLEAR", "finished_hold",     5, nullptr,              0, nullptr,     nullptr},
+    {TimerMenuKind::SteppedRange, "REALERT",   "realert_interval",  5, nullptr,              0, nullptr,     nullptr},
+    {TimerMenuKind::BoolToggle,   "ICON",      "icon_enabled",      0, nullptr,              0, nullptr,     nullptr},
+    {TimerMenuKind::BoolToggle,   "BAR",       "bar_enabled",       0, nullptr,              0, nullptr,     nullptr},
+    {TimerMenuKind::Navigation,   "MAIN",      nullptr,             0, nullptr,              0, nullptr,     nullptr},
 };
 
 const size_t TIMER_MENU_SLOT_COUNT = sizeof(TIMER_MENU_SLOTS) / sizeof(TIMER_MENU_SLOTS[0]);
 
-String timerMenuLabel(uint8_t slot)
+String timerMenuName(uint8_t slot)
+{
+    if (slot >= TIMER_MENU_SLOT_COUNT) return String();
+    const char *n = TIMER_MENU_SLOTS[slot].name;
+    return n ? String(n) : String();
+}
+
+String timerMenuValue(uint8_t slot)
 {
     if (slot >= TIMER_MENU_SLOT_COUNT) return String();
     const TimerMenuSlot &s = TIMER_MENU_SLOTS[slot];
@@ -43,14 +53,16 @@ String timerMenuLabel(uint8_t slot)
         {
             const TimerSettingDesc *d = timerSettingByCmdKey(s.cmdKey);
             uint16_t v = d ? *static_cast<uint16_t *>(d->storage) : 0;
-            return String(s.prefix) + String(v);
+            return String(v);
         }
         case TimerMenuKind::BoolToggle:
         {
             const TimerSettingDesc *d = timerSettingByCmdKey(s.cmdKey);
             bool on = d && *static_cast<bool *>(d->storage);
-            return String(s.prefix) + (on ? "ON" : "OFF");
+            return String(on ? "ON" : "OFF");
         }
+        case TimerMenuKind::Navigation:
+            return String();
     }
     return String();
 }
@@ -87,5 +99,7 @@ void timerMenuAdjust(uint8_t slot, int dir)
             b = !b;
             break;
         }
+        case TimerMenuKind::Navigation:
+            break;  // no value to adjust
     }
 }

@@ -7,6 +7,7 @@
 #include "timer.h"
 #include "TimerManager.h"
 #include "TimerMenu.h"
+#include "TimerMenuNav.h"
 #include "MQTTManager.h"
 #include <icons.h>
 #include <UpdateManager.h>
@@ -84,8 +85,25 @@ uint8_t appsCount = 6;
 uint8_t appsCount = 5;
 #endif
 
-int8_t timerConfigIndex;
 uint8_t timerConfigCount = TIMER_MENU_SLOT_COUNT;
+// The TIMER menu's drill-in navigation state machine (PRD #83 / issue #85). MAIN
+// is the last slot (a Navigation row); the device keeps only drawing + the commit.
+TimerMenuNav timerNav(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1);
+
+// The one-shot TIMER-menu commit: a single PersistBatch window (enum edits
+// deferred during scroll in "timer" ns + table-row knob/toggle keys in "awtrix"
+// ns), then the peer broadcast and the HA attribute republish. Fires once on the
+// list -> main-menu transition (long-press out of the list, or selecting MAIN).
+// See ADR-0008/0015 and PRD #29/#45/#60.
+static void commitTimerMenu()
+{
+    {
+        TimerManager_::PersistBatch batch(TimerManager);
+        batch.markTableDirty();
+    }
+    TimerManager.broadcastConfig();
+    TimerManager.publishAllAttributeGroups();
+}
 
 MenuState currentState = MainMenu;
 
@@ -224,8 +242,14 @@ String MenuManager_::menutext()
             return String(SOUND_VOLUME);
         }
     case TimerConfigMenu:
-        DisplayManager.drawMenuIndicator(timerConfigIndex, timerConfigCount, 0xFBC000);
-        return timerMenuLabel(timerConfigIndex);
+        // List focus: walk the named items (indicator over the list). Leaf focus:
+        // show the bare value only, no indicator (PRD #83).
+        if (timerNav.focus() == TimerNavFocus::List)
+        {
+            DisplayManager.drawMenuIndicator(timerNav.index(), timerConfigCount, 0xFBC000);
+            return timerMenuName(timerNav.index());
+        }
+        return timerMenuValue(timerNav.index());
     default:
         break;
     }
@@ -288,7 +312,9 @@ void MenuManager_::rightButton()
             SOUND_VOLUME++;
         break;
     case TimerConfigMenu:
-        timerMenuAdjust(timerConfigIndex, +1);
+        // List focus walks the list; leaf focus steps the value live.
+        if (timerNav.navigate(+1) == TimerNavOutcome::AdjustValue)
+            timerMenuAdjust(timerNav.index(), +1);
         break;
     default:
         break;
@@ -353,7 +379,8 @@ void MenuManager_::leftButton()
             SOUND_VOLUME--;
         break;
     case TimerConfigMenu:
-        timerMenuAdjust(timerConfigIndex, -1);
+        if (timerNav.navigate(-1) == TimerNavOutcome::AdjustValue)
+            timerMenuAdjust(timerNav.index(), -1);
         break;
     default:
         break;
@@ -389,6 +416,11 @@ void MenuManager_::selectButton()
                 UpdateManager.updateFirmware();
             }
             break;
+        case TimerConfigMenu:
+            // Open the TIMER menu at the top of the list (origin = main menu).
+            timerNav.enter(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1,
+                           TimerNavOrigin::Menu);
+            break;
         }
         break;
     case BrightnessMenu:
@@ -400,7 +432,13 @@ void MenuManager_::selectButton()
         }
         break;
     case TimerConfigMenu:
-        timerConfigIndex = (timerConfigIndex + 1) % timerConfigCount;
+        // Short press: drill into a value leaf, confirm a leaf back to the list,
+        // or (on MAIN) commit and return to the main menu.
+        if (timerNav.select() == TimerNavOutcome::GoToMainMenu)
+        {
+            commitTimerMenu();
+            currentState = MainMenu;
+        }
         break;
     case Appmenu:
         switch (appsIndex)
@@ -499,17 +537,17 @@ void MenuManager_::selectButtonLong()
             saveSettings();
             break;
         case TimerConfigMenu:
-            {
-                // The long-press commit is one PersistBatch window (PRD #29):
-                // scope exit flushes enum edits deferred during scroll ("timer"
-                // ns, iff any) then the table-backed knob/toggle keys ("awtrix"
-                // ns), the same commit seam parseCommand uses.
-                TimerManager_::PersistBatch batch(TimerManager);
-                batch.markTableDirty();
-            }
-            TimerManager.broadcastConfig();             // propagate the committed timer config to peers
-            TimerManager.publishAllAttributeGroups();   // refresh every carrier's HA attribute object (issue #60)
-            break;
+        {
+            // Long press: in a leaf it just steps back up to the list (value
+            // already live in RAM, no commit). Out of the list it is the single
+            // commit seam -> main menu (origin = menu) or back to the Timer app
+            // (origin = app; wired by issue #87).
+            TimerNavOutcome o = timerNav.back();
+            if (o == TimerNavOutcome::BackToList)
+                return;                 // stay in the TIMER menu, list focus
+            commitTimerMenu();          // GoToMainMenu / ExitMenu: commit once
+            break;                      // falls through to currentState = MainMenu
+        }
         default:
             break;
         }

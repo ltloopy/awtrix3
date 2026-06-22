@@ -34,7 +34,7 @@ enum class FinishedMode : uint8_t { AutoClear = 0, Hold = 1, ReAlert = 2, COUNT 
 struct TimerEnumCodec
 {
     const char *wire;     // canonical wire string (MQTT/HTTP/sync)
-    const char *menu;     // on-device menu label
+    const char *menu;     // on-device BARE leaf value (e.g. "END", not "BZR END")
     const char *ha;       // Home Assistant select-option label
     const char *aliases;  // extra accepted input spelling(s), nullptr if none
 };
