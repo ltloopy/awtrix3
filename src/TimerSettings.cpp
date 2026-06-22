@@ -435,3 +435,21 @@ void timerMemberConfigPublish(const char *cmdKey)
         return;
     }
 }
+
+// ===========================================================================
+// HTTP GET /api/timer config mirror (PRD #73). The complete persisted-config
+// projection: both tables, no snapshot filter, raw values. Lives here beside the
+// descriptor tables (and, from #75, the file-local carrier-native formatters it
+// will reuse) rather than in the manager. See the header for the full contract.
+// ===========================================================================
+void timerBuildFullConfig(JsonDocument &doc)
+{
+    // Table half: EVERY settings row, ignoring inSnapshot, so the sync-role keys
+    // (sync_follow/sync_targets) are part of the read mirror even though they are
+    // never propagated. Raw value per row via the shared single-row emitter.
+    for (size_t i = 0; i < TIMER_SETTINGS_DESC_COUNT; ++i)
+        timerSettingEmitValue(TIMER_SETTINGS_DESCS[i], doc);
+
+    // Member-backed half: buzzer/finished + the four icon_* live values.
+    timerMemberConfigBuildSnapshot(doc);
+}
