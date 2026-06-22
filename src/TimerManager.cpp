@@ -220,7 +220,10 @@ const char *TimerManager_::finishedModeString() const
 
 String TimerManager_::getStateJson() const
 {
-    StaticJsonDocument<512> doc;
+    // Bumped from the old 512-byte fixed buffer to the shared command-size
+    // constant the snapshot/broadcast paths use, to hold the added config mirror
+    // (PRD #73: ~20 keys incl. two melodies, a CSV sync_targets, four icon names).
+    DynamicJsonDocument doc(kTimerCmdJsonSize);
     uint32_t remaining = computeCurrentRemaining();
     doc["state"]         = getStateString();
     doc["enabled"]       = (bool)SHOW_TIMER;
@@ -230,6 +233,14 @@ String TimerManager_::getStateJson() const
     doc["duration_str"]  = formatHMS(durationSec);
     doc["buzzer"]        = buzzerModeString();
     doc["finished"]      = finishedModeString();
+
+    // Persisted-config mirror (PRD #73): the complete two-table dump under a
+    // nested `config` object, so an HTTP-only client reads back everything it can
+    // POST. Built in a temp doc by the pure table-walking projection, then
+    // deep-copied in -- duration stays top-level only (run-state, not config).
+    DynamicJsonDocument cfg(kTimerCmdJsonSize);
+    timerBuildFullConfig(cfg);
+    doc["config"] = cfg.as<JsonObject>();
 
     String out;
     serializeJson(doc, out);

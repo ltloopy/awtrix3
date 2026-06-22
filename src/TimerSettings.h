@@ -147,4 +147,18 @@ bool timerDocTouchesMemberConfig(const JsonDocument &doc);
 // single place "how key X goes out on the wire" is defined (issue #33 / PRD #28).
 void timerMemberConfigPublish(const char *cmdKey);
 
+// ---------------------------------------------------------------------------
+// HTTP GET /api/timer config mirror (PRD #73). Build the COMPLETE persisted
+// configuration into `doc`: the full two-table dump an HTTP-only client reads
+// back so it can confirm everything it can POST. Unlike timerSettingsBuildSnapshot
+// it does NOT honour the inSnapshot filter -- the sync-role keys
+// (sync_follow/sync_targets) ARE included -- and it appends the member-config half
+// (buzzer/finished/the four icon_*) via timerMemberConfigBuildSnapshot. Pure: it
+// reads only the descriptor storage, no I/O, no globals beyond that. Because it
+// walks the same two tables that drive the control surface, the read surface
+// cannot drift from what is writable (the drift-guard test pins this). Values are
+// raw here; the two carrier-native renderings (friendly bar_color,
+// max_duration_str) are layered on in issue #75.
+void timerBuildFullConfig(JsonDocument &doc);
+
 #endif

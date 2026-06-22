@@ -1444,7 +1444,9 @@ void test_D8_view_duration_edit_while_running_buffers_bar(void) {
 // ============================================================================
 void test_U44_getStateJson_idle_snapshot(void) {
     TimerManager.setDuration(300);
-    StaticJsonDocument<512> doc;
+    // 2048: the GET body now carries the nested config mirror (PRD #73), past the
+    // old 512-byte buffer. The top-level field assertions below are unchanged.
+    StaticJsonDocument<2048> doc;
     TEST_ASSERT_FALSE(deserializeJson(doc, TimerManager.getStateJson()));
     TEST_ASSERT_EQUAL_STRING("idle", doc["state"]);
     TEST_ASSERT_TRUE(doc["enabled"].as<bool>());
@@ -1462,7 +1464,7 @@ void test_U45_getStateJson_running_is_wallclock_fresh(void) {
     TimerManager.start();
     fixture::advance(126000);   // 126 s elapsed; NO tick() — proves live compute,
                                 // not the cached remainingSec the publish path uses.
-    StaticJsonDocument<512> doc;
+    StaticJsonDocument<2048> doc;
     TEST_ASSERT_FALSE(deserializeJson(doc, TimerManager.getStateJson()));
     TEST_ASSERT_EQUAL_STRING("running", doc["state"]);
     TEST_ASSERT_EQUAL_UINT32(174, doc["remaining"].as<uint32_t>());
@@ -1476,7 +1478,7 @@ void test_U46_getStateJson_paused_frozen(void) {
     TimerManager.pause();
     uint32_t frozen = TimerManager.getRemaining();
     fixture::advance(50000);    // time passes while paused; remaining must not move.
-    StaticJsonDocument<512> doc;
+    StaticJsonDocument<2048> doc;
     TEST_ASSERT_FALSE(deserializeJson(doc, TimerManager.getStateJson()));
     TEST_ASSERT_EQUAL_STRING("paused", doc["state"]);
     TEST_ASSERT_EQUAL_UINT32(frozen, doc["remaining"].as<uint32_t>());
@@ -1487,7 +1489,7 @@ void test_U47_getStateJson_finished_zero(void) {
     TimerManager.start();
     fixture::advance(5000);
     TimerManager.tick();
-    StaticJsonDocument<512> doc;
+    StaticJsonDocument<2048> doc;
     TEST_ASSERT_FALSE(deserializeJson(doc, TimerManager.getStateJson()));
     TEST_ASSERT_EQUAL_STRING("finished", doc["state"]);
     TEST_ASSERT_EQUAL_UINT32(0, doc["remaining"].as<uint32_t>());
@@ -1495,7 +1497,7 @@ void test_U47_getStateJson_finished_zero(void) {
 
 void test_U48_getStateJson_disabled_still_200_shape(void) {
     SHOW_TIMER = false;
-    StaticJsonDocument<512> doc;
+    StaticJsonDocument<2048> doc;
     TEST_ASSERT_FALSE(deserializeJson(doc, TimerManager.getStateJson()));
     TEST_ASSERT_FALSE(doc["enabled"].as<bool>());
     TEST_ASSERT_EQUAL_STRING("idle", doc["state"]);   // disabled timer is forced Idle
@@ -1503,7 +1505,7 @@ void test_U48_getStateJson_disabled_still_200_shape(void) {
 
 void test_U49_getStateJson_enum_canonical_spellings(void) {
     TimerManager.parseCommand("{\"buzzer\":\"countdown\",\"finished\":\"re-alert\"}");
-    StaticJsonDocument<512> doc;
+    StaticJsonDocument<2048> doc;
     TEST_ASSERT_FALSE(deserializeJson(doc, TimerManager.getStateJson()));
     TEST_ASSERT_EQUAL_STRING("countdown", doc["buzzer"]);
     TEST_ASSERT_EQUAL_STRING("re-alert", doc["finished"]);
@@ -1511,6 +1513,57 @@ void test_U49_getStateJson_enum_canonical_spellings(void) {
     TimerManager.parseCommand("{\"finished\":\"autoclear\"}");
     TEST_ASSERT_FALSE(deserializeJson(doc, TimerManager.getStateJson()));
     TEST_ASSERT_EQUAL_STRING("auto-clear", doc["finished"]);
+}
+
+// ============================================================================
+// U60 (#74) — getStateJson() gains a nested `config` object alongside the
+// existing top-level run-state summary. The config mirror is built from the two
+// descriptor tables (timerBuildFullConfig); this pins its presence as a JSON
+// object and that the stable 8-field top-level summary is untouched (back-compat).
+// ============================================================================
+void test_U60_getStateJson_has_nested_config_object(void) {
+    DynamicJsonDocument doc(2048);
+    TEST_ASSERT_FALSE(deserializeJson(doc, TimerManager.getStateJson()));
+
+    // The existing 8 top-level fields are present and unchanged (U44 contract).
+    TEST_ASSERT_TRUE(doc.containsKey("state"));
+    TEST_ASSERT_TRUE(doc.containsKey("enabled"));
+    TEST_ASSERT_TRUE(doc.containsKey("remaining"));
+    TEST_ASSERT_TRUE(doc.containsKey("remaining_str"));
+    TEST_ASSERT_TRUE(doc.containsKey("duration"));
+    TEST_ASSERT_TRUE(doc.containsKey("duration_str"));
+    TEST_ASSERT_TRUE(doc.containsKey("buzzer"));
+    TEST_ASSERT_TRUE(doc.containsKey("finished"));
+
+    // The new nested config object.
+    TEST_ASSERT_TRUE(doc.containsKey("config"));
+    TEST_ASSERT_TRUE(doc["config"].is<JsonObject>());
+}
+
+// ============================================================================
+// U61 (#74) — run-state ↔ config boundary in the GET body. `duration` is
+// top-level only (run-state, never config; excluded from the member-config
+// table for that reason). `buzzer`/`finished` appear BOTH at top level (legacy
+// back-compat) AND inside config (the mirror is self-contained). `action` is
+// never persisted, so it is absent from config.
+// ============================================================================
+void test_U61_getStateJson_config_boundary_placement(void) {
+    DynamicJsonDocument doc(2048);
+    TEST_ASSERT_FALSE(deserializeJson(doc, TimerManager.getStateJson()));
+    JsonObject config = doc["config"].as<JsonObject>();
+    TEST_ASSERT_FALSE(config.isNull());
+
+    // duration is run-state: top-level only, absent from config.
+    TEST_ASSERT_TRUE (doc.containsKey("duration"));
+    TEST_ASSERT_FALSE(config.containsKey("duration"));
+    TEST_ASSERT_FALSE(config.containsKey("duration_str"));
+    TEST_ASSERT_FALSE(config.containsKey("action"));
+
+    // buzzer/finished appear in both places.
+    TEST_ASSERT_TRUE(doc.containsKey("buzzer"));
+    TEST_ASSERT_TRUE(doc.containsKey("finished"));
+    TEST_ASSERT_TRUE(config.containsKey("buzzer"));
+    TEST_ASSERT_TRUE(config.containsKey("finished"));
 }
 
 // ============================================================================
@@ -2498,6 +2551,100 @@ void test_T18_attribute_group_duration_bag(void) {
     TEST_ASSERT_EQUAL_STRING("1:00:00", edge["max_duration"].as<const char *>());
 }
 
+// T19 (#74) — drift guard for the GET /api/timer config mirror. The pure
+// projection timerBuildFullConfig walks BOTH descriptor tables, so its output
+// must carry every persisted config key. For every TIMER_SETTINGS_DESCS row
+// (including the sync-role keys sync_follow/sync_targets, which are NOT in the
+// propagation snapshot) and every TIMER_MEMBER_CONFIG_DESCS row, the produced
+// config object contains that cmdKey. Walking the tables means a future config
+// key forces a corresponding read entry here or this test fails -- the read/write
+// parity cannot silently regress. duration (run-state) and action (not
+// persisted) are deliberately absent.
+void test_T19_full_config_mirrors_every_persisted_key(void) {
+    DynamicJsonDocument cfg(2048);
+    timerBuildFullConfig(cfg);
+
+    for (size_t i = 0; i < TIMER_SETTINGS_DESC_COUNT; ++i) {
+        const char *k = TIMER_SETTINGS_DESCS[i].cmdKey;
+        TEST_ASSERT_TRUE_MESSAGE(cfg.containsKey(k), k);
+    }
+    for (size_t i = 0; i < TIMER_MEMBER_CONFIG_DESC_COUNT; ++i) {
+        const char *k = TIMER_MEMBER_CONFIG_DESCS[i].cmdKey;
+        TEST_ASSERT_TRUE_MESSAGE(cfg.containsKey(k), k);
+    }
+
+    // The run-state / non-persisted keys are NOT config.
+    TEST_ASSERT_FALSE(cfg.containsKey("duration"));
+    TEST_ASSERT_FALSE(cfg.containsKey("action"));
+}
+
+// T20 (#75) — the two deliberate carrier-native renderings on the GET config
+// mirror, following this endpoint's raw+_str duration precedent. bar_color is
+// rendered as the human string ("default" when 0 / follow text color, ADR-0004,
+// else uppercase "#RRGGBB") instead of the raw int. max_duration keeps its raw
+// seconds AND gains a sibling max_duration_str in the trimmed clock form (reusing
+// formatHMS, hours group kept). Every other key stays raw.
+void test_T20_full_config_carrier_native_renderings(void) {
+    // bar_color: "default" when 0.
+    TIMER_BAR_COLOR = 0;
+    {
+        DynamicJsonDocument cfg(2048);
+        timerBuildFullConfig(cfg);
+        TEST_ASSERT_TRUE(cfg["bar_color"].is<const char *>());
+        TEST_ASSERT_EQUAL_STRING("default", cfg["bar_color"].as<const char *>());
+    }
+    // bar_color: uppercase "#RRGGBB" when set.
+    TIMER_BAR_COLOR = 0x00FF00;
+    {
+        DynamicJsonDocument cfg(2048);
+        timerBuildFullConfig(cfg);
+        TEST_ASSERT_EQUAL_STRING("#00FF00", cfg["bar_color"].as<const char *>());
+    }
+    // max_duration: raw seconds kept, plus the trimmed clock-string sibling.
+    TIMER_MAX_DURATION = 86400;
+    {
+        DynamicJsonDocument cfg(2048);
+        timerBuildFullConfig(cfg);
+        TEST_ASSERT_FALSE(cfg["max_duration"].is<const char *>());   // still a number
+        TEST_ASSERT_EQUAL_UINT32(86400, cfg["max_duration"].as<uint32_t>());
+        TEST_ASSERT_EQUAL_STRING("24:00:00", cfg["max_duration_str"].as<const char *>());
+    }
+    // Edge value: 3600 s -> "1:00:00" (hours group kept), raw unchanged.
+    TIMER_MAX_DURATION = 3600;
+    {
+        DynamicJsonDocument cfg(2048);
+        timerBuildFullConfig(cfg);
+        TEST_ASSERT_EQUAL_UINT32(3600, cfg["max_duration"].as<uint32_t>());
+        TEST_ASSERT_EQUAL_STRING("1:00:00", cfg["max_duration_str"].as<const char *>());
+    }
+}
+
+// T21 (#75) — value spot-check round-trip: set representative knobs via
+// parseCommand (a number, a color, a CSV sync target, an icon, a melody, a
+// toggle) then GET them back under config. Proves the read-after-write contract
+// over HTTP alone, including both carrier-native renderings. sync_targets and
+// the melody/icon read back as their raw strings; the toggle as a raw bool.
+void test_T21_get_config_value_spotchecks_via_parsecommand(void) {
+    SHOW_TIMER = true;
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.parseCommand(
+            "{\"max_duration\":7200,\"bar_color\":\"#112233\",\"sync_targets\":\"abc,def\","
+            "\"icon_running\":\"run\",\"melody_tick\":\"tick2\",\"bar_enabled\":false}")));
+
+    DynamicJsonDocument doc(2048);
+    TEST_ASSERT_FALSE(deserializeJson(doc, TimerManager.getStateJson()));
+    JsonObject c = doc["config"].as<JsonObject>();
+    TEST_ASSERT_FALSE(c.isNull());
+
+    TEST_ASSERT_EQUAL_UINT32(7200, c["max_duration"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_STRING("2:00:00", c["max_duration_str"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("#112233", c["bar_color"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("abc,def", c["sync_targets"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("run", c["icon_running"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("tick2", c["melody_tick"].as<const char *>());
+    TEST_ASSERT_FALSE(c["bar_enabled"].as<bool>());
+}
+
 // ============================================================================
 // TimerConfigEditor — direct-drive tests for the extracted duration editor.
 // These exercise the pure value object in isolation (no TimerManager singleton,
@@ -3307,6 +3454,8 @@ int main(int, char **) {
     RUN_TEST(test_U47_getStateJson_finished_zero);
     RUN_TEST(test_U48_getStateJson_disabled_still_200_shape);
     RUN_TEST(test_U49_getStateJson_enum_canonical_spellings);
+    RUN_TEST(test_U60_getStateJson_has_nested_config_object);
+    RUN_TEST(test_U61_getStateJson_config_boundary_placement);
     RUN_TEST(test_S1_sync_settings_validation_atomic_reject);
     RUN_TEST(test_S2_local_start_emits_runstate_only);
     RUN_TEST(test_S3_local_config_emits_snapshot_only);
@@ -3343,6 +3492,9 @@ int main(int, char **) {
     RUN_TEST(test_T18_attribute_group_duration_bag);
     RUN_TEST(test_T16_attribute_group_remaining_bag);
     RUN_TEST(test_T17_bar_color_formatter_renders_default_or_hex);
+    RUN_TEST(test_T19_full_config_mirrors_every_persisted_key);
+    RUN_TEST(test_T20_full_config_carrier_native_renderings);
+    RUN_TEST(test_T21_get_config_value_spotchecks_via_parsecommand);
     RUN_TEST(test_CE1_enter_decomposes_and_activates);
     RUN_TEST(test_CE2_adjust_default_cap_wraps_HH_at_23);
     RUN_TEST(test_CE3_adjust_tight_cap_recomputes_per_field);

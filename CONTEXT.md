@@ -46,7 +46,7 @@ _Avoid_: "tuning knobs" (reserved for the three per-mode knobs above); "compile-
 
 Two different `icon`/`bar`-named families on the Timer surface; do not conflate them.
 
-- **Display-element toggles** — the `_enabled`-suffixed booleans `icon_enabled` (`TIMER_ICON_ENABLED`, ADR-0005) and `bar_enabled` (`TIMER_BAR_ENABLED`, ADR-0004). Each shows/hides a *drawn element*. `icon_enabled = false` suppresses the icon region entirely — including the built-in hourglass fallback — and reflows **both** the time text and the progress bar to span the full 32px panel (ADR-0005); `bar_enabled = false` only hides the bar. Reachable via `dev.json` / `POST /api/timer` / `{prefix}/timer` MQTT **and** the on-device `TIMER` menu's `ICON` / `BAR` slots. No HA entity; not echoed in `GET /api/timer`. Persisted in NVS `"awtrix"` (`TICONEN` / `TBAREN`).
+- **Display-element toggles** — the `_enabled`-suffixed booleans `icon_enabled` (`TIMER_ICON_ENABLED`, ADR-0005) and `bar_enabled` (`TIMER_BAR_ENABLED`, ADR-0004). Each shows/hides a *drawn element*. `icon_enabled = false` suppresses the icon region entirely — including the built-in hourglass fallback — and reflows **both** the time text and the progress bar to span the full 32px panel (ADR-0005); `bar_enabled = false` only hides the bar. Reachable via `dev.json` / `POST /api/timer` / `{prefix}/timer` MQTT **and** the on-device `TIMER` menu's `ICON` / `BAR` slots. No dedicated HA control entity (surfaced read-only as state-sensor attributes); readable over HTTP in `GET /api/timer`'s `config` mirror (`config.icon_enabled` / `config.bar_enabled`, ADR-0015). Persisted in NVS `"awtrix"` (`TICONEN` / `TBAREN`).
 - **Icon image selection** — the `icon_<state>` family `icon_idle` / `icon_running` / `icon_paused` / `icon_finished` (`TIMER_ICON_*`). Each selects *which image* is drawn in a given state; empty falls back per [timer.md](docs/timer.md). These pick the picture; `icon_enabled` decides whether *any* icon (picture or hourglass) is drawn at all.
 
 _Avoid_: reading `icon_enabled` as "enable the idle icon" or as a member of the `icon_<state>` family — it is the master on/off for the whole icon region.
@@ -93,9 +93,13 @@ editor) or implying enum edits persist per-press (they no longer do, per ADR-000
 Two distinct kinds of Timer interface; do not conflate them.
 
 - **Control surface** — *writes* timer state/config. The three that must stay in parity (ADR-0001): on-device config buttons, `POST /api/timer`, and the `{prefix}/timer` MQTT topic (plus the HA `timer_dur` text entity as the discovery face of the MQTT one). Their shared obligation is the **atomic-reject validation contract**: an invalid command is rejected whole, nothing applied.
-- **Observation surface** — *reads* timer state without mutating it. Today: the Home Assistant MQTT discovery sensors (`{id}_timer_state` / `{id}_timer_rem`, etc.) and `GET /api/timer`. Their obligation is **parity of reported values**: every observation surface reports the same live values (same `state` vocabulary, same remaining-seconds basis) the others do. They carry *none* of the validation contract — there is no input to validate.
+- **Observation surface** — *reads* timer state **and persisted configuration** without mutating it. Today: the Home Assistant MQTT discovery sensors (`{id}_timer_state` / `{id}_timer_rem`, etc., plus their read-only attribute groups) and `GET /api/timer`. Their obligation is **parity of reported values**: every observation surface reports the same live values (same `state` vocabulary, same remaining-seconds basis) **and the same persisted configuration** the others do. They carry *none* of the validation contract — there is no input to validate. `GET /api/timer` reaches config-read parity by returning a nested `config` object mirroring the full persisted configuration (read-only, ADR-0015) — it does not gain a per-entity attribute structure; on HTTP, config-read genuinely *is* just `GET`.
 
-_Avoid_: calling `GET /api/timer` a "control surface" or implying it participates in atomic-reject. It observes; it never writes.
+_Avoid_: calling `GET /api/timer` a "control surface" or implying it participates in atomic-reject. It observes; it never writes — even though it now reports the full config, it remains pure read (always `200`, no `409`).
+
+**Carrier-native representation** (a general property of *reads*, on any carrier — not only HA attribute groups). A read surface renders each value in the representation that carrier already uses for its own state, so a multi-carrier key can read differently on each carrier while the underlying value cannot drift (every carrier reads the same persisted storage). On HA attribute groups: `bar_color` as `"default"`/`"#RRGGBB"` and `max_duration` as raw seconds on the state sensor vs. the `H:MM:SS` clock string on the Duration entity. On HTTP `GET /api/timer`: the same `bar_color` rendering, and `max_duration` reported **both** raw and as `max_duration_str` — following the endpoint's own raw+`_str` duration precedent rather than the HA form. The raw-vs-rendered choice thus has a documented home on every carrier; the HTTP `config` mirror deliberately diverges from the raw propagation snapshot, yet cannot disagree in value because both read the same storage.
+
+**Icons are the one deliberate HA observation non-gap.** The four `icon_<state>` names are readable over HTTP (`config.icon_*`, ADR-0015) and MQTT (retained `{prefix}/timer/icons`), but have **no HA read path** by design: they already have two read paths, HA cannot usefully render an AWTRIX icon file, and they sit outside the settings/attribute-group tables. Documented, not an oversight.
 
 ### Timer wire seam
 
@@ -177,15 +181,14 @@ sensor carries the full config bag `{max_duration, remaining_publish_interval,
 app_config_timeout, icon_enabled, bar_enabled, bar_color, sync_follow, sync_targets}`.
 `remaining_publish_interval` and `max_duration` each ride **two** carriers (one settings
 row, two table rows). A per-row formatter renders a key in its **carrier-native
-representation** — the representation that carrier already uses for its own state: a
-multi-carrier key may therefore read differently on each carrier, while the underlying
-value cannot drift (every carrier reads the same persisted storage). `bar_color` first
-showed an attribute can differ from the **config snapshot** (`"default"`/`"#RRGGBB"`
-rather than its raw-int form); `max_duration` (#68) sharpens that to differ **per
-carrier** — raw seconds (`86400`) on the state sensor, the trimmed `H:MM:SS` clock
-string (`"24:00:00"`, via the same `formatHMS` the Duration state speaks) on the
-Duration entity. Values are read-only from HA; they change only through
-their config keys, never the attribute. Each carrier's retained object rides the
+representation** (see the general principle below): a multi-carrier key may therefore
+read differently on each carrier, while the underlying value cannot drift (every carrier
+reads the same persisted storage). `bar_color` first showed an attribute can differ from
+the **config snapshot** (`"default"`/`"#RRGGBB"` rather than its raw-int form);
+`max_duration` (#68) sharpens that to differ **per carrier** — raw seconds (`86400`) on
+the state sensor, the trimmed `H:MM:SS` clock string (`"24:00:00"`, via the same
+`formatHMS` the Duration state speaks) on the Duration entity. Values are read-only from
+HA; they change only through their config keys, never the attribute. Each carrier's retained object rides the
 **Timer wire seam** to
 its `json_attr_t` topic via `publishAttributeGroup(carrier)` and is (re)published so HA
 never drifts from the device: at **discovery-enable** and every **MQTT (re)connect**
