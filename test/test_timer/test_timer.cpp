@@ -2220,11 +2220,13 @@ void test_M11_menu_commit_republishes_all_attribute_groups(void) {
 
     // The peer broadcast went out ...
     TEST_ASSERT_EQUAL_INT(1, fixture::sync_packet_count());
-    // ... and every carrier's attribute object was refreshed exactly once.
+    // ... and every carrier's attribute object was refreshed exactly once,
+    // including the Duration text entity (PRD #66 / issue #68).
     TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_FINISHED_ATTR_TOPIC));
     TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_BUZZER_ATTR_TOPIC));
     TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_STATE_ATTR_TOPIC));
     TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_REMAINING_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_DURATION_ATTR_TOPIC));
     // The just-committed knob's new value is in its carrier's refreshed bag.
     const PublishCall *fin = fixture::last_publish(fixture::TIMER_FINISHED_ATTR_TOPIC);
     TEST_ASSERT_NOT_NULL(fin);
@@ -2392,19 +2394,21 @@ void test_T13_attribute_group_buzzer_bag(void) {
 
 // T14 — the attribute-group table is well-formed: every row maps to a real
 // settings row (the cmdKey resolves via timerSettingByCmdKey), and the lit-up
-// carriers are exactly the buzzer/finished selects plus the state/remaining
-// sensors (PRD #57 / issue #59 extended the opt-in to HASensor).
+// carriers are exactly the buzzer/finished selects, the state/remaining sensors
+// (PRD #57 / issue #59), plus the Duration text entity (PRD #66 / issue #68
+// extended the opt-in to HAText) — the carrier set grew four -> five.
 void test_T14_attribute_group_table_well_formed(void) {
     TEST_ASSERT_TRUE(TIMER_ATTR_GROUP_DESC_COUNT >= 5);
     for (size_t i = 0; i < TIMER_ATTR_GROUP_DESC_COUNT; ++i) {
         const TimerAttrGroupDesc &g = TIMER_ATTR_GROUP_DESCS[i];
         TEST_ASSERT_NOT_NULL(g.cmdKey);
         TEST_ASSERT_NOT_NULL_MESSAGE(timerSettingByCmdKey(g.cmdKey), g.cmdKey);
-        // The lit-up carriers: the two HASelects and the two HASensors.
+        // The lit-up carriers: the two HASelects, the two HASensors, the HAText.
         TEST_ASSERT_TRUE(g.carrier == TimerHaEntity::Buzzer   ||
                          g.carrier == TimerHaEntity::Finished ||
                          g.carrier == TimerHaEntity::State    ||
-                         g.carrier == TimerHaEntity::Remaining);
+                         g.carrier == TimerHaEntity::Remaining||
+                         g.carrier == TimerHaEntity::Duration);
     }
 }
 
@@ -2466,6 +2470,32 @@ void test_T17_bar_color_formatter_renders_default_or_hex(void) {
     StaticJsonDocument<512> green;
     timerBuildAttributeGroup(TimerHaEntity::State, green);
     TEST_ASSERT_EQUAL_STRING("#00FF00", green["bar_color"].as<const char *>());
+}
+
+// T18 — the Duration text entity's attribute bag (PRD #66 / issue #68): exactly
+// {max_duration}, rendered in the carrier-NATIVE clock form the Duration entity's
+// own state speaks (formatHMS), NOT the raw seconds the state sensor keeps. This
+// is the first projected key whose representation differs per carrier: T15 pins
+// max_duration as the raw number 86400 on the State carrier; here the SAME key on
+// the Duration carrier is the clock STRING "24:00:00". The formatter reuses the
+// exact formatHMS the Duration state uses, including its trimming (drop the hours
+// group when zero), so the edge value 3600 renders "1:00:00".
+void test_T18_attribute_group_duration_bag(void) {
+    TIMER_MAX_DURATION = 86400;   // the default cap
+
+    StaticJsonDocument<256> doc;
+    timerBuildAttributeGroup(TimerHaEntity::Duration, doc);
+
+    TEST_ASSERT_EQUAL_STRING("24:00:00", doc["max_duration"].as<const char *>());
+    TEST_ASSERT_TRUE(doc["max_duration"].is<const char *>());   // clock STRING, not a number
+    TEST_ASSERT_EQUAL_INT(1, (int)doc.as<JsonObjectConst>().size());
+
+    // Edge value: 3600 s -> the trimmed clock form "1:00:00" (hours group kept,
+    // byte-identical in style to formatHMS, which the Duration state also uses).
+    TIMER_MAX_DURATION = 3600;
+    StaticJsonDocument<256> edge;
+    timerBuildAttributeGroup(TimerHaEntity::Duration, edge);
+    TEST_ASSERT_EQUAL_STRING("1:00:00", edge["max_duration"].as<const char *>());
 }
 
 // ============================================================================
@@ -3001,7 +3031,8 @@ void test_W17_publishAllAttributeGroups_each_carrier_once(void) {
     TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_BUZZER_ATTR_TOPIC));
     TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_STATE_ATTR_TOPIC));
     TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_REMAINING_ATTR_TOPIC));
-    TEST_ASSERT_EQUAL_INT(4, (int)MQTTManager.recorded.size());   // exactly the four carriers
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_DURATION_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(5, (int)MQTTManager.recorded.size());   // exactly the five carriers
 }
 
 // ============================================================================
@@ -3143,7 +3174,8 @@ void test_W24_clearAllAttributeGroups_empties_each_carrier(void) {
     TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_BUZZER_ATTR_TOPIC));
     TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_STATE_ATTR_TOPIC));
     TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_REMAINING_ATTR_TOPIC));
-    TEST_ASSERT_EQUAL_INT(4, (int)MQTTManager.recorded.size());   // exactly the four carriers
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_DURATION_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(5, (int)MQTTManager.recorded.size());   // exactly the five carriers
 
     // Empty payload == a retained clear (the broker drops the retained object).
     const PublishCall *st = fixture::last_publish(fixture::TIMER_STATE_ATTR_TOPIC);
@@ -3169,6 +3201,44 @@ void test_W25_refresh_after_clear_repopulates_attributes(void) {
     const PublishCall *fin = fixture::last_publish(fixture::TIMER_FINISHED_ATTR_TOPIC);
     TEST_ASSERT_NOT_NULL(fin);
     TEST_ASSERT_NOT_NULL(strstr(fin->payload.c_str(), "\"realert_interval\""));
+    // The Duration carrier (PRD #66 / issue #68) repopulates too — its last
+    // retained value is the live cap in clock form, never the empty clear.
+    const PublishCall *dur = fixture::last_publish(fixture::TIMER_DURATION_ATTR_TOPIC);
+    TEST_ASSERT_NOT_NULL(dur);
+    TEST_ASSERT_NOT_NULL(strstr(dur->payload.c_str(), "\"max_duration\""));
+}
+
+// ============================================================================
+// W26 — editing max_duration republishes BOTH carriers that map it, EACH IN ITS
+// OWN REPRESENTATION (PRD #66 / issue #68): max_duration rides the state sensor
+// (raw seconds, a JSON number) AND the Duration text entity (the formatHMS clock
+// string, a JSON string), so a config command carrying it makes parseCommand
+// republish each carrier exactly once, in its carrier-native form. This is the
+// single executable guard for the per-carrier representation divergence end-to-
+// end through the command path: a refactor that collapsed the Duration form back
+// to raw seconds, or dropped either carrier from the fan-out, fails here. Analog
+// of W21 (multi-carrier fan-out) and W22 (formatter on the wire path).
+void test_W26_max_duration_change_republishes_state_and_duration(void) {
+    TIMER_MAX_DURATION = 3600;   // start off-target so the edit is a genuine change
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.parseCommand("{\"max_duration\":86400}")));
+
+    const PublishCall *st  = fixture::last_publish(fixture::TIMER_STATE_ATTR_TOPIC);
+    const PublishCall *dur = fixture::last_publish(fixture::TIMER_DURATION_ATTR_TOPIC);
+    TEST_ASSERT_NOT_NULL(st);
+    TEST_ASSERT_NOT_NULL(dur);
+    // State carrier: raw seconds, a JSON number (unchanged from today's T15/W19).
+    TEST_ASSERT_NOT_NULL(strstr(st->payload.c_str(), "\"max_duration\":86400"));
+    // Duration carrier: the clock string, a JSON object {"max_duration":"24:00:00"}.
+    TEST_ASSERT_EQUAL_STRING("{\"max_duration\":\"24:00:00\"}", dur->payload.c_str());
+    // Each mapped carrier republished EXACTLY once.
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_STATE_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_DURATION_ATTR_TOPIC));
+    // No unrelated carrier churns.
+    TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_FINISHED_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_BUZZER_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_REMAINING_ATTR_TOPIC));
 }
 
 int main(int, char **) {
@@ -3270,6 +3340,7 @@ int main(int, char **) {
     RUN_TEST(test_T13_attribute_group_buzzer_bag);
     RUN_TEST(test_T14_attribute_group_table_well_formed);
     RUN_TEST(test_T15_attribute_group_state_bag);
+    RUN_TEST(test_T18_attribute_group_duration_bag);
     RUN_TEST(test_T16_attribute_group_remaining_bag);
     RUN_TEST(test_T17_bar_color_formatter_renders_default_or_hex);
     RUN_TEST(test_CE1_enter_decomposes_and_activates);
@@ -3309,5 +3380,6 @@ int main(int, char **) {
     RUN_TEST(test_W23_sync_follow_edit_republishes_state_but_does_not_propagate);
     RUN_TEST(test_W24_clearAllAttributeGroups_empties_each_carrier);
     RUN_TEST(test_W25_refresh_after_clear_repopulates_attributes);
+    RUN_TEST(test_W26_max_duration_change_republishes_state_and_duration);
     return UNITY_END();
 }
