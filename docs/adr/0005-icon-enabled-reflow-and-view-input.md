@@ -52,10 +52,10 @@ unchanged.
 painter-side pattern — it would break the reflow. And note the bar's max length is
 now `iconEnabled`-dependent.
 
-### 3. Two on-device `TIMER` menu toggle slots (`ICON` + `BAR`)
+### 3. Two on-device `TIMER` menu toggle slots (`ICON` + `PROGRESS BAR`)
 
 The on-device `TIMER` submenu grows from five to seven slots, appending `ICON`
-(`ICON ON`/`ICON OFF`) and `BAR` (`BAR ON`/`BAR OFF`) boolean toggles where left and
+(`ICON ON`/`ICON OFF`) and `PROGRESS BAR` (`PROGRESS BAR ON`/`PROGRESS BAR OFF`) boolean toggles where left and
 right both flip the value. This **supersedes ADR-0004's deferral** of the
 `bar_enabled` menu slot ("`bar_enabled` is a binary that would fit on-device, but
 expanding the menu to six slots was deferred — revisit if real demand emerges") —

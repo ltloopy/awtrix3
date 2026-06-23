@@ -27,10 +27,10 @@ const TimerMenuSlot TIMER_MENU_SLOTS[] = {
     {TimerMenuKind::EnumCycle,    "BUZZER",    nullptr,             0, TIMER_BUZZER_CODEC,   (uint8_t)BuzzerMode::COUNT,   getBuzzer,   setBuzzer},
     {TimerMenuKind::SteppedRange, "COUNTDOWN", "countdown_seconds", 1, nullptr,              0, nullptr,     nullptr},
     {TimerMenuKind::EnumCycle,    "FINISH",    nullptr,             0, TIMER_FINISHED_CODEC, (uint8_t)FinishedMode::COUNT, getFinished, setFinished},
-    {TimerMenuKind::SteppedRange, "AUTOCLEAR", "finished_hold",     5, nullptr,              0, nullptr,     nullptr},
-    {TimerMenuKind::SteppedRange, "REALERT",   "realert_interval",  5, nullptr,              0, nullptr,     nullptr},
-    {TimerMenuKind::BoolToggle,   "ICON",      "icon_enabled",      0, nullptr,              0, nullptr,     nullptr},
-    {TimerMenuKind::BoolToggle,   "BAR",       "bar_enabled",       0, nullptr,              0, nullptr,     nullptr},
+    {TimerMenuKind::SteppedRange, "CLEAR DELAY",       "finished_hold",    5, nullptr,              0, nullptr,     nullptr},
+    {TimerMenuKind::SteppedRange, "RE-ALERT INTERVAL", "realert_interval", 5, nullptr,              0, nullptr,     nullptr},
+    {TimerMenuKind::BoolToggle,   "ICON",              "icon_enabled",     0, nullptr,              0, nullptr,     nullptr},
+    {TimerMenuKind::BoolToggle,   "PROGRESS BAR",      "bar_enabled",      0, nullptr,              0, nullptr,     nullptr},
     {TimerMenuKind::Navigation,   "MAIN",      nullptr,             0, nullptr,              0, nullptr,     nullptr},
 };
 
