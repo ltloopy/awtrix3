@@ -14,6 +14,7 @@
 #include "../../src/TimerView.h"
 #include "../../src/TimerSettings.h"
 #include "../../src/TimerMenu.h"
+#include "../../src/TimerMenuNav.h"
 #include "../../src/TimerConfigEditor.h"
 #include "Preferences.h"
 
@@ -855,8 +856,8 @@ void test_U38_parseCommand_tuning_change_persists_via_saveSettings(void) {
 }
 
 // ============================================================================
-// U39 (ADR-0004) — Four behavior parameters accepted within their principled
-// ranges, applied to the globals.
+// U39 (ADR-0004) — Behavior parameters accepted within their principled ranges,
+// applied to the globals. (app_config_timeout was removed in PRD #83 / #88.)
 // ============================================================================
 void test_U39_parseCommand_behavior_params_accepted_in_range(void) {
     SHOW_TIMER = true;
@@ -864,19 +865,17 @@ void test_U39_parseCommand_behavior_params_accepted_in_range(void) {
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
                       static_cast<int>(TimerManager.parseCommand(
                           "{\"max_duration\":3600,"
-                          "\"remaining_publish_interval\":2,\"app_config_timeout\":60}")));
+                          "\"remaining_publish_interval\":2}")));
     TEST_ASSERT_EQUAL_UINT32(3600, TIMER_MAX_DURATION);
     TEST_ASSERT_EQUAL_UINT16(2,    TIMER_PUBLISH_INTERVAL);
-    TEST_ASSERT_EQUAL_UINT16(60,   TIMER_CONFIG_TIMEOUT);
 
     // Lower bounds.
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
                       static_cast<int>(TimerManager.parseCommand(
                           "{\"max_duration\":1,"
-                          "\"remaining_publish_interval\":1,\"app_config_timeout\":5}")));
+                          "\"remaining_publish_interval\":1}")));
     TEST_ASSERT_EQUAL_UINT32(1,  TIMER_MAX_DURATION);
     TEST_ASSERT_EQUAL_UINT16(1,  TIMER_PUBLISH_INTERVAL);
-    TEST_ASSERT_EQUAL_UINT16(5,  TIMER_CONFIG_TIMEOUT);
 
     // Reset max_duration so it doesn't reject other tests' duration commands.
     TIMER_MAX_DURATION = 86400;
@@ -885,10 +884,16 @@ void test_U39_parseCommand_behavior_params_accepted_in_range(void) {
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
                       static_cast<int>(TimerManager.parseCommand(
                           "{\"max_duration\":604800,"
-                          "\"remaining_publish_interval\":60,\"app_config_timeout\":300}")));
+                          "\"remaining_publish_interval\":60}")));
     TEST_ASSERT_EQUAL_UINT32(604800, TIMER_MAX_DURATION);
     TEST_ASSERT_EQUAL_UINT16(60,     TIMER_PUBLISH_INTERVAL);
-    TEST_ASSERT_EQUAL_UINT16(300,    TIMER_CONFIG_TIMEOUT);
+
+    // Back-compat: an inbound command still carrying the removed app_config_timeout
+    // key is accepted and the key silently ignored (unknown keys are not errors).
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand(
+                          "{\"max_duration\":3600,\"app_config_timeout\":60}")));
+    TEST_ASSERT_EQUAL_UINT32(3600, TIMER_MAX_DURATION);
 }
 
 // ============================================================================
@@ -898,7 +903,6 @@ void test_U40_parseCommand_behavior_params_atomic_reject(void) {
     SHOW_TIMER = true;
     TIMER_MAX_DURATION     = 86400;
     TIMER_PUBLISH_INTERVAL = 1;
-    TIMER_CONFIG_TIMEOUT   = 30;
 
     // max_duration below floor.
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
@@ -915,10 +919,10 @@ void test_U40_parseCommand_behavior_params_atomic_reject(void) {
                       static_cast<int>(TimerManager.parseCommand("{\"remaining_publish_interval\":0}")));
     TEST_ASSERT_EQUAL_UINT16(1, TIMER_PUBLISH_INTERVAL);
 
-    // app_config_timeout out of range.
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+    // The removed app_config_timeout key is now unknown: even an out-of-range value
+    // is accepted (silently ignored), not rejected (back-compat, #88).
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
                       static_cast<int>(TimerManager.parseCommand("{\"app_config_timeout\":4}")));
-    TEST_ASSERT_EQUAL_UINT16(30, TIMER_CONFIG_TIMEOUT);
 
     // Non-numeric is rejected.
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
@@ -1778,29 +1782,6 @@ void test_U51_setDuration_while_paused_resets_to_idle(void) {
 }
 
 // ============================================================================
-// U52 — tick() delegates config-mode timing to the editor (issue #23): with the
-// editor active, 30 s of no input auto-applies the edit and exits to Idle. Proves
-// the timeout path runs through editor.tick() -> exitConfigMode -> setDuration.
-// ============================================================================
-void test_U52_tick_delegates_config_timeout_autoapplies_and_exits(void) {
-    TimerManager.setDuration(300);      // 00:05:00
-    TimerManager.enterConfigMode();     // millis()==0 seeds the idle clock
-    TEST_ASSERT_TRUE(TimerManager.isInConfig());
-
-    TimerManager.configAdjust(+1);      // HH 0 -> 1 (edit -> 01:05:00 = 3900s)
-    TEST_ASSERT_EQUAL_UINT8(1, TimerManager.getConfigHH());
-
-    // 30 s of no input: tick() must auto-apply through the editor and exit to Idle.
-    fixture::advance(30000);
-    TimerManager.tick();
-
-    TEST_ASSERT_FALSE(TimerManager.isInConfig());
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle),
-                      static_cast<int>(TimerManager.getState()));
-    TEST_ASSERT_EQUAL_UINT32(3900, TimerManager.getDuration());   // committed via setDuration
-}
-
-// ============================================================================
 // U53 — when the editor is NOT active, tick() runs the run-state machine: the
 // config branch never intercepts a Running countdown (issue #23 delegation guard).
 // ============================================================================
@@ -2025,22 +2006,22 @@ void test_T8_member_config_validate_and_snapshot_roundtrip(void) {
 }
 
 // ============================================================================
-// TIMER menu slot table (src/TimerMenu.cpp). The on-device menu's label/adjust
+// TIMER menu slot table (src/TimerMenu.cpp). The on-device menu's name/value/adjust
 // logic, host-testable for the first time (MenuManager itself isn't host-built).
-// Slot order: 0 buzzer, 1 countdown, 2 finished, 3 clear(hold), 4 alert(realert),
-// 5 icon, 6 bar. See docs/adr/0008.
+// Slot order: 0 DURATION, 1 buzzer, 2 countdown, 3 finished, 4 autoclear(hold),
+// 5 realert, 6 icon, 7 bar, 8 MAIN (navigation). See docs/adr/0008 and 0016.
 // ============================================================================
 
 // Shared cmdKey-resolution guard for the slot-table integrity tests (issue #49):
 // resolves a table-backed slot's cmdKey exactly the way the production menu code
 // does (timerSettingByCmdKey); on a miss, formats a diagnostic into msg naming
-// the slot index, its label prefix, and the unresolved key.
+// the slot index, its item name, and the unresolved key.
 static const TimerSettingDesc *resolveSlotCmdKey(const TimerMenuSlot &s, size_t idx,
                                                  char *msg, size_t msgLen) {
     const TimerSettingDesc *d = s.cmdKey ? timerSettingByCmdKey(s.cmdKey) : nullptr;
     if (!d)
         snprintf(msg, msgLen, "slot %u (%s): cmdKey \"%s\" not in TIMER_SETTINGS_DESCS",
-                 (unsigned)idx, s.prefix ? s.prefix : "?", s.cmdKey ? s.cmdKey : "(null)");
+                 (unsigned)idx, s.name ? s.name : "?", s.cmdKey ? s.cmdKey : "(null)");
     return d;
 }
 
@@ -2048,16 +2029,24 @@ static const TimerSettingDesc *resolveSlotCmdKey(const TimerMenuSlot &s, size_t 
 // slot's cmdKey resolves to a descriptor whose type matches the slot kind (so the
 // menu can't reference a key the settings table doesn't back, ADR-0007).
 void test_M1_slot_table_well_formed(void) {
-    TEST_ASSERT_EQUAL_UINT32(7, (uint32_t)TIMER_MENU_SLOT_COUNT);
+    TEST_ASSERT_EQUAL_UINT32(9, (uint32_t)TIMER_MENU_SLOT_COUNT);
     for (uint8_t i = 0; i < TIMER_MENU_SLOT_COUNT; ++i) {
-        TEST_ASSERT_TRUE(timerMenuLabel(i).length() > 0);
+        // Every list row has a non-empty name (the list label).
+        TEST_ASSERT_TRUE(timerMenuName(i).length() > 0);
         const TimerMenuSlot &s = TIMER_MENU_SLOTS[i];
         switch (s.kind) {
+            case TimerMenuKind::Duration:
+                // No storage row; the value is the HH:MM:SS clock (non-empty).
+                TEST_ASSERT_NULL(s.cmdKey);
+                TEST_ASSERT_NULL(s.codec);
+                TEST_ASSERT_TRUE(timerMenuValue(i).length() > 0);
+                break;
             case TimerMenuKind::EnumCycle:
                 TEST_ASSERT_NOT_NULL(s.codec);
                 TEST_ASSERT_TRUE(s.labelCount > 0);
                 TEST_ASSERT_NOT_NULL((void *)s.getEnum);
                 TEST_ASSERT_NOT_NULL((void *)s.setEnum);
+                TEST_ASSERT_TRUE(timerMenuValue(i).length() > 0);
                 break;
             case TimerMenuKind::SteppedRange: {
                 char msg[120];
@@ -2074,8 +2063,22 @@ void test_M1_slot_table_well_formed(void) {
                 TEST_ASSERT_TRUE(d->type == TcType::Bool);
                 break;
             }
+            case TimerMenuKind::Navigation:
+                // The MAIN row carries no value and no cmdKey/codec.
+                TEST_ASSERT_EQUAL_STRING("", timerMenuValue(i).c_str());
+                TEST_ASSERT_NULL(s.cmdKey);
+                TEST_ASSERT_NULL(s.codec);
+                break;
         }
     }
+    // DURATION is the first row (PRD #83 / issue #86).
+    TEST_ASSERT_TRUE(TIMER_MENU_SLOTS[0].kind == TimerMenuKind::Duration);
+    TEST_ASSERT_EQUAL_STRING("DURATION", timerMenuName(0).c_str());
+    // The lone Navigation row (MAIN) sits last -- the TimerMenuNav back-to-main
+    // invariant the device relies on.
+    TEST_ASSERT_TRUE(TIMER_MENU_SLOTS[TIMER_MENU_SLOT_COUNT - 1].kind ==
+                     TimerMenuKind::Navigation);
+    TEST_ASSERT_EQUAL_STRING("MAIN", timerMenuName(TIMER_MENU_SLOT_COUNT - 1).c_str());
 }
 
 // M10 — negative proof for the M1 resolution guard (issue #49): a deliberately
@@ -2083,7 +2086,7 @@ void test_M1_slot_table_well_formed(void) {
 // walk uses, and the diagnostic names the slot (index + label prefix) and the
 // offending key. The synthetic slot lives only here; TIMER_MENU_SLOTS is untouched.
 void test_M10_unresolved_cmdkey_guard_fires_and_names_slot(void) {
-    const TimerMenuSlot bogus = {TimerMenuKind::BoolToggle, "no_such_key", "BOGUS ",
+    const TimerMenuSlot bogus = {TimerMenuKind::BoolToggle, "BOGUS", "no_such_key",
                                  0, nullptr, 0, nullptr, nullptr};
     char msg[120] = "";
     const TimerSettingDesc *d = resolveSlotCmdKey(bogus, 99, msg, sizeof(msg));
@@ -2099,24 +2102,24 @@ void test_M2_enum_cycle_wraps_and_routes_via_setter(void) {
     TimerManager.setBuzzerMode(BuzzerMode::Off);
     MQTTManager.__test_reset();
 
-    timerMenuAdjust(0, +1);   // Off -> End
+    timerMenuAdjust(1, +1);   // buzzer (slot 1): Off -> End
     TEST_ASSERT_EQUAL_UINT8((uint8_t)BuzzerMode::End, (uint8_t)TimerManager.getBuzzerMode());
     const PublishCall *buz = fixture::last_publish(fixture::TIMER_BUZZER_TOPIC);
     TEST_ASSERT_NOT_NULL(buz);
     TEST_ASSERT_EQUAL_STRING("end", buz->payload.c_str());
 
-    timerMenuAdjust(0, +1);   // End -> Countdown
-    timerMenuAdjust(0, +1);   // Countdown -> Off (wrap)
+    timerMenuAdjust(1, +1);   // End -> Countdown
+    timerMenuAdjust(1, +1);   // Countdown -> Off (wrap)
     TEST_ASSERT_EQUAL_UINT8((uint8_t)BuzzerMode::Off, (uint8_t)TimerManager.getBuzzerMode());
 
-    timerMenuAdjust(0, -1);   // Off -> Countdown (wrap backward)
+    timerMenuAdjust(1, -1);   // Off -> Countdown (wrap backward)
     TEST_ASSERT_EQUAL_UINT8((uint8_t)BuzzerMode::Countdown, (uint8_t)TimerManager.getBuzzerMode());
 
     // finished slot routes through its setter too (proven on the wire: the
     // row's publish hook puts the codec string on the canonical topic).
     TimerManager.setFinishedMode(FinishedMode::AutoClear);
     MQTTManager.__test_reset();
-    timerMenuAdjust(2, +1);   // AutoClear -> Hold
+    timerMenuAdjust(3, +1);   // finished (slot 3): AutoClear -> Hold
     TEST_ASSERT_EQUAL_UINT8((uint8_t)FinishedMode::Hold, (uint8_t)TimerManager.getFinishedMode());
     const PublishCall *fin = fixture::last_publish(fixture::TIMER_FINISHED_TOPIC);
     TEST_ASSERT_NOT_NULL(fin);
@@ -2125,39 +2128,39 @@ void test_M2_enum_cycle_wraps_and_routes_via_setter(void) {
 
 // M3 — stepped ranges saturate at the descriptor bounds (no overshoot/underflow).
 void test_M3_stepped_range_saturates(void) {
-    // finished_hold (slot 3): step 5, lo 1, hi 300.
+    // finished_hold (slot 4): step 5, lo 1, hi 300.
     TIMER_FINISHED_HOLD = 298;
-    timerMenuAdjust(3, +1);                                  // 298 (+5 -> 303 > 300) -> cap
+    timerMenuAdjust(4, +1);                                  // 298 (+5 -> 303 > 300) -> cap
     TEST_ASSERT_EQUAL_UINT16(300, TIMER_FINISHED_HOLD);
-    timerMenuAdjust(3, +1);
+    timerMenuAdjust(4, +1);
     TEST_ASSERT_EQUAL_UINT16(300, TIMER_FINISHED_HOLD);
     TIMER_FINISHED_HOLD = 4;
-    timerMenuAdjust(3, -1);                                  // 4 (>=1+5? no) -> lo
+    timerMenuAdjust(4, -1);                                  // 4 (>=1+5? no) -> lo
     TEST_ASSERT_EQUAL_UINT16(1, TIMER_FINISHED_HOLD);
 
-    // countdown_seconds (slot 1): step 1, lo 0, hi 30.
+    // countdown_seconds (slot 2): step 1, lo 0, hi 30.
     TIMER_COUNTDOWN_SECONDS = 30;
-    timerMenuAdjust(1, +1);
+    timerMenuAdjust(2, +1);
     TEST_ASSERT_EQUAL_UINT16(30, TIMER_COUNTDOWN_SECONDS);
     TIMER_COUNTDOWN_SECONDS = 0;
-    timerMenuAdjust(1, -1);
+    timerMenuAdjust(2, -1);
     TEST_ASSERT_EQUAL_UINT16(0, TIMER_COUNTDOWN_SECONDS);
-    timerMenuAdjust(1, +1);
+    timerMenuAdjust(2, +1);
     TEST_ASSERT_EQUAL_UINT16(1, TIMER_COUNTDOWN_SECONDS);
 }
 
 // M4 — bool toggles flip on either button.
 void test_M4_bool_toggle_flips_both_directions(void) {
     TIMER_ICON_ENABLED = true;
-    timerMenuAdjust(5, +1);
+    timerMenuAdjust(6, +1);
     TEST_ASSERT_FALSE(TIMER_ICON_ENABLED);
-    timerMenuAdjust(5, -1);
+    timerMenuAdjust(6, -1);
     TEST_ASSERT_TRUE(TIMER_ICON_ENABLED);
 
     TIMER_BAR_ENABLED = false;
-    timerMenuAdjust(6, +1);
+    timerMenuAdjust(7, +1);
     TEST_ASSERT_TRUE(TIMER_BAR_ENABLED);
-    timerMenuAdjust(6, -1);
+    timerMenuAdjust(7, -1);
     TEST_ASSERT_FALSE(TIMER_BAR_ENABLED);
 }
 
@@ -2181,16 +2184,32 @@ void test_M5_stepped_clamps_to_descriptor_bounds(void) {
     }
 }
 
-// M6 — label formatting matches the on-screen strings.
-void test_M6_label_formatting(void) {
+// M6 — the name vs bare-value accessors. The list shows the item NAME; the leaf
+// shows the BARE value only (no prefix), per PRD #83.
+void test_M6_name_and_bare_value(void) {
+    // Names are the list labels (DURATION first, MAIN last).
+    TEST_ASSERT_EQUAL_STRING("DURATION",  timerMenuName(0).c_str());
+    TEST_ASSERT_EQUAL_STRING("BUZZER",    timerMenuName(1).c_str());
+    TEST_ASSERT_EQUAL_STRING("COUNTDOWN", timerMenuName(2).c_str());
+    TEST_ASSERT_EQUAL_STRING("FINISH",    timerMenuName(3).c_str());
+    TEST_ASSERT_EQUAL_STRING("AUTOCLEAR", timerMenuName(4).c_str());
+    TEST_ASSERT_EQUAL_STRING("REALERT",   timerMenuName(5).c_str());
+    TEST_ASSERT_EQUAL_STRING("ICON",      timerMenuName(6).c_str());
+    TEST_ASSERT_EQUAL_STRING("BAR",       timerMenuName(7).c_str());
+    TEST_ASSERT_EQUAL_STRING("MAIN",      timerMenuName(8).c_str());
+
+    // Bare values: no prefix.
     TIMER_FINISHED_HOLD = 10;
-    TEST_ASSERT_EQUAL_STRING("CLEAR 10", timerMenuLabel(3).c_str());
+    TEST_ASSERT_EQUAL_STRING("10", timerMenuValue(4).c_str());
     TimerManager.setBuzzerMode(BuzzerMode::End);
-    TEST_ASSERT_EQUAL_STRING("BZR END", timerMenuLabel(0).c_str());
+    TEST_ASSERT_EQUAL_STRING("END", timerMenuValue(1).c_str());
     TIMER_ICON_ENABLED = true;
-    TEST_ASSERT_EQUAL_STRING("ICON ON", timerMenuLabel(5).c_str());
+    TEST_ASSERT_EQUAL_STRING("ON", timerMenuValue(6).c_str());
     TIMER_COUNTDOWN_SECONDS = 3;
-    TEST_ASSERT_EQUAL_STRING("CDOWN 3", timerMenuLabel(1).c_str());
+    TEST_ASSERT_EQUAL_STRING("3", timerMenuValue(2).c_str());
+    // DURATION value is the zero-padded HH:MM:SS clock.
+    TimerManager.setDuration(305);   // 0h 5m 5s
+    TEST_ASSERT_EQUAL_STRING("00:05:05", timerMenuValue(0).c_str());
 }
 
 // M7 — an enum adjust applies + publishes live but DEFERS the NVS write; the write
@@ -2200,7 +2219,7 @@ void test_M7_enum_adjust_defers_persist_until_commit(void) {
     TimerManager.setBuzzerMode(BuzzerMode::End);   // known starting point (default persist)
     int before = Preferences::begin_calls;
 
-    timerMenuAdjust(0, +1);   // End -> Countdown, persist deferred
+    timerMenuAdjust(1, +1);   // buzzer (slot 1): End -> Countdown, persist deferred
     TEST_ASSERT_EQUAL_UINT8((uint8_t)BuzzerMode::Countdown, (uint8_t)TimerManager.getBuzzerMode());
     TEST_ASSERT_EQUAL_INT(before, Preferences::begin_calls);   // no "timer"-ns write yet
 
@@ -2217,12 +2236,15 @@ void test_M7_enum_adjust_defers_persist_until_commit(void) {
 void test_M8_enum_labels_source_from_codec(void) {
     for (uint8_t i = 0; i < (uint8_t)BuzzerMode::COUNT; ++i) {
         TimerManager.setBuzzerMode((BuzzerMode)i);
-        TEST_ASSERT_EQUAL_STRING(TIMER_BUZZER_CODEC[i].menu, timerMenuLabel(0).c_str());
+        TEST_ASSERT_EQUAL_STRING(TIMER_BUZZER_CODEC[i].menu, timerMenuValue(1).c_str());
     }
     for (uint8_t i = 0; i < (uint8_t)FinishedMode::COUNT; ++i) {
         TimerManager.setFinishedMode((FinishedMode)i);
-        TEST_ASSERT_EQUAL_STRING(TIMER_FINISHED_CODEC[i].menu, timerMenuLabel(2).c_str());
+        TEST_ASSERT_EQUAL_STRING(TIMER_FINISHED_CODEC[i].menu, timerMenuValue(3).c_str());
     }
+    // The codec menu column is now the BARE value (no "BZR "/"FIN " prefix).
+    TEST_ASSERT_EQUAL_STRING("END",  TIMER_BUZZER_CODEC[(int)BuzzerMode::End].menu);
+    TEST_ASSERT_EQUAL_STRING("AUTO", TIMER_FINISHED_CODEC[(int)FinishedMode::AutoClear].menu);
 }
 
 // M9 — the TIMER-menu long-press commit is ONE PersistBatch window (#45): enum
@@ -2233,8 +2255,8 @@ void test_M9_menu_commit_one_persistbatch_flushes_both_namespaces(void) {
     saveSettings_calls = 0;
     int before = Preferences::begin_calls;
 
-    timerMenuAdjust(0, +1);   // buzzer End -> Countdown: applies live, persist deferred
-    timerMenuAdjust(3, +1);   // finished_hold 10 -> 15: table row, RAM only
+    timerMenuAdjust(1, +1);   // buzzer (slot 1) End -> Countdown: applies live, persist deferred
+    timerMenuAdjust(4, +1);   // finished_hold (slot 4) 10 -> 15: table row, RAM only
     TEST_ASSERT_EQUAL_INT(0, Preferences::begin_calls - before);   // no "timer" write during scroll
     TEST_ASSERT_EQUAL_INT(0, saveSettings_calls);                  // no "awtrix" write during scroll
 
@@ -2262,7 +2284,7 @@ void test_M9_menu_commit_one_persistbatch_flushes_both_namespaces(void) {
 void test_M11_menu_commit_republishes_all_attribute_groups(void) {
     TIMER_SYNC_TARGETS = "all";   // sync on, so the commit's peer broadcast actually emits
 
-    timerMenuAdjust(3, +1);   // finished_hold 10 -> 15: a menu knob, live in RAM, NVS deferred
+    timerMenuAdjust(4, +1);   // finished_hold (slot 4) 10 -> 15: a menu knob, live in RAM, NVS deferred
 
     {   // the long-press commit window, then broadcast, then the attribute refresh
         TimerManager_::PersistBatch batch(TimerManager);
@@ -2287,11 +2309,200 @@ void test_M11_menu_commit_republishes_all_attribute_groups(void) {
 }
 
 // ============================================================================
+// TIMER menu navigation state machine (src/TimerMenuNav.cpp). The display-free
+// drill-in interaction model: list/leaf focus, selected index with wrap, and the
+// input->outcome mapping the device layer acts on (PRD #83 / issues #85, #86). The
+// nine list rows are the nine slots (DURATION at 0, 6 value rows, MAIN at index 8).
+// See docs/adr/0016.
+// ============================================================================
+
+// The on-screen label the device renders for the current cursor: the item NAME in
+// List focus, the BARE VALUE in Editing focus -- mirrors MenuManager.menutext().
+static String navCurrentLabel(const TimerMenuNav &nav) {
+    return nav.focus() == TimerNavFocus::List
+               ? timerMenuName(nav.index())
+               : timerMenuValue(nav.index());
+}
+
+// N1 — list navigation walks every row and WRAPS in both directions; focus stays
+// List throughout and the reported label is the item name.
+void test_N1_list_navigation_wraps(void) {
+    TimerMenuNav nav(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1);
+    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::List);
+    TEST_ASSERT_EQUAL_UINT8(0, nav.index());
+    TEST_ASSERT_EQUAL_STRING("DURATION", navCurrentLabel(nav).c_str());
+
+    // Walk right through all nine rows and wrap back to 0.
+    for (uint8_t i = 1; i < TIMER_MENU_SLOT_COUNT; ++i) {
+        TEST_ASSERT_TRUE(nav.navigate(+1) == TimerNavOutcome::None);
+        TEST_ASSERT_EQUAL_UINT8(i, nav.index());
+        TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::List);
+    }
+    TEST_ASSERT_EQUAL_STRING("MAIN", navCurrentLabel(nav).c_str());  // last row
+    nav.navigate(+1);
+    TEST_ASSERT_EQUAL_UINT8(0, nav.index());                        // wrapped
+
+    // Left from the first row lands on the last (MAIN).
+    nav.navigate(-1);
+    TEST_ASSERT_EQUAL_UINT8(TIMER_MENU_SLOT_COUNT - 1, nav.index());
+}
+
+// N2 — short press on a value row drills into its leaf (focus -> Editing); the
+// reported label switches from the item name to the bare value.
+void test_N2_select_value_row_enters_leaf(void) {
+    TimerManager.setBuzzerMode(BuzzerMode::End);
+    TimerMenuNav nav(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1);
+    nav.navigate(+1);          // to BUZZER (slot 1)
+    TEST_ASSERT_EQUAL_STRING("BUZZER", navCurrentLabel(nav).c_str());
+
+    TEST_ASSERT_TRUE(nav.select() == TimerNavOutcome::EnterLeaf);
+    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::Editing);
+    TEST_ASSERT_EQUAL_UINT8(1, nav.index());
+    TEST_ASSERT_EQUAL_STRING("END", navCurrentLabel(nav).c_str());  // bare value
+}
+
+// N3 — inside a value leaf, left/right yields AdjustValue (the caller mutates the
+// value via timerMenuAdjust) and the cursor index does NOT move.
+void test_N3_leaf_navigate_adjusts_value(void) {
+    TimerMenuNav nav(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1);
+    nav.navigate(+1);          // to BUZZER (slot 1)
+    nav.select();              // enter leaf
+    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::Editing);
+
+    TEST_ASSERT_TRUE(nav.navigate(+1) == TimerNavOutcome::AdjustValue);
+    TEST_ASSERT_EQUAL_UINT8(1, nav.index());   // still on BUZZER
+    TEST_ASSERT_TRUE(nav.navigate(-1) == TimerNavOutcome::AdjustValue);
+    TEST_ASSERT_EQUAL_UINT8(1, nav.index());
+}
+
+// N4 — short press inside a value leaf confirms and returns to the list.
+void test_N4_leaf_select_confirms_back_to_list(void) {
+    TimerMenuNav nav(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1);
+    nav.navigate(+1);          // to BUZZER (slot 1)
+    nav.select();              // enter BUZZER leaf
+    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::Editing);
+
+    TEST_ASSERT_TRUE(nav.select() == TimerNavOutcome::ConfirmBackToList);
+    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::List);
+    TEST_ASSERT_EQUAL_UINT8(1, nav.index());
+}
+
+// N5 — long press inside a value leaf saves and returns to the list; the value is
+// already live in RAM so no separate commit happens here.
+void test_N5_leaf_back_returns_to_list(void) {
+    TimerMenuNav nav(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1);
+    nav.navigate(+1);          // to BUZZER (slot 1)
+    nav.select();              // enter BUZZER leaf
+    TEST_ASSERT_TRUE(nav.back() == TimerNavOutcome::BackToList);
+    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::List);
+}
+
+// N6 — short press on MAIN returns to the main menu (and commits), from EITHER
+// entry origin (PRD #83 / issue #87: MAIN always goes to the main menu).
+void test_N6_select_main_goes_to_main_menu(void) {
+    for (uint8_t o = 0; o < 2; ++o) {
+        TimerNavOrigin origin = o == 0 ? TimerNavOrigin::Menu : TimerNavOrigin::App;
+        TimerMenuNav nav(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1, origin);
+        // walk to MAIN (last row)
+        for (uint8_t i = 0; i < TIMER_MENU_SLOT_COUNT - 1; ++i) nav.navigate(+1);
+        TEST_ASSERT_TRUE(nav.onMain());
+        TEST_ASSERT_TRUE(nav.select() == TimerNavOutcome::GoToMainMenu);
+        TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::List);  // not a leaf
+    }
+}
+
+// N7 — long press OUT of the list is context-aware by entry origin: Menu -> back
+// to the main menu, App -> exit the menu (back to the Timer app).
+void test_N7_list_back_is_context_aware(void) {
+    TimerMenuNav fromMenu(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1,
+                          TimerNavOrigin::Menu);
+    TEST_ASSERT_TRUE(fromMenu.back() == TimerNavOutcome::GoToMainMenu);
+
+    TimerMenuNav fromApp(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1,
+                         TimerNavOrigin::App);
+    TEST_ASSERT_TRUE(fromApp.back() == TimerNavOutcome::ExitMenu);
+}
+
+// N8 — enter() (re)opens the list: List focus, index 0, fresh origin -- the device
+// uses it whenever the TIMER menu is opened, even after a prior leaf edit.
+void test_N8_enter_resets_to_list_top(void) {
+    TimerMenuNav nav(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1,
+                     TimerNavOrigin::Menu);
+    nav.navigate(+1);
+    nav.select();              // now Editing on BUZZER (slot 1)
+    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::Editing);
+
+    nav.enter(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1, TimerNavOrigin::App);
+    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::List);
+    TEST_ASSERT_EQUAL_UINT8(0, nav.index());
+    TEST_ASSERT_TRUE(nav.origin() == TimerNavOrigin::App);
+}
+
+// N9 — the Idle-only gating decision is host-testable: timerMenuLeafKind maps the
+// DURATION slot to an editable wheel only while Idle, read-only otherwise; every
+// other slot is a plain Value leaf (PRD #83 user story 27).
+void test_N9_duration_leaf_kind_gated_by_state(void) {
+    TEST_ASSERT_TRUE(timerMenuLeafKind(0, TimerState::Idle) == TimerNavLeaf::DurationEditable);
+    TEST_ASSERT_TRUE(timerMenuLeafKind(0, TimerState::Running) == TimerNavLeaf::DurationReadOnly);
+    TEST_ASSERT_TRUE(timerMenuLeafKind(0, TimerState::Paused) == TimerNavLeaf::DurationReadOnly);
+    TEST_ASSERT_TRUE(timerMenuLeafKind(0, TimerState::Finished) == TimerNavLeaf::DurationReadOnly);
+    // A value row is always a plain Value leaf regardless of state.
+    TEST_ASSERT_TRUE(timerMenuLeafKind(1, TimerState::Idle) == TimerNavLeaf::Value);
+    TEST_ASSERT_TRUE(timerMenuLeafKind(1, TimerState::Running) == TimerNavLeaf::Value);
+}
+
+// N10 — the editable DURATION leaf: short press cycles the H/M/S field (stays in
+// the leaf), left/right steps the field, and a long press commits and returns to
+// the list.
+void test_N10_duration_editable_leaf_inputs(void) {
+    TimerMenuNav nav(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1);
+    // Drill into DURATION (slot 0) as an editable wheel.
+    TEST_ASSERT_TRUE(nav.select(TimerNavLeaf::DurationEditable) == TimerNavOutcome::EnterLeaf);
+    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::Editing);
+
+    // Short press cycles the field and STAYS in the leaf (not confirm-back).
+    TEST_ASSERT_TRUE(nav.select() == TimerNavOutcome::CycleField);
+    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::Editing);
+
+    // left/right step the active field.
+    TEST_ASSERT_TRUE(nav.navigate(+1) == TimerNavOutcome::AdjustField);
+    TEST_ASSERT_TRUE(nav.navigate(-1) == TimerNavOutcome::AdjustField);
+    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::Editing);
+
+    // Long press commits the duration and returns to the list.
+    TEST_ASSERT_TRUE(nav.back() == TimerNavOutcome::CommitDuration);
+    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::List);
+    TEST_ASSERT_EQUAL_UINT8(0, nav.index());
+}
+
+// N11 — the read-only DURATION leaf (Running/Paused): left/right are no-ops and any
+// press returns to the list; nothing is committed.
+void test_N11_duration_readonly_leaf_inputs(void) {
+    TimerMenuNav nav(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1);
+    TEST_ASSERT_TRUE(nav.select(TimerNavLeaf::DurationReadOnly) == TimerNavOutcome::EnterLeaf);
+    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::Editing);
+
+    // left/right do nothing.
+    TEST_ASSERT_TRUE(nav.navigate(+1) == TimerNavOutcome::None);
+    TEST_ASSERT_TRUE(nav.navigate(-1) == TimerNavOutcome::None);
+    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::Editing);
+
+    // A short press returns to the list (no CommitDuration, no field cycle).
+    TEST_ASSERT_TRUE(nav.select() == TimerNavOutcome::BackToList);
+    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::List);
+
+    // And so does a long press (re-entered).
+    nav.select(TimerNavLeaf::DurationReadOnly);
+    TEST_ASSERT_TRUE(nav.back() == TimerNavOutcome::BackToList);
+    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::List);
+}
+
+// ============================================================================
 // TIMER per-enum codec table (src/TimerEnums.cpp). The fifth descriptor-table
 // family member: one row per enum value, indexed by the enum's numeric value,
 // carrying {wire, menu, ha, aliases}. The wire column is the MQTT/HTTP/sync
 // contract consumed by parse*/toString in TimerManager; menu/ha columns are
-// rewired by the two follow-up issues. See docs/adr/0010.
+// the bare on-device leaf value and the HA option label. See docs/adr/0010.
 // ============================================================================
 
 // T9 — both codec tables are well-formed: exactly COUNT rows (also a static_assert
@@ -2466,14 +2677,14 @@ void test_T14_attribute_group_table_well_formed(void) {
 }
 
 // T15 — the state-sensor carrier's attribute bag (timerBuildAttributeGroup):
-// exactly the eight config-view keys in table order, carrying live values, with
+// exactly the seven config-view keys in table order, carrying live values, with
 // bar_color rendered as the human "#RRGGBB" string via the per-row formatter
 // (deliberately different from its raw-int config-snapshot form). sync_follow /
 // sync_targets ride here as read-only attributes despite inSnapshot=false.
+// (app_config_timeout was removed in PRD #83 / #88.)
 void test_T15_attribute_group_state_bag(void) {
     TIMER_MAX_DURATION     = 7200;
     TIMER_PUBLISH_INTERVAL = 5;
-    TIMER_CONFIG_TIMEOUT   = 45;
     TIMER_ICON_ENABLED     = false;
     TIMER_BAR_ENABLED      = true;
     TIMER_BAR_COLOR        = 0xFF8800;
@@ -2485,13 +2696,13 @@ void test_T15_attribute_group_state_bag(void) {
 
     TEST_ASSERT_EQUAL_UINT32(7200, doc["max_duration"].as<uint32_t>());
     TEST_ASSERT_EQUAL_UINT32(5,    doc["remaining_publish_interval"].as<uint32_t>());
-    TEST_ASSERT_EQUAL_UINT32(45,   doc["app_config_timeout"].as<uint32_t>());
+    TEST_ASSERT_TRUE(doc["app_config_timeout"].isNull());   // key gone
     TEST_ASSERT_FALSE(doc["icon_enabled"].as<bool>());
     TEST_ASSERT_TRUE(doc["bar_enabled"].as<bool>());
     TEST_ASSERT_EQUAL_STRING("#FF8800", doc["bar_color"].as<const char *>());
     TEST_ASSERT_TRUE(doc["sync_follow"].as<bool>());
     TEST_ASSERT_EQUAL_STRING("all", doc["sync_targets"].as<const char *>());
-    TEST_ASSERT_EQUAL_INT(8, (int)doc.as<JsonObjectConst>().size());
+    TEST_ASSERT_EQUAL_INT(7, (int)doc.as<JsonObjectConst>().size());
 }
 
 // T16 — the remaining-sensor carrier's attribute bag: exactly
@@ -2760,32 +2971,15 @@ void test_CE7_exit_recomposes_and_deactivates(void) {
 // See docs/adr/0012-timer-config-timing-in-editor.md.
 // ============================================================================
 
-// CE8 — 30 s of no input makes tick() report TimedOut so the caller auto-applies.
-// noteInput(0) seeds the idle clock; the window is TIMER_CONFIG_TIMEOUT seconds.
-void test_CE8_tick_times_out_after_no_input(void) {
-    TIMER_CONFIG_TIMEOUT = 30;
-    TimerConfigEditor ed;
-    ed.enter(60);
-    ed.noteInput(0);
-
-    TimerConfigEditor::ButtonState none;
-    TEST_ASSERT_EQUAL(TimerConfigEditor::TickOutcome::Active,
-                      ed.tick(29000, none));   // 29 s < 30 s window
-    TEST_ASSERT_EQUAL(TimerConfigEditor::TickOutcome::TimedOut,
-                      ed.tick(30000, none));   // 30 s elapsed
-}
-
 // CE9 — a held right button auto-repeats +1 on the current field: the hold clock
 // starts at the first tick the button is observed pressed; the first step fires
 // once the 500 ms long-press threshold is crossed, then one step per 250 ms cadence
 // window, and nothing in between. Field is SS (no cap interference).
 void test_CE9_held_button_autorepeats_at_cadence(void) {
     TIMER_MAX_DURATION = 0;        // disable cap: SS wraps at 59, predictable +1 steps
-    TIMER_CONFIG_TIMEOUT = 30;     // well above the cadence under test
     TimerConfigEditor ed;
     ed.enter(0);                   // 00:00:00, field=HH
     ed.cycleField(); ed.cycleField();   // -> SS
-    ed.noteInput(1000);
 
     TimerConfigEditor::ButtonState right; right.rightPressed = true;
 
@@ -2801,11 +2995,9 @@ void test_CE9_held_button_autorepeats_at_cadence(void) {
 // clock so a re-press must wait the full long-press threshold again (no instant step).
 void test_CE10_left_decrements_and_release_rewaits(void) {
     TIMER_MAX_DURATION = 0;
-    TIMER_CONFIG_TIMEOUT = 30;
     TimerConfigEditor ed;
     ed.enter(5);                   // 00:00:05, field=HH
     ed.cycleField(); ed.cycleField();   // -> SS = 5
-    ed.noteInput(1000);
 
     TimerConfigEditor::ButtonState left;  left.leftPressed  = true;
     TimerConfigEditor::ButtonState none;
@@ -2820,25 +3012,6 @@ void test_CE10_left_decrements_and_release_rewaits(void) {
     ed.tick(1900, left);  TEST_ASSERT_EQUAL_UINT8(3, ed.ss());   // press re-observed
     ed.tick(2399, left);  TEST_ASSERT_EQUAL_UINT8(3, ed.ss());   // 499 ms held < 500: no step
     ed.tick(2400, left);  TEST_ASSERT_EQUAL_UINT8(2, ed.ss());   // threshold crossed: step
-}
-
-// CE11 — holding a button past the 30 s window never times out: each auto-repeat
-// counts as input and resets the idle clock, so the editor stays Active throughout
-// (matching the on-device "holding to scrub keeps the edit alive" behaviour).
-void test_CE11_hold_suppresses_timeout(void) {
-    TIMER_MAX_DURATION = 0;
-    TIMER_CONFIG_TIMEOUT = 30;
-    TimerConfigEditor ed;
-    ed.enter(0);
-    ed.cycleField(); ed.cycleField();   // -> SS
-    ed.noteInput(1000);
-
-    TimerConfigEditor::ButtonState right; right.rightPressed = true;
-
-    // Tick at a steady on-device-like cadence across well past 30 s of holding.
-    for (unsigned long now = 1000; now <= 40000; now += 200) {
-        TEST_ASSERT_EQUAL(TimerConfigEditor::TickOutcome::Active, ed.tick(now, right));
-    }
 }
 
 // CE12 — regression guard for issue #25: ButtonState is constructible from two button
@@ -3203,14 +3376,14 @@ void test_W18_countdown_change_republishes_buzzer_group_only(void) {
 
 // ============================================================================
 // W19 — the state sensor's attribute bag on the wire (PRD #57 / issue #59):
-// publishAttributeGroup(State) puts the eight-key config view — live values,
+// publishAttributeGroup(State) puts the seven-key config view — live values,
 // bar_color as the "#RRGGBB" human string — on the state sensor's json_attr_t
 // topic, and only there. Proves the HASensor carrier rides the same wire seam.
+// (app_config_timeout was removed in PRD #83 / #88.)
 // ============================================================================
 void test_W19_publish_state_group_emits_full_config_view(void) {
     TIMER_MAX_DURATION     = 7200;
     TIMER_PUBLISH_INTERVAL = 5;
-    TIMER_CONFIG_TIMEOUT   = 45;
     TIMER_ICON_ENABLED     = false;
     TIMER_BAR_ENABLED      = true;
     TIMER_BAR_COLOR        = 0xFF8800;
@@ -3223,7 +3396,7 @@ void test_W19_publish_state_group_emits_full_config_view(void) {
     TEST_ASSERT_NOT_NULL(attr);
     TEST_ASSERT_EQUAL_STRING(
         "{\"max_duration\":7200,\"remaining_publish_interval\":5,"
-        "\"app_config_timeout\":45,\"icon_enabled\":false,\"bar_enabled\":true,"
+        "\"icon_enabled\":false,\"bar_enabled\":true,"
         "\"bar_color\":\"#FF8800\",\"sync_follow\":true,\"sync_targets\":\"all\"}",
         attr->payload.c_str());
     TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_STATE_ATTR_TOPIC));
@@ -3433,7 +3606,6 @@ int main(int, char **) {
     RUN_TEST(test_U43_parseCommand_bar_enabled_strict_bool);
     RUN_TEST(test_U50_parseCommand_icon_enabled_strict_bool);
     RUN_TEST(test_U51_setDuration_while_paused_resets_to_idle);
-    RUN_TEST(test_U52_tick_delegates_config_timeout_autoapplies_and_exits);
     RUN_TEST(test_U53_tick_runs_runstate_when_not_in_config);
     RUN_TEST(test_U32_descriptor_table_well_formed);
     RUN_TEST(test_U33_descriptor_ids_unique);
@@ -3477,11 +3649,22 @@ int main(int, char **) {
     RUN_TEST(test_M3_stepped_range_saturates);
     RUN_TEST(test_M4_bool_toggle_flips_both_directions);
     RUN_TEST(test_M5_stepped_clamps_to_descriptor_bounds);
-    RUN_TEST(test_M6_label_formatting);
+    RUN_TEST(test_M6_name_and_bare_value);
     RUN_TEST(test_M7_enum_adjust_defers_persist_until_commit);
     RUN_TEST(test_M8_enum_labels_source_from_codec);
     RUN_TEST(test_M9_menu_commit_one_persistbatch_flushes_both_namespaces);
     RUN_TEST(test_M11_menu_commit_republishes_all_attribute_groups);
+    RUN_TEST(test_N1_list_navigation_wraps);
+    RUN_TEST(test_N2_select_value_row_enters_leaf);
+    RUN_TEST(test_N3_leaf_navigate_adjusts_value);
+    RUN_TEST(test_N4_leaf_select_confirms_back_to_list);
+    RUN_TEST(test_N5_leaf_back_returns_to_list);
+    RUN_TEST(test_N6_select_main_goes_to_main_menu);
+    RUN_TEST(test_N7_list_back_is_context_aware);
+    RUN_TEST(test_N8_enter_resets_to_list_top);
+    RUN_TEST(test_N9_duration_leaf_kind_gated_by_state);
+    RUN_TEST(test_N10_duration_editable_leaf_inputs);
+    RUN_TEST(test_N11_duration_readonly_leaf_inputs);
     RUN_TEST(test_T9_codec_tables_well_formed);
     RUN_TEST(test_T10_codec_roundtrip_aliases_and_case);
     RUN_TEST(test_T11_setting_emit_value_by_type);
@@ -3502,10 +3685,8 @@ int main(int, char **) {
     RUN_TEST(test_CE5_adjust_decrement_wraps_to_dynamic_max);
     RUN_TEST(test_CE6_cycleField_rotates);
     RUN_TEST(test_CE7_exit_recomposes_and_deactivates);
-    RUN_TEST(test_CE8_tick_times_out_after_no_input);
     RUN_TEST(test_CE9_held_button_autorepeats_at_cadence);
     RUN_TEST(test_CE10_left_decrements_and_release_rewaits);
-    RUN_TEST(test_CE11_hold_suppresses_timeout);
     RUN_TEST(test_CE12_buttonstate_constructible_from_two_reads);
     RUN_TEST(test_W1_state_topic_builder_formats_canonical_topic);
     RUN_TEST(test_W2_start_publishes_running_on_state_topic);

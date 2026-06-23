@@ -7,9 +7,12 @@
 #include "timer.h"
 #include "TimerManager.h"
 #include "TimerMenu.h"
+#include "TimerMenuNav.h"
+#include "TimerConfigEditor.h"
 #include "MQTTManager.h"
 #include <icons.h>
 #include <UpdateManager.h>
+#include "Functions.h"   // getTextWidth (centering the duration leaf + its underline)
 
 enum MenuState
 {
@@ -84,8 +87,37 @@ uint8_t appsCount = 6;
 uint8_t appsCount = 5;
 #endif
 
-int8_t timerConfigIndex;
 uint8_t timerConfigCount = TIMER_MENU_SLOT_COUNT;
+// The TIMER menu's drill-in navigation state machine (PRD #83 / issue #85). MAIN
+// is the last slot (a Navigation row); the device keeps only drawing + the commit.
+TimerMenuNav timerNav(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1);
+
+// The DURATION leaf reuses the existing display-free duration edit engine (#86),
+// a menu-owned instance. The editor has no auto-apply timeout (#88); the menu only
+// drives its hold-to-repeat, and the edited duration commits via setDuration on
+// leaf back-out (run-state, not the list -> main config batch).
+TimerConfigEditor timerDurationEditor;
+
+// Is the cursor on the DURATION row?
+static bool timerNavOnDuration()
+{
+    return TIMER_MENU_SLOTS[timerNav.index()].kind == TimerMenuKind::Duration;
+}
+
+// The one-shot TIMER-menu commit: a single PersistBatch window (enum edits
+// deferred during scroll in "timer" ns + table-row knob/toggle keys in "awtrix"
+// ns), then the peer broadcast and the HA attribute republish. Fires once on the
+// list -> main-menu transition (long-press out of the list, or selecting MAIN).
+// See ADR-0008/0015 and PRD #29/#45/#60.
+static void commitTimerMenu()
+{
+    {
+        TimerManager_::PersistBatch batch(TimerManager);
+        batch.markTableDirty();
+    }
+    TimerManager.broadcastConfig();
+    TimerManager.publishAllAttributeGroups();
+}
 
 MenuState currentState = MainMenu;
 
@@ -224,8 +256,42 @@ String MenuManager_::menutext()
             return String(SOUND_VOLUME);
         }
     case TimerConfigMenu:
-        DisplayManager.drawMenuIndicator(timerConfigIndex, timerConfigCount, 0xFBC000);
-        return timerMenuLabel(timerConfigIndex);
+        // List focus: walk the named items (indicator over the list). Leaf focus:
+        // show the bare value only, no indicator (PRD #83).
+        if (timerNav.focus() == TimerNavFocus::List)
+        {
+            DisplayManager.drawMenuIndicator(timerNav.index(), timerConfigCount, 0xFBC000);
+            return timerMenuName(timerNav.index());
+        }
+        // DURATION leaf: HH:MM:SS wheel with the active-field underline when
+        // editable; the static value (no underline) when read-only (#86).
+        if (timerNavOnDuration())
+        {
+            if (timerDurationEditor.isActive())
+            {
+                // Drive the editor's hold-to-repeat from the raw button reads each
+                // frame. The menu is timeout-free and the editor no longer has an
+                // auto-apply timeout (#88), so there is nothing else to handle.
+                EasyButton *bL = PeripheryManager.buttonL;
+                EasyButton *bR = PeripheryManager.buttonR;
+                TimerConfigEditor::ButtonState buttons{bL && bL->isPressed(),
+                                                       bR && bR->isPressed()};
+                timerDurationEditor.tick(millis(), buttons);
+
+                snprintf(t, sizeof(t), "%02u:%02u:%02u",
+                         (unsigned)timerDurationEditor.hh(),
+                         (unsigned)timerDurationEditor.mm(),
+                         (unsigned)timerDurationEditor.ss());
+                // Active-field underline, aligned under the centered HH:MM:SS (the
+                // same step/geometry the Timer-app config screen uses).
+                int16_t textX = (32 - (int)getTextWidth(t, 2)) / 2;
+                int16_t ux = textX + timerDurationEditor.field() * 10;
+                DisplayManager.drawLine(ux, 7, ux + 7, 7, TEXTCOLOR_888);
+                return String(t);
+            }
+            return timerMenuValue(timerNav.index());   // read-only: current value
+        }
+        return timerMenuValue(timerNav.index());
     default:
         break;
     }
@@ -288,8 +354,16 @@ void MenuManager_::rightButton()
             SOUND_VOLUME++;
         break;
     case TimerConfigMenu:
-        timerMenuAdjust(timerConfigIndex, +1);
+    {
+        // List focus walks the list; a value leaf steps its value live; the
+        // DURATION leaf steps the active H/M/S field; a read-only leaf is a no-op.
+        TimerNavOutcome o = timerNav.navigate(+1);
+        if (o == TimerNavOutcome::AdjustValue)
+            timerMenuAdjust(timerNav.index(), +1);
+        else if (o == TimerNavOutcome::AdjustField)
+            timerDurationEditor.adjust(+1);
         break;
+    }
     default:
         break;
     }
@@ -353,8 +427,14 @@ void MenuManager_::leftButton()
             SOUND_VOLUME--;
         break;
     case TimerConfigMenu:
-        timerMenuAdjust(timerConfigIndex, -1);
+    {
+        TimerNavOutcome o = timerNav.navigate(-1);
+        if (o == TimerNavOutcome::AdjustValue)
+            timerMenuAdjust(timerNav.index(), -1);
+        else if (o == TimerNavOutcome::AdjustField)
+            timerDurationEditor.adjust(-1);
         break;
+    }
     default:
         break;
     }
@@ -389,6 +469,11 @@ void MenuManager_::selectButton()
                 UpdateManager.updateFirmware();
             }
             break;
+        case TimerConfigMenu:
+            // Open the TIMER menu at the top of the list (origin = main menu).
+            timerNav.enter(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1,
+                           TimerNavOrigin::Menu);
+            break;
         }
         break;
     case BrightnessMenu:
@@ -400,7 +485,27 @@ void MenuManager_::selectButton()
         }
         break;
     case TimerConfigMenu:
-        timerConfigIndex = (timerConfigIndex + 1) % timerConfigCount;
+        // Short press.
+        if (timerNav.focus() == TimerNavFocus::List)
+        {
+            // Drill in (passing how the target leaf behaves), commit + leave on MAIN.
+            TimerNavLeaf leaf = timerMenuLeafKind(timerNav.index(), TimerManager.getState());
+            TimerNavOutcome o = timerNav.select(leaf);
+            if (o == TimerNavOutcome::GoToMainMenu)
+            {
+                commitTimerMenu();
+                currentState = MainMenu;
+            }
+            else if (o == TimerNavOutcome::EnterLeaf && leaf == TimerNavLeaf::DurationEditable)
+            {
+                timerDurationEditor.enter(TimerManager.getDuration());
+            }
+        }
+        else if (timerNav.select() == TimerNavOutcome::CycleField)
+        {
+            // DURATION leaf: cycle H -> M -> S (value leaves just confirm back).
+            timerDurationEditor.cycleField();
+        }
         break;
     case Appmenu:
         switch (appsIndex)
@@ -499,17 +604,35 @@ void MenuManager_::selectButtonLong()
             saveSettings();
             break;
         case TimerConfigMenu:
+        {
+            // Long press: in a value/read-only leaf it just steps back up to the
+            // list (value already live in RAM, no commit). In the DURATION leaf it
+            // commits the edited duration (run-state, separate from the config
+            // batch) then returns to the list. Out of the list it is the single
+            // commit seam: main menu (origin = menu) or back to the Timer app
+            // (origin = app, #87).
+            TimerNavOutcome o = timerNav.back();
+            if (o == TimerNavOutcome::CommitDuration)
             {
-                // The long-press commit is one PersistBatch window (PRD #29):
-                // scope exit flushes enum edits deferred during scroll ("timer"
-                // ns, iff any) then the table-backed knob/toggle keys ("awtrix"
-                // ns), the same commit seam parseCommand uses.
-                TimerManager_::PersistBatch batch(TimerManager);
-                batch.markTableDirty();
+                // The normal set-duration commit path (mirrors the old config exit):
+                // apply, drain deferred notifications, propagate run-state to peers.
+                TimerManager.setDuration(timerDurationEditor.exit());
+                DisplayManager.drainDeferredNotifications();
+                TimerManager.broadcastRunState(nullptr);
+                return;                 // stay in the TIMER menu, list focus
             }
-            TimerManager.broadcastConfig();             // propagate the committed timer config to peers
-            TimerManager.publishAllAttributeGroups();   // refresh every carrier's HA attribute object (issue #60)
-            break;
+            if (o == TimerNavOutcome::BackToList)
+                return;                 // stay in the TIMER menu, list focus
+            commitTimerMenu();          // GoToMainMenu / ExitMenu: commit once
+            if (o == TimerNavOutcome::ExitMenu)
+            {
+                // Entered from the Timer app: close the menu so the app reappears.
+                inMenu = false;
+                currentState = MainMenu;
+                return;
+            }
+            break;                      // GoToMainMenu: falls through to MainMenu
+        }
         default:
             break;
         }
@@ -519,4 +642,13 @@ void MenuManager_::selectButtonLong()
     {
         inMenu = true;
     }
+}
+
+void MenuManager_::openTimerMenuFromApp()
+{
+    // Open the TIMER menu directly at the top of the list, origin = App so a
+    // long-press out of the list returns to the Timer app (issue #87).
+    inMenu = true;
+    currentState = TimerConfigMenu;
+    timerNav.enter(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1, TimerNavOrigin::App);
 }

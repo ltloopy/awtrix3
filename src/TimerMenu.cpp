@@ -15,42 +15,67 @@ namespace
     void    setFinished(uint8_t v) { TimerManager.setFinishedMode((FinishedMode)v, /*persist=*/false); }
 }
 
-// idx order is the on-screen slot order (selectButton cycles through it).
-//   kind, cmdKey, prefix, step, codec, labelCount, getEnum, setEnum
-// The two EnumCycle slots read their labels from the per-enum codec table's menu
-// column (ADR-0010) -- no private label copy to drift from it.
+// idx order is the on-screen list order (left/right walks it, wrapping). DURATION
+// is first (the HH:MM:SS wheel, delegating to TimerConfigEditor); MAIN is the lone
+// Navigation row and sits last (the device reads it as the back-to-main item; PRD
+// #83).
+//   kind, name, cmdKey, step, codec, labelCount, getEnum, setEnum
+// The two EnumCycle slots read their bare leaf value from the per-enum codec
+// table's menu column (ADR-0010) -- no private label copy to drift from it.
 const TimerMenuSlot TIMER_MENU_SLOTS[] = {
-    {TimerMenuKind::EnumCycle,    nullptr,             nullptr,  0, TIMER_BUZZER_CODEC,   (uint8_t)BuzzerMode::COUNT,   getBuzzer,   setBuzzer},
-    {TimerMenuKind::SteppedRange, "countdown_seconds", "CDOWN ", 1, nullptr,              0, nullptr,     nullptr},
-    {TimerMenuKind::EnumCycle,    nullptr,             nullptr,  0, TIMER_FINISHED_CODEC, (uint8_t)FinishedMode::COUNT, getFinished, setFinished},
-    {TimerMenuKind::SteppedRange, "finished_hold",     "CLEAR ", 5, nullptr,              0, nullptr,     nullptr},
-    {TimerMenuKind::SteppedRange, "realert_interval",  "ALERT ", 5, nullptr,              0, nullptr,     nullptr},
-    {TimerMenuKind::BoolToggle,   "icon_enabled",      "ICON ",  0, nullptr,              0, nullptr,     nullptr},
-    {TimerMenuKind::BoolToggle,   "bar_enabled",       "BAR ",   0, nullptr,              0, nullptr,     nullptr},
+    {TimerMenuKind::Duration,     "DURATION",  nullptr,             0, nullptr,              0, nullptr,     nullptr},
+    {TimerMenuKind::EnumCycle,    "BUZZER",    nullptr,             0, TIMER_BUZZER_CODEC,   (uint8_t)BuzzerMode::COUNT,   getBuzzer,   setBuzzer},
+    {TimerMenuKind::SteppedRange, "COUNTDOWN", "countdown_seconds", 1, nullptr,              0, nullptr,     nullptr},
+    {TimerMenuKind::EnumCycle,    "FINISH",    nullptr,             0, TIMER_FINISHED_CODEC, (uint8_t)FinishedMode::COUNT, getFinished, setFinished},
+    {TimerMenuKind::SteppedRange, "AUTOCLEAR", "finished_hold",     5, nullptr,              0, nullptr,     nullptr},
+    {TimerMenuKind::SteppedRange, "REALERT",   "realert_interval",  5, nullptr,              0, nullptr,     nullptr},
+    {TimerMenuKind::BoolToggle,   "ICON",      "icon_enabled",      0, nullptr,              0, nullptr,     nullptr},
+    {TimerMenuKind::BoolToggle,   "BAR",       "bar_enabled",       0, nullptr,              0, nullptr,     nullptr},
+    {TimerMenuKind::Navigation,   "MAIN",      nullptr,             0, nullptr,              0, nullptr,     nullptr},
 };
 
 const size_t TIMER_MENU_SLOT_COUNT = sizeof(TIMER_MENU_SLOTS) / sizeof(TIMER_MENU_SLOTS[0]);
 
-String timerMenuLabel(uint8_t slot)
+String timerMenuName(uint8_t slot)
+{
+    if (slot >= TIMER_MENU_SLOT_COUNT) return String();
+    const char *n = TIMER_MENU_SLOTS[slot].name;
+    return n ? String(n) : String();
+}
+
+String timerMenuValue(uint8_t slot)
 {
     if (slot >= TIMER_MENU_SLOT_COUNT) return String();
     const TimerMenuSlot &s = TIMER_MENU_SLOTS[slot];
     switch (s.kind)
     {
+        case TimerMenuKind::Duration:
+        {
+            // The committed duration as a zero-padded HH:MM:SS clock (matches the
+            // wheel), independent of any live edit in the leaf engine.
+            uint32_t sec = TimerManager.getDuration();
+            uint32_t h = sec / 3600, m = (sec / 60) % 60, ss = sec % 60;
+            char buf[12];
+            snprintf(buf, sizeof(buf), "%02u:%02u:%02u",
+                     (unsigned)h, (unsigned)m, (unsigned)ss);
+            return String(buf);
+        }
         case TimerMenuKind::EnumCycle:
             return String(s.codec[s.getEnum()].menu);
         case TimerMenuKind::SteppedRange:
         {
             const TimerSettingDesc *d = timerSettingByCmdKey(s.cmdKey);
             uint16_t v = d ? *static_cast<uint16_t *>(d->storage) : 0;
-            return String(s.prefix) + String(v);
+            return String(v);
         }
         case TimerMenuKind::BoolToggle:
         {
             const TimerSettingDesc *d = timerSettingByCmdKey(s.cmdKey);
             bool on = d && *static_cast<bool *>(d->storage);
-            return String(s.prefix) + (on ? "ON" : "OFF");
+            return String(on ? "ON" : "OFF");
         }
+        case TimerMenuKind::Navigation:
+            return String();
     }
     return String();
 }
@@ -61,6 +86,8 @@ void timerMenuAdjust(uint8_t slot, int dir)
     const TimerMenuSlot &s = TIMER_MENU_SLOTS[slot];
     switch (s.kind)
     {
+        case TimerMenuKind::Duration:
+            break;  // the duration wheel is driven by the edit engine, not adjust
         case TimerMenuKind::EnumCycle:
         {
             uint8_t cur  = s.getEnum();
@@ -87,5 +114,18 @@ void timerMenuAdjust(uint8_t slot, int dir)
             b = !b;
             break;
         }
+        case TimerMenuKind::Navigation:
+            break;  // no value to adjust
     }
+}
+
+TimerNavLeaf timerMenuLeafKind(uint8_t slot, TimerState st)
+{
+    if (slot >= TIMER_MENU_SLOT_COUNT) return TimerNavLeaf::Value;
+    if (TIMER_MENU_SLOTS[slot].kind != TimerMenuKind::Duration)
+        return TimerNavLeaf::Value;
+    // Duration: editable HH:MM:SS wheel only while Idle; read-only otherwise.
+    return (st == TimerState::Idle)
+               ? TimerNavLeaf::DurationEditable
+               : TimerNavLeaf::DurationReadOnly;
 }

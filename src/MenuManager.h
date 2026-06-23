@@ -17,6 +17,11 @@ public:
     void leftButton();
     void selectButton();
     void selectButtonLong();
+
+    // Open the TIMER menu directly from the Timer app's idle long-press (PRD #83 /
+    // issue #87): list focus, first item, origin = App so a long-press out of the
+    // list returns to the Timer app rather than the main menu.
+    void openTimerMenuFromApp();
 };
 
 extern MenuManager_ &MenuManager;
