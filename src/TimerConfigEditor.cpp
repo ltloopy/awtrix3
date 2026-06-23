@@ -1,6 +1,6 @@
 #include "TimerConfigEditor.h"
 
-#include "Globals.h"        // TIMER_MAX_DURATION (cap math) + TIMER_CONFIG_TIMEOUT (idle window)
+#include "Globals.h"        // TIMER_MAX_DURATION (cap math)
 #include "TimerManager.h"   // secondsToHMS / hmsToSeconds (static math helpers, header-only)
 
 namespace {
@@ -63,25 +63,15 @@ void TimerConfigEditor::adjust(int delta)
     else                  ss_ = (uint8_t)next;
 }
 
-void TimerConfigEditor::noteInput(unsigned long nowMs)
+void TimerConfigEditor::tick(unsigned long nowMs, ButtonState buttons)
 {
-    lastInputMs_ = nowMs;
-}
-
-TimerConfigEditor::TickOutcome TimerConfigEditor::tick(unsigned long nowMs, ButtonState buttons)
-{
-    if (!active_) return TickOutcome::Active;
-
-    if (nowMs - lastInputMs_ >= (unsigned long)TIMER_CONFIG_TIMEOUT * 1000UL)
-        return TickOutcome::TimedOut;
+    if (!active_) return;
 
     // Hold-to-repeat: derive held time from nowMs vs a per-button press-start.
     // While held past the long-press threshold, step once immediately, then once
-    // per repeat-cadence window; an auto-repeat counts as input (resets the timeout).
+    // per repeat-cadence window. The editor never auto-applies on idle (#88).
     repeatHeld(buttons.leftPressed,  nowMs, leftPressStartMs_,  leftRepeatMs_,  -1);
     repeatHeld(buttons.rightPressed, nowMs, rightPressStartMs_, rightRepeatMs_, +1);
-
-    return TickOutcome::Active;
 }
 
 void TimerConfigEditor::repeatHeld(bool pressed, unsigned long nowMs,
@@ -101,7 +91,6 @@ void TimerConfigEditor::repeatHeld(bool pressed, unsigned long nowMs,
     if (repeatMs == 0 || (nowMs - repeatMs) >= kBtnRepeatMs)
     {
         adjust(delta);
-        repeatMs     = nowMs;
-        lastInputMs_ = nowMs;
+        repeatMs = nowMs;
     }
 }

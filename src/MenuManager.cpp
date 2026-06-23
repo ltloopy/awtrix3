@@ -93,10 +93,9 @@ uint8_t timerConfigCount = TIMER_MENU_SLOT_COUNT;
 TimerMenuNav timerNav(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1);
 
 // The DURATION leaf reuses the existing display-free duration edit engine (#86),
-// a menu-owned instance separate from the Timer-app's. The menu is timeout-free,
-// so its hold-to-repeat is driven (the editor's no-input TimedOut is ignored) and
-// the edited duration commits via setDuration on leaf back-out (run-state, not the
-// list -> main config batch).
+// a menu-owned instance. The editor has no auto-apply timeout (#88); the menu only
+// drives its hold-to-repeat, and the edited duration commits via setDuration on
+// leaf back-out (run-state, not the list -> main config batch).
 TimerConfigEditor timerDurationEditor;
 
 // Is the cursor on the DURATION row?
@@ -270,16 +269,14 @@ String MenuManager_::menutext()
         {
             if (timerDurationEditor.isActive())
             {
-                // Menu is timeout-free: keep the no-input clock fresh every frame so
-                // tick() never reports TimedOut, and drive hold-to-repeat from the
-                // raw button reads (mirrors TimerManager's config tick).
+                // Drive the editor's hold-to-repeat from the raw button reads each
+                // frame. The menu is timeout-free and the editor no longer has an
+                // auto-apply timeout (#88), so there is nothing else to handle.
                 EasyButton *bL = PeripheryManager.buttonL;
                 EasyButton *bR = PeripheryManager.buttonR;
                 TimerConfigEditor::ButtonState buttons{bL && bL->isPressed(),
                                                        bR && bR->isPressed()};
-                unsigned long now = millis();
-                timerDurationEditor.noteInput(now);
-                timerDurationEditor.tick(now, buttons);
+                timerDurationEditor.tick(millis(), buttons);
 
                 snprintf(t, sizeof(t), "%02u:%02u:%02u",
                          (unsigned)timerDurationEditor.hh(),
@@ -364,10 +361,7 @@ void MenuManager_::rightButton()
         if (o == TimerNavOutcome::AdjustValue)
             timerMenuAdjust(timerNav.index(), +1);
         else if (o == TimerNavOutcome::AdjustField)
-        {
             timerDurationEditor.adjust(+1);
-            timerDurationEditor.noteInput(millis());
-        }
         break;
     }
     default:
@@ -438,10 +432,7 @@ void MenuManager_::leftButton()
         if (o == TimerNavOutcome::AdjustValue)
             timerMenuAdjust(timerNav.index(), -1);
         else if (o == TimerNavOutcome::AdjustField)
-        {
             timerDurationEditor.adjust(-1);
-            timerDurationEditor.noteInput(millis());
-        }
         break;
     }
     default:
@@ -508,7 +499,6 @@ void MenuManager_::selectButton()
             else if (o == TimerNavOutcome::EnterLeaf && leaf == TimerNavLeaf::DurationEditable)
             {
                 timerDurationEditor.enter(TimerManager.getDuration());
-                timerDurationEditor.noteInput(millis());
             }
         }
         else if (timerNav.select() == TimerNavOutcome::CycleField)

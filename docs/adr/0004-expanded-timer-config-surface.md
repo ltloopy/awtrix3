@@ -160,3 +160,15 @@ asymmetric naming forever or maintaining transitional fallback code.
   pattern: declare global → dev.json read → loadSettings/saveSettings
   → parseCommand validate+apply → docs in three places. No new
   decision-makings required.
+
+## Addendum — `app_config_timeout` removed (PRD #83 / issue #88)
+
+The `app_config_timeout` knob promoted here is **removed**. With the duration editor folded
+into the timeout-free TIMER menu (the `DURATION` leaf, #86) and the legacy Timer-app config
+mode retired (#87), the no-input auto-apply window has no place. The value is gone from the
+global (`TIMER_CONFIG_TIMEOUT`), the `TIMER_SETTINGS_DESCS` row, the HA state-sensor attribute
+bag (and thus the HTTP `config` mirror), and the `dev.json` read path. Back-compat is
+graceful: inbound commands still sending `app_config_timeout` are accepted and the key
+silently ignored (unknown keys are not errors); the stored NVS `TCFGT` key is left as dead
+bytes (no migration). The other two ADR-0004 behavior parameters (`max_duration`,
+`remaining_publish_interval`) are unchanged.

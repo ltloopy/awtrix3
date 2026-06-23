@@ -159,7 +159,7 @@ The end tone is loaded from `/MELODIES/timer_end.txt` if present, otherwise a bu
 
 #### Setting the duration on the device
 
-While the Timer app is the current app and the timer is `idle`, **long-press SELECT** to enter a local configuration mode. The display switches to `HH:MM:SS` with a 1-pixel underline beneath the field you are currently editing.
+While the Timer app is the current app and the timer is `idle`, **long-press SELECT** to open the **TIMER menu** (see [onscreen menu](onscreen.md)). Duration is its first item: select the `DURATION` leaf to get the `HH:MM:SS` wheel with a 1-pixel underline beneath the field you are currently editing.
 
 | Gesture | Effect |
 | --- | --- |
@@ -167,16 +167,11 @@ While the Timer app is the current app and the timer is `idle`, **long-press SEL
 | LEFT short | Decreases the active field by 1 (wraps within the field) |
 | RIGHT short | Increases the active field by 1 (wraps within the field) |
 | LEFT / RIGHT hold | After ~500 ms triggers auto-repeat at ~4 ticks per second until released |
-| SELECT long | Exits config mode and saves |
-| 30 s of no input | Sliding timeout — measured from the last button press, not from entry. Exits and saves |
+| SELECT long | Saves the duration and returns to the menu list |
 
-The dialed value is silently clamped to `[1, timer_max_duration]` on save. Each field has independent bounds (HH 0–99, MM 0–59, SS 0–59) — incrementing seconds past 59 does **not** carry over into minutes. Use SELECT short to switch to the minutes field instead.
+The menu has **no idle timeout** — it never auto-exits while you are editing. The dialed value is silently clamped to `[1, timer_max_duration]` on save. Each field has independent bounds (HH 0–99, MM 0–59, SS 0–59) — incrementing seconds past 59 does **not** carry over into minutes. Use SELECT short to switch to the minutes field instead. While the timer is running or paused the `DURATION` leaf is read-only.
 
-Notifications that arrive while config mode is active are deferred (up to 10) and displayed when you exit, so a passing notification can't disturb the editing session. Remote commands from HA or the native API exit config first (saving the in-progress edit), then execute.
-
-The Timer app is always visible in the rotation, so you can reach this gesture whenever the Timer app is on screen and `idle`. You can also set the duration via Home Assistant or the [native API](https://blueforcer.github.io/awtrix3/#/api?id=timer-control).
-
-The timeout can be tuned via the `timer_config_timeout` key in dev.json.
+You can also set the duration via Home Assistant or the [native API](https://blueforcer.github.io/awtrix3/#/api?id=timer-control).
 
 #### Customisation
 
