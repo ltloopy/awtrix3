@@ -2417,14 +2417,18 @@ void test_N5_leaf_back_returns_to_list(void) {
     TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::List);
 }
 
-// N6 — short press on MAIN returns to the main menu (and commits), from any origin.
+// N6 — short press on MAIN returns to the main menu (and commits), from EITHER
+// entry origin (PRD #83 / issue #87: MAIN always goes to the main menu).
 void test_N6_select_main_goes_to_main_menu(void) {
-    TimerMenuNav nav(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1);
-    // walk to MAIN (last row)
-    for (uint8_t i = 0; i < TIMER_MENU_SLOT_COUNT - 1; ++i) nav.navigate(+1);
-    TEST_ASSERT_TRUE(nav.onMain());
-    TEST_ASSERT_TRUE(nav.select() == TimerNavOutcome::GoToMainMenu);
-    TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::List);  // not a leaf
+    for (uint8_t o = 0; o < 2; ++o) {
+        TimerNavOrigin origin = o == 0 ? TimerNavOrigin::Menu : TimerNavOrigin::App;
+        TimerMenuNav nav(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1, origin);
+        // walk to MAIN (last row)
+        for (uint8_t i = 0; i < TIMER_MENU_SLOT_COUNT - 1; ++i) nav.navigate(+1);
+        TEST_ASSERT_TRUE(nav.onMain());
+        TEST_ASSERT_TRUE(nav.select() == TimerNavOutcome::GoToMainMenu);
+        TEST_ASSERT_TRUE(nav.focus() == TimerNavFocus::List);  // not a leaf
+    }
 }
 
 // N7 — long press OUT of the list is context-aware by entry origin: Menu -> back
