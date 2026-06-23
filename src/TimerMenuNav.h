@@ -19,15 +19,24 @@
 enum class TimerNavFocus  : uint8_t { List, Editing };
 enum class TimerNavOrigin : uint8_t { Menu, App };
 
+// The kind of leaf a value row drills into. Most rows are a plain Value leaf
+// (cycle/step/toggle). DURATION is a field editor (HH/MM/SS wheel) when the timer
+// is Idle, and read-only otherwise -- the device maps slot+timer-state to this via
+// timerMenuLeafKind() (host-tested), so the gating decision lives in testable code.
+enum class TimerNavLeaf : uint8_t { Value, DurationEditable, DurationReadOnly };
+
 // Outcomes the device layer acts on. Anything not listed (plain list movement) is
 // reported as None; the caller reads focus()/index() for the new cursor position.
 enum class TimerNavOutcome : uint8_t
 {
-    None,              // handled internally (list cursor moved)
-    AdjustValue,       // Editing focus: caller applies timerMenuAdjust(index(), dir)
-    EnterLeaf,         // List focus, value row selected: drilled into its leaf
-    ConfirmBackToList, // Editing focus, short press: confirm, back to the list
-    BackToList,        // Editing focus, long press: save, back to the list
+    None,              // handled internally (list cursor moved / read-only no-op)
+    AdjustValue,       // Editing, value leaf: caller applies timerMenuAdjust(index(), dir)
+    AdjustField,       // Editing, DURATION leaf: caller steps the active H/M/S field
+    CycleField,        // Editing, DURATION leaf, short press: cycle the H/M/S field
+    EnterLeaf,         // List focus, value/duration row selected: drilled into its leaf
+    ConfirmBackToList, // Editing, value leaf, short press: confirm, back to the list
+    BackToList,        // Editing, long press (or read-only press): back to the list
+    CommitDuration,    // Editing, DURATION leaf, long press: commit duration, back to list
     GoToMainMenu,      // commit + return to the main menu
     ExitMenu,          // commit + return to the Timer app (origin == App)
 };
@@ -51,19 +60,25 @@ public:
     bool           onMain() const { return _index == _mainIndex; }
 
     // left/right. List focus: move the cursor with wrap (-> None). Editing focus:
-    // -> AdjustValue (the caller mutates the value via timerMenuAdjust).
+    // value leaf -> AdjustValue; DurationEditable -> AdjustField; DurationReadOnly
+    // -> None (no-op).
     TimerNavOutcome navigate(int dir);
 
     // short press (middle button).
-    //   List focus, value row -> EnterLeaf (focus becomes Editing).
-    //   List focus, MAIN      -> GoToMainMenu.
-    //   Editing focus         -> ConfirmBackToList (focus becomes List).
-    TimerNavOutcome select();
+    //   List focus, value/duration row -> EnterLeaf (focus becomes Editing); pass
+    //     the target row's leaf kind so the leaf behaves correctly once editing.
+    //   List focus, MAIN  -> GoToMainMenu.
+    //   Editing, value leaf            -> ConfirmBackToList (focus becomes List).
+    //   Editing, DurationEditable leaf -> CycleField (stays Editing).
+    //   Editing, DurationReadOnly leaf -> BackToList (any press returns to the list).
+    TimerNavOutcome select(TimerNavLeaf leafKind = TimerNavLeaf::Value);
 
     // long press (middle button, held).
     //   List focus    -> context-aware exit: GoToMainMenu (origin Menu) or
     //                    ExitMenu (origin App).
-    //   Editing focus -> BackToList (focus becomes List; value already live in RAM).
+    //   Editing, value leaf            -> BackToList (value already live in RAM).
+    //   Editing, DurationEditable leaf -> CommitDuration (then back to the list).
+    //   Editing, DurationReadOnly leaf -> BackToList.
     TimerNavOutcome back();
 
 private:
@@ -72,6 +87,7 @@ private:
     uint8_t        _index;
     TimerNavFocus  _focus;
     TimerNavOrigin _origin;
+    TimerNavLeaf   _leaf;   // kind of the leaf currently being edited (Editing focus)
 };
 
 #endif
