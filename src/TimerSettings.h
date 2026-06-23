@@ -97,6 +97,24 @@ void timerSettingsRestoreSnapshot(const TcValue in[]);
 const TimerSettingDesc *timerSettingByCmdKey(const char *cmdKey);
 
 // ---------------------------------------------------------------------------
+// Inline RTTTL classifier/validator (PRD #99 / issue #102) -- a pure, reusable pair
+// reused by command validation and melody resolution. `melody_end`/`melody_tick`
+// accept EITHER a bare file-name token (as today) OR an inline RTTTL tune; the two
+// are distinguished by content. An inline tune is always one-shot (it has no
+// persistable file form), so it is never written to a melody name global.
+
+// True iff `s` is an inline RTTTL tune rather than a bare melody file-name token.
+// A bare token is [A-Za-z0-9_-]* (never contains a colon); an inline tune carries
+// RTTTL structure, so the presence of a ':' is the discriminator.
+bool timerMelodyIsInline(const String &s);
+
+// Validate an inline RTTTL tune's syntax: `name:control:notes` (exactly two colons),
+// a non-empty control section carrying a d=/o=/b= token, a non-empty notes section,
+// within a length cap. Returns false on any violation (a malformed inline tune is
+// BadField/400, atomic-reject). Name may be empty.
+bool timerMelodyValidateInline(const String &s);
+
+// ---------------------------------------------------------------------------
 // HA attribute-group projection (PRD #57) -- the descriptor-table family's fifth
 // member. One row per (carrier entity, settings key) projection: a persisted
 // settings value surfaced as a read-only JSON attribute on the HA entity it is
