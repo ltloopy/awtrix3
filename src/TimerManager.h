@@ -7,6 +7,7 @@
 #include "TimerEnums.h"          // TimerState + BuzzerMode / FinishedMode + their codec tables (ADR-0010)
 #include "TimerConfigEditor.h"   // display-free duration editor; owns the config-mode working state (ADR-0011)
 #include "TimerHa.h"             // TimerHaEntity (the HA carrier publishAttributeGroup targets)
+#include "TimerSettings.h"       // TcValue + TIMER_SETTINGS_DESC_CAP (one-shot override snapshot, PRD #99)
 
 // Result of parseCommand. All control surfaces share one validation policy
 // (reject invalid input atomically); only the HTTP API surfaces this as a
@@ -71,6 +72,24 @@ private:
     uint8_t  _syncSeenIdx = 0;
     bool syncSeenRecently(const String &src, uint32_t seq, unsigned long nowMs);
 
+    // -- One-shot override (save:false), PRD #99 / issue #100 --
+    // A save:false command applies its config for the CURRENT RUN only: the saved
+    // config is snapshotted, the command applies live, and returnToIdle() restores
+    // the snapshot when the timer next returns to Idle (reset or auto-clear). While
+    // an override is active no NVS write, no config broadcast and no HA config-
+    // attribute republish occur. A normal (save:true) config command mid-override
+    // promotes the live config to the new saved baseline and ends the override.
+    bool         _overrideActive = false;
+    TcValue      _snapTable[TIMER_SETTINGS_DESC_CAP];   // Family A (inSnapshot rows), generic capture
+    BuzzerMode   _snapBuzzer     = BuzzerMode::End;
+    FinishedMode _snapFinished   = FinishedMode::AutoClear;
+    String       _snapIconIdle, _snapIconRunning, _snapIconPaused, _snapIconFinished;
+    uint32_t     _snapDuration   = 300;
+    String       _snapEndRtttl, _snapTickRtttl;
+    void captureSnapshot();   // record the saved config (both tables + duration + melody RAM)
+    void restoreSnapshot();   // write the snapshot back (no publish/persist side effects)
+    void returnToIdle();      // revert seam shared by reset() and the tick auto-clear transition
+
     void buildConfigSnapshot(JsonDocument &doc) const;   // config keys only; no action/duration/sync_*
     void addSyncEnvelope(JsonObject &sync);              // src/seq/tgt
     bool syncTargetsMe(JsonVariantConst tgt) const;      // does _sync.tgt cover this clock's uniqueID?
@@ -106,6 +125,15 @@ public:
         ~PersistBatch()
         {
             tm._suspendPersist = false;
+            // Transient (one-shot, save:false) window: scope exit writes NOTHING to
+            // flash. RAM intentionally diverges from NVS for the duration of the run
+            // (returnToIdle() restores it), so the pending member-half dirty flag is
+            // discarded rather than flushed, and the table half is left untouched.
+            if (transient)
+            {
+                tm._dirty = false;
+                return;
+            }
             if (tm._dirty)
             {
                 tm._dirty = false;
@@ -116,6 +144,8 @@ public:
         }
         // A table-backed ("awtrix"-namespace) value changed inside the window.
         void markTableDirty() { tableDirty = true; }
+        // Mark this window one-shot: scope exit skips both NVS flushes (issue #100).
+        void setTransient() { transient = true; }
 
         PersistBatch(const PersistBatch &) = delete;
         PersistBatch &operator=(const PersistBatch &) = delete;
@@ -123,6 +153,7 @@ public:
     private:
         TimerManager_ &tm;
         bool tableDirty = false;
+        bool transient  = false;
     };
 
     static TimerManager_ &getInstance();

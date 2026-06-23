@@ -552,6 +552,154 @@ void test_U59_parseCommand_mixed_payload_one_flush_per_namespace(void) {
 }
 
 // ============================================================================
+// One-shot override core (PRD #99 / issue #100). A payload-level boolean `save`
+// (default true) makes a command one-shot: save:false applies its config for the
+// current run only and reverts to the saved settings when the timer next returns
+// to Idle (reset or auto-clear), writing nothing to flash.
+// ============================================================================
+
+// OS1 (AC1, run-state key) — save:false duration runs once; after reset() the
+// working duration is the previously-saved default (300), not the one-off value.
+void test_OS1_save_false_duration_reverts_on_reset(void) {
+    TimerCmdResult r = TimerManager.parseCommand(
+        "{\"duration\":900,\"action\":\"start\",\"save\":false}");
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok), static_cast<int>(r));
+    TEST_ASSERT_EQUAL_UINT32(900, TimerManager.getDuration());          // live one-shot value
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Running),
+                      static_cast<int>(TimerManager.getState()));
+
+    TimerManager.reset();
+    TEST_ASSERT_EQUAL_UINT32(300, TimerManager.getDuration());          // reverted to saved default
+}
+
+// OS2 (AC1, table key) — save:false finished_hold runs once; after reset() the
+// working value is the previously-saved default (10).
+void test_OS2_save_false_table_key_reverts_on_reset(void) {
+    TimerCmdResult r = TimerManager.parseCommand(
+        "{\"finished_hold\":99,\"action\":\"start\",\"save\":false}");
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok), static_cast<int>(r));
+    TEST_ASSERT_EQUAL_UINT16(99, TIMER_FINISHED_HOLD);                  // live one-shot value
+
+    TimerManager.reset();
+    TEST_ASSERT_EQUAL_UINT16(10, TIMER_FINISHED_HOLD);                  // reverted to saved default
+}
+
+// OS9 (AC1, member-config key) — save:false buzzer runs once; after reset() the
+// buzzer mode reverts to the saved default (End). Exercises the second descriptor
+// table's restore path.
+void test_OS9_save_false_member_key_reverts_on_reset(void) {
+    TimerCmdResult r = TimerManager.parseCommand(
+        "{\"buzzer\":\"countdown\",\"action\":\"start\",\"save\":false}");
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok), static_cast<int>(r));
+    TEST_ASSERT_EQUAL(static_cast<int>(BuzzerMode::Countdown),
+                      static_cast<int>(TimerManager.getBuzzerMode()));  // live one-shot value
+
+    TimerManager.reset();
+    TEST_ASSERT_EQUAL(static_cast<int>(BuzzerMode::End),
+                      static_cast<int>(TimerManager.getBuzzerMode()));  // reverted to saved default
+}
+
+// OS3 (AC2) — a one-shot apply performs no NVS write: neither the member-backed
+// "timer" namespace (Preferences begin) nor the table-backed "awtrix" namespace
+// (saveSettings) is flushed.
+void test_OS3_save_false_writes_no_nvs(void) {
+    saveSettings_calls = 0;
+    int begin_at_start = Preferences::begin_calls;
+
+    TimerCmdResult r = TimerManager.parseCommand(
+        "{\"duration\":900,\"finished_hold\":99,\"buzzer\":\"countdown\",\"save\":false}");
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok), static_cast<int>(r));
+
+    TEST_ASSERT_EQUAL_INT(0, saveSettings_calls);                       // no "awtrix" flush
+    TEST_ASSERT_EQUAL_INT(0, Preferences::begin_calls - begin_at_start);// no "timer" flush
+}
+
+// OS4 (AC3, auto-clear path) — the tick auto-clear transition reverts the override
+// via the same returnToIdle() seam reset() uses. A one-shot duration runs once and
+// reverts to the saved default when AutoClear returns the timer to Idle.
+void test_OS4_autoclear_reverts_override(void) {
+    TimerCmdResult r = TimerManager.parseCommand(
+        "{\"duration\":1,\"action\":\"start\",\"save\":false}");
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok), static_cast<int>(r));
+    TEST_ASSERT_EQUAL_UINT32(1, TimerManager.getDuration());            // live one-shot value
+
+    fixture::advance(1000);
+    TimerManager.tick();                                               // cross zero -> Finished
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Finished),
+                      static_cast<int>(TimerManager.getState()));
+
+    fixture::advance(10500);                                           // > saved finished_hold (10s)
+    TimerManager.tick();                                              // AutoClear -> Idle
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle),
+                      static_cast<int>(TimerManager.getState()));
+    TEST_ASSERT_EQUAL_UINT32(300, TimerManager.getDuration());         // reverted to saved default
+}
+
+// OS5 (AC4) — a normal (save:true) command arriving mid-override becomes the new
+// saved baseline; a later revert restores that new truth, not the original.
+void test_OS5_normal_command_mid_override_rebaselines(void) {
+    saveSettings_calls = 0;
+    // One-shot finished_hold=99 (saved default 10) starts an override and, being
+    // one-shot, writes nothing to flash.
+    TimerManager.parseCommand("{\"finished_hold\":99,\"action\":\"start\",\"save\":false}");
+    TEST_ASSERT_EQUAL_UINT16(99, TIMER_FINISHED_HOLD);
+    TEST_ASSERT_EQUAL_INT(0, saveSettings_calls);                       // override suppressed the flush
+
+    // A normal config command (save defaults true) mid-override commits + rebaselines.
+    TimerCmdResult r = TimerManager.parseCommand("{\"countdown_seconds\":7}");
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok), static_cast<int>(r));
+    TEST_ASSERT_EQUAL_UINT16(7, TIMER_COUNTDOWN_SECONDS);
+    TEST_ASSERT_GREATER_THAN_INT(0, saveSettings_calls);               // rebaseline flushed to NVS
+
+    // The later revert must NOT undo the promoted values.
+    TimerManager.reset();
+    TEST_ASSERT_EQUAL_UINT16(99, TIMER_FINISHED_HOLD);                  // promoted, not reverted to 10
+    TEST_ASSERT_EQUAL_UINT16(7, TIMER_COUNTDOWN_SECONDS);
+}
+
+// OS6 (AC5) — a non-boolean `save` rejects the whole payload atomically (ADR-0001);
+// nothing applies, even valid sibling fields.
+void test_OS6_non_boolean_save_atomic_reject(void) {
+    TimerCmdResult r = TimerManager.parseCommand("{\"finished_hold\":99,\"save\":\"yes\"}");
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField), static_cast<int>(r));
+    TEST_ASSERT_EQUAL_UINT16(10, TIMER_FINISHED_HOLD);                  // nothing applied
+
+    r = TimerManager.parseCommand("{\"save\":1}");                      // a number is not a bool
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField), static_cast<int>(r));
+}
+
+// OS7 (AC6) — save:false carrying only action/duration is harmless: the action
+// runs, the one-off duration is live, and nothing breaks.
+void test_OS7_save_false_action_duration_harmless(void) {
+    TimerCmdResult r = TimerManager.parseCommand(
+        "{\"action\":\"start\",\"duration\":120,\"save\":false}");
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok), static_cast<int>(r));
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Running),
+                      static_cast<int>(TimerManager.getState()));
+    TEST_ASSERT_EQUAL_UINT32(120, TimerManager.getDuration());
+
+    r = TimerManager.parseCommand("{\"action\":\"reset\",\"save\":false}");
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok), static_cast<int>(r));
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle),
+                      static_cast<int>(TimerManager.getState()));
+    TEST_ASSERT_EQUAL_UINT32(300, TimerManager.getDuration());         // one-off duration reverted on Idle
+}
+
+// OS8 (mechanism) — a one-shot config command does not broadcast config to sync
+// followers (they have no notion of revert, ADR-0006); a normal config command
+// still does.
+void test_OS8_save_false_suppresses_config_broadcast(void) {
+    TIMER_SYNC_TARGETS = "all";                                        // enable propagation
+    int before = fixture::sync_packet_count();
+
+    TimerManager.parseCommand("{\"finished_hold\":99,\"save\":false}");
+    TEST_ASSERT_EQUAL_INT(before, fixture::sync_packet_count());        // suppressed under one-shot
+
+    TimerManager.parseCommand("{\"finished_hold\":42}");               // normal command still broadcasts
+    TEST_ASSERT_EQUAL_INT(before + 1, fixture::sync_packet_count());
+}
+
+// ============================================================================
 // U22 (M1) — parseCommand while in config: drop partial edit, drain deferred,
 // accept command. The partial edit must NOT be committed to durationSec.
 // ============================================================================
@@ -3589,6 +3737,15 @@ int main(int, char **) {
     RUN_TEST(test_U57_parseCommand_multikey_stores_correct_values);
     RUN_TEST(test_U58_parseCommand_noop_table_value_skips_awtrix_write);
     RUN_TEST(test_U59_parseCommand_mixed_payload_one_flush_per_namespace);
+    RUN_TEST(test_OS1_save_false_duration_reverts_on_reset);
+    RUN_TEST(test_OS2_save_false_table_key_reverts_on_reset);
+    RUN_TEST(test_OS9_save_false_member_key_reverts_on_reset);
+    RUN_TEST(test_OS3_save_false_writes_no_nvs);
+    RUN_TEST(test_OS4_autoclear_reverts_override);
+    RUN_TEST(test_OS5_normal_command_mid_override_rebaselines);
+    RUN_TEST(test_OS6_non_boolean_save_atomic_reject);
+    RUN_TEST(test_OS7_save_false_action_duration_harmless);
+    RUN_TEST(test_OS8_save_false_suppresses_config_broadcast);
     RUN_TEST(test_U22_parseCommand_aborts_config_without_committing_edit);
     RUN_TEST(test_U23_formatHMS_trimmed);
     RUN_TEST(test_U24_parseHMS_accepts);

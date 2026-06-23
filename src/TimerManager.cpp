@@ -46,6 +46,51 @@ void TimerManager_::loadMelodiesCached()
     tickRtttl = PeripheryManager.resolveRtttl(tickName, FALLBACK_TICK_RTTTL);
 }
 
+// One-shot override (PRD #99 / issue #100). captureSnapshot records the SAVED config
+// before a save:false command applies on top of it; restoreSnapshot writes it back
+// when the timer returns to Idle. The table half (Family A inSnapshot rows) is captured
+// generically over TIMER_SETTINGS_DESCS; the member-backed half (Family B) plus the
+// run-state duration and the resolved melody RAM are TimerManager's own members, so they
+// are captured/restored directly. Restore writes members directly (no setter), so it
+// triggers no persist/publish side effects — carriers reported saved values throughout.
+void TimerManager_::captureSnapshot()
+{
+    timerSettingsCaptureSnapshot(_snapTable);
+    _snapBuzzer       = buzzerMode;
+    _snapFinished     = finishedMode;
+    _snapIconIdle     = iconIdle;
+    _snapIconRunning  = iconRunning;
+    _snapIconPaused   = iconPaused;
+    _snapIconFinished = iconFinished;
+    _snapDuration     = durationSec;
+    _snapEndRtttl     = endRtttl;
+    _snapTickRtttl    = tickRtttl;
+}
+
+void TimerManager_::restoreSnapshot()
+{
+    timerSettingsRestoreSnapshot(_snapTable);
+    buzzerMode    = _snapBuzzer;
+    finishedMode  = _snapFinished;
+    iconIdle      = _snapIconIdle;
+    iconRunning   = _snapIconRunning;
+    iconPaused    = _snapIconPaused;
+    iconFinished  = _snapIconFinished;
+    durationSec   = _snapDuration;
+    endRtttl      = _snapEndRtttl;
+    tickRtttl     = _snapTickRtttl;
+}
+
+// The single revert seam shared by reset() and the tick auto-clear transition: if a
+// one-shot override is active, restore the saved config and clear the flag. A no-op
+// otherwise, so the normal return-to-Idle paths are unaffected.
+void TimerManager_::returnToIdle()
+{
+    if (!_overrideActive) return;
+    restoreSnapshot();
+    _overrideActive = false;
+}
+
 void TimerManager_::setup()
 {
     timerPrefs.begin("timer", false);
@@ -450,6 +495,7 @@ void TimerManager_::pause()
 void TimerManager_::reset()
 {
     PeripheryManager.stopSound();
+    returnToIdle();                 // one-shot: restore saved config before deriving remaining (issue #100)
     state = TimerState::Idle;
     remainingSec = durationSec;
     publishState();
@@ -553,6 +599,7 @@ void TimerManager_::tick()
             && (now - enteredFinishedMs >= (unsigned long)TIMER_FINISHED_HOLD * 1000UL))
         {
             PeripheryManager.stopSound();
+            returnToIdle();             // one-shot: restore saved config (shared seam, issue #100)
             state = TimerState::Idle;
             remainingSec = durationSec;
             publishState();
@@ -650,6 +697,19 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     bool haveAction = doc.containsKey("action");
     if (haveAction && !isValidAction(doc["action"].as<String>())) return TimerCmdResult::BadField;
 
+    // One-shot flag (PRD #99 / issue #100): a payload-level boolean, default true.
+    // A non-boolean rejects the whole command (atomic-reject, ADR-0001). save:false
+    // makes this command one-shot — its config applies to the current run only and
+    // reverts when the timer next returns to Idle (see the override block below).
+    bool saveFlag = true;
+    if (doc.containsKey("save"))
+    {
+        JsonVariantConst sv = doc["save"];
+        if (!sv.is<bool>()) return TimerCmdResult::BadField;
+        saveFlag = sv.as<bool>();
+    }
+    bool oneShot = !saveFlag;
+
     // -- Command is known-good: only now disturb device state. --
     if (configEditor.isActive())
     {
@@ -668,10 +728,21 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     //    it (ADR-0001 addendum). Then duration (run-state, B1; applied before any
     //    member-config side effects), then the member-backed applies via their
     //    publish-aware setters. --
+    // One-shot override (issue #100): before applying, snapshot the saved config so
+    // returnToIdle() can restore it. Only the first save:false in a run captures
+    // (latest-command-wins, single snapshot); a later save:false applies on top of
+    // the same baseline.
+    if (oneShot && !_overrideActive)
+    {
+        captureSnapshot();
+        _overrideActive = true;
+    }
+
     bool snapshotChanged = false;   // any config-block (inSnapshot) table key -> broadcastConfig()
     bool melodyChanged   = false;
     {
         PersistBatch batch(*this);
+        if (oneShot) batch.setTransient();   // one-shot: scope exit writes nothing to flash
         for (size_t i = 0; i < TIMER_SETTINGS_DESC_COUNT; ++i)
         {
             if (!tablePresent[i]) continue;
@@ -686,20 +757,43 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     }
 
     if (melodyChanged) loadMelodiesCached();
+
+    // configInCommand: this payload carries a config-block key (table inSnapshot half
+    // OR the member-backed half). Drives both the rebaseline trigger and the config
+    // broadcast. sync_* (inSnapshot=false) and action/duration (run-state) are excluded.
+    bool configInCommand = snapshotChanged || timerDocTouchesMemberConfig(doc);
+
+    // Rebaseline (issue #100, story 21): a normal (save:true) config command arriving
+    // during an active one-shot run commits the live config — including prior one-shot
+    // values — as the new saved baseline and ends the override, so a later revert
+    // leaves the promoted truth in place. A pure action/duration command does NOT
+    // rebaseline (it carries no config to commit), so the override survives to revert.
+    if (!oneShot && _overrideActive && configInCommand)
+    {
+        persist();        // member half: full live state -> "timer" NVS
+        saveSettings();   // table half: full live state -> "awtrix" NVS
+        _overrideActive = false;
+    }
+
     // Settings projected as read-only HA attributes (PRD #57) are not wire rows
     // with their own setters, so republish each affected carrier's bag here when
     // any of its mapped keys was in the command. Table-driven, so a multi-carrier
     // key republishes every carrier; deduped so a carrier publishes at most once.
     // Fires on the remote-apply path too (not _remoteApply-gated), keeping each
     // synced peer's HA attributes consistent with no extra code (generalizes #52).
-    bool attrCarrierDirty[(size_t)TimerHaEntity::COUNT] = {false};
-    for (size_t i = 0; i < TIMER_ATTR_GROUP_DESC_COUNT; ++i)
+    // Suppressed under a one-shot command so the retained HA attribute bags keep
+    // reporting the saved config (carriers stay honest, issue #101 builds on this).
+    if (!oneShot)
     {
-        const TimerAttrGroupDesc &g = TIMER_ATTR_GROUP_DESCS[i];
-        if (doc.containsKey(g.cmdKey)) attrCarrierDirty[(size_t)g.carrier] = true;
+        bool attrCarrierDirty[(size_t)TimerHaEntity::COUNT] = {false};
+        for (size_t i = 0; i < TIMER_ATTR_GROUP_DESC_COUNT; ++i)
+        {
+            const TimerAttrGroupDesc &g = TIMER_ATTR_GROUP_DESCS[i];
+            if (doc.containsKey(g.cmdKey)) attrCarrierDirty[(size_t)g.carrier] = true;
+        }
+        for (size_t c = 0; c < (size_t)TimerHaEntity::COUNT; ++c)
+            if (attrCarrierDirty[c]) publishAttributeGroup((TimerHaEntity)c);
     }
-    for (size_t c = 0; c < (size_t)TimerHaEntity::COUNT; ++c)
-        if (attrCarrierDirty[c]) publishAttributeGroup((TimerHaEntity)c);
 
     if (haveAction)
     {
@@ -729,8 +823,10 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
         bool runStateChanged = haveAction || haveDuration;
         // configChanged = any config-block key edited. Snapshot membership IS the
         // broadcast trigger (one flag, ADR-0006): the table half via inSnapshot, the
-        // member-backed half via the TIMER_MEMBER_CONFIG_DESCS table.
-        bool configChanged = snapshotChanged || timerDocTouchesMemberConfig(doc);
+        // member-backed half via the TIMER_MEMBER_CONFIG_DESCS table. Suppressed under
+        // a one-shot command — config must not propagate to sync followers, who have
+        // no notion of revert (ADR-0006). Run-state still propagates below (story 19).
+        bool configChanged = configInCommand && !oneShot;
 
         if (configChanged) broadcastConfig();
         if (runStateChanged)

@@ -129,6 +129,11 @@ const TimerSettingDesc TIMER_SETTINGS_DESCS[] = {
 
 const size_t TIMER_SETTINGS_DESC_COUNT = sizeof(TIMER_SETTINGS_DESCS) / sizeof(TIMER_SETTINGS_DESCS[0]);
 
+// The header's compile-time extent (used to size the one-shot snapshot buffer) must
+// match the actual table. If a row is added, bump TIMER_SETTINGS_DESC_CAP.
+static_assert(sizeof(TIMER_SETTINGS_DESCS) / sizeof(TIMER_SETTINGS_DESCS[0]) == TIMER_SETTINGS_DESC_CAP,
+              "TIMER_SETTINGS_DESC_CAP must equal the descriptor row count");
+
 bool timerSettingParse(const TimerSettingDesc &d, JsonVariantConst v, TcValue &out)
 {
     if (d.bespoke) return d.bespoke(v, out);
@@ -262,6 +267,32 @@ void timerSettingsBuildSnapshot(JsonDocument &doc)
         const TimerSettingDesc &d = TIMER_SETTINGS_DESCS[i];
         if (!d.inSnapshot) continue;
         timerSettingEmitValue(d, doc);
+    }
+}
+
+void timerSettingsCaptureSnapshot(TcValue out[])
+{
+    for (size_t i = 0; i < TIMER_SETTINGS_DESC_COUNT; ++i)
+    {
+        const TimerSettingDesc &d = TIMER_SETTINGS_DESCS[i];
+        if (!d.inSnapshot) continue;   // sync_* (local identity) excluded by construction
+        switch (d.type)
+        {
+            case TcType::U16:  out[i].num = *static_cast<uint16_t *>(d.storage); break;
+            case TcType::U32:  out[i].num = *static_cast<uint32_t *>(d.storage); break;
+            case TcType::Bool: out[i].b   = *static_cast<bool *>    (d.storage); break;
+            case TcType::Str:  out[i].str = *static_cast<String *>  (d.storage); break;
+        }
+    }
+}
+
+void timerSettingsRestoreSnapshot(const TcValue in[])
+{
+    for (size_t i = 0; i < TIMER_SETTINGS_DESC_COUNT; ++i)
+    {
+        const TimerSettingDesc &d = TIMER_SETTINGS_DESCS[i];
+        if (!d.inSnapshot) continue;
+        timerSettingStore(d, in[i]);   // dispatch-by-type write; equality-skip return ignored
     }
 }
 
