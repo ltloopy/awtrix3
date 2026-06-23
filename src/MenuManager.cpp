@@ -609,8 +609,8 @@ void MenuManager_::selectButtonLong()
             // list (value already live in RAM, no commit). In the DURATION leaf it
             // commits the edited duration (run-state, separate from the config
             // batch) then returns to the list. Out of the list it is the single
-            // commit seam -> main menu (origin = menu) or back to the Timer app
-            // (origin = app; wired by issue #87).
+            // commit seam: main menu (origin = menu) or back to the Timer app
+            // (origin = app, #87).
             TimerNavOutcome o = timerNav.back();
             if (o == TimerNavOutcome::CommitDuration)
             {
@@ -624,7 +624,14 @@ void MenuManager_::selectButtonLong()
             if (o == TimerNavOutcome::BackToList)
                 return;                 // stay in the TIMER menu, list focus
             commitTimerMenu();          // GoToMainMenu / ExitMenu: commit once
-            break;                      // falls through to currentState = MainMenu
+            if (o == TimerNavOutcome::ExitMenu)
+            {
+                // Entered from the Timer app: close the menu so the app reappears.
+                inMenu = false;
+                currentState = MainMenu;
+                return;
+            }
+            break;                      // GoToMainMenu: falls through to MainMenu
         }
         default:
             break;
@@ -635,4 +642,13 @@ void MenuManager_::selectButtonLong()
     {
         inMenu = true;
     }
+}
+
+void MenuManager_::openTimerMenuFromApp()
+{
+    // Open the TIMER menu directly at the top of the list, origin = App so a
+    // long-press out of the list returns to the Timer app (issue #87).
+    inMenu = true;
+    currentState = TimerConfigMenu;
+    timerNav.enter(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1, TimerNavOrigin::App);
 }

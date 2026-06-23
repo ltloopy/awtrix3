@@ -127,3 +127,16 @@ menu so there is one on-device place to set every timer value.
 
 The Timer-app idle long-press still opens the legacy standalone wheel here; issue #87
 reroutes it to open this menu, after which the `DURATION` leaf is the only path to the wheel.
+
+## Addendum — Timer-app entry + context-aware exit (issue #87)
+
+The context-aware exit designed above is now fully wired. `MenuManager` gains
+`openTimerMenuFromApp()`, which opens the menu at the top of the list with `origin = App`;
+the Timer app's **idle long-press** calls it instead of `TimerManager.enterConfigMode()`, so
+the bare duration wheel has **no entry point other than the `DURATION` leaf**. A long-press
+out of the list maps the nav's `ExitMenu` outcome to closing the menu (the Timer app
+reappears) when `origin = App`, and `GoToMainMenu` to the main menu when `origin = Menu`;
+`MAIN` always commits and goes to the main menu regardless of entry (`test_N6`/`test_N7`).
+The Timer app's other long-press actions are unchanged (Finished → start, Running → reset).
+`TimerManager`'s now-unreachable config-mode forwarders (`enterConfigMode` etc.) are left as
+dead code for a follow-up cleanup; the editor *class* remains in use behind the leaf.
