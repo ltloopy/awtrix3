@@ -48,7 +48,6 @@ no Home Assistant or MQTT subscription required. `dev.json` keys override NVS on
 | Countdown window (0–30 s, dflt 3) | `countdown_seconds` ✅ | `timer_countdown_seconds` ✅ | 👁 `config.countdown_seconds` | 👁 attr on buzzer select | `TIMER` menu (`CDOWN`) ✅ |
 | Max duration (1–604800 s, dflt 86400) | `max_duration` ✅ | `timer_max_duration` ✅ | 👁 `config.max_duration` (raw) + `config.max_duration_str` (clock form) | 👁 attr on state sensor (raw seconds) + Duration entity (clock form) | — (caps config editor) |
 | Remaining publish interval (1–60 s, dflt 1) | `remaining_publish_interval` ✅ | `timer_remaining_publish_interval` ✅ | 👁 `config.remaining_publish_interval` | 👁 attr on remaining + state sensors (also governs sensor cadence) | — |
-| App config timeout (5–300 s, dflt 30) | `app_config_timeout` ✅ | `timer_app_config_timeout` ✅ | 👁 `config.app_config_timeout` | 👁 attr on state sensor | — (governs editor idle) |
 | Icon enabled (dflt true) | `icon_enabled` ✅ | `timer_icon_enabled` ✅ | 👁 `config.icon_enabled` | 👁 attr on state sensor | `TIMER` menu (`ICON`) ✅ |
 | Bar enabled (dflt true) | `bar_enabled` ✅ | `timer_bar_enabled` ✅ | 👁 `config.bar_enabled` | 👁 attr on state sensor | `TIMER` menu (`BAR`) ✅ |
 | Bar color (hex / `#RRGGBB`, dflt 0 = text color) | `bar_color` ✅ | `timer_bar_color` ✅ | 👁 `config.bar_color` (as `"default"`/`"#RRGGBB"`) | 👁 attr on state sensor (as `"default"`/`"#RRGGBB"`) | — |
@@ -103,7 +102,6 @@ timer in one publish.
 | `countdown_seconds` | integer | 0–30   (seconds) | Pre-expiry beep window (only meaningful when `buzzer = "countdown"`). Persists to NVS `"awtrix"`. Same value as the `CDOWN` slot of the on-device `TIMER` menu. |
 | `max_duration`               | integer | 1–604800 (seconds, 1 s .. 7 days) | Upper bound on accepted `duration` commands. Out-of-range duration is rejected, not clamped (ADR-0001). Persists to NVS `"awtrix"`. See ADR-0004. |
 | `remaining_publish_interval` | integer | 1–60 (seconds) | How often `timer_rem` republishes while Running (drives the HA `{id}_timer_rem` sensor cadence). Persists to NVS `"awtrix"`. See ADR-0004. |
-| `app_config_timeout`         | integer | 5–300 (seconds) | No-input idle window before the **Timer-app config mode** auto-applies and exits to `Idle`. Does **not** affect the TIMER global menu. Persists to NVS `"awtrix"`. See ADR-0004. |
 | `melody_tick` | string | Bare name resolved against `/MELODIES/<name>.txt`; empty resets to default `"timer_tick"`; capped at 32 chars (alphanumeric, `_`, `-` only) | RTTTL melody played for each countdown beep when `buzzer = "countdown"`. Persists to NVS `"awtrix"`. See ADR-0004. |
 | `melody_end`  | string | Same. Empty resets to default `"timer_end"`. | RTTTL melody played on timer expiry (subject to `buzzer` mode). Persists to NVS `"awtrix"`. See ADR-0004. |
 | `bar_enabled` | bool | `true` / `false` | When `false`, the progress bar is hidden in Running/Paused. Persists to NVS `"awtrix"`. See ADR-0004. |
@@ -280,7 +278,7 @@ With `HA_DISCOVERY=true`, the firmware advertises eight entities:
 | --- | --- | --- |
 | `{id}_timer_dur`   | `text`        | Timer duration as a clock string `HH:MM:SS` (writable; accepts `MM:SS` and bare seconds too). Invalid input (malformed or out-of-range) reverts to the previous valid time. Carries a read-only JSON attribute object `{max_duration}` in the same `H:MM:SS` clock form (e.g. `"24:00:00"`), so the largest duration the timer will accept is visible at the point of entry. The cap is **read-only**; only the duration *state* is writable. |
 | `{id}_timer_rem`   | `sensor`      | Seconds remaining (read-only, updates every `TIMER_PUBLISH_INTERVAL` s while running). Carries a read-only JSON attribute object `{remaining_publish_interval}` — this sensor's own update cadence. |
-| `{id}_timer_state` | `sensor`      | One of `idle` / `running` / `paused` / `finished`. Carries the full-config read-only JSON attribute bag `{max_duration, remaining_publish_interval, app_config_timeout, icon_enabled, bar_enabled, bar_color, sync_follow, sync_targets}` so the whole configuration is readable from one entity. |
+| `{id}_timer_state` | `sensor`      | One of `idle` / `running` / `paused` / `finished`. Carries the full-config read-only JSON attribute bag `{max_duration, remaining_publish_interval, icon_enabled, bar_enabled, bar_color, sync_follow, sync_targets}` so the whole configuration is readable from one entity. |
 | `{id}_timer_buz`   | `select`      | Buzzer mode. Carries a read-only JSON attribute object `{countdown_seconds, melody_tick, melody_end}` so the beep window and both melodies are visible in HA without leaving the entity. |
 | `{id}_timer_fin`   | `select`      | Finished mode. Carries a read-only JSON attribute object `{realert_interval, finished_hold}` so the re-alert cadence and auto-clear hold are visible in HA without leaving the entity. |
 | `{id}_timer_start` | `button`      | Equivalent to `{"action":"start"}`. |
@@ -312,7 +310,7 @@ persisted-settings knob is projected onto the entity it is semantically about:
 | `{id}_timer_fin` (finished select) | `{"realert_interval":N, "finished_hold":N}` |
 | `{id}_timer_buz` (buzzer select)   | `{"countdown_seconds":N, "melody_tick":"…", "melody_end":"…"}` |
 | `{id}_timer_rem` (remaining sensor) | `{"remaining_publish_interval":N}` |
-| `{id}_timer_state` (state sensor)  | `{"max_duration":N, "remaining_publish_interval":N, "app_config_timeout":N, "icon_enabled":bool, "bar_enabled":bool, "bar_color":"default"\|"#RRGGBB", "sync_follow":bool, "sync_targets":"…"}` |
+| `{id}_timer_state` (state sensor)  | `{"max_duration":N, "remaining_publish_interval":N, "icon_enabled":bool, "bar_enabled":bool, "bar_color":"default"\|"#RRGGBB", "sync_follow":bool, "sync_targets":"…"}` |
 
 `remaining_publish_interval` and `max_duration` each deliberately ride **two** carriers.
 `remaining_publish_interval` rides the remaining sensor (its own cadence) and the state
@@ -369,10 +367,7 @@ read paths, and HA cannot usefully render an AWTRIX icon file.
 
 | Input | Effect |
 | --- | --- |
-| Middle long-press (from Idle, Timer app) | Enter config mode. `HH` field highlighted. |
-| Middle short-press (in config) | Cycle field `HH → MM → SS → HH`. |
-| Left / Right (in config) | Decrement / increment current field by 1. Hold ≥500 ms to auto-repeat every 250 ms. |
-| 30 s of no input (in config) | Auto-applies HH:MM:SS to duration, exits config. |
+| Middle long-press (from Idle, Timer app) | Open the **TIMER menu** at the top of its list (origin = App). Duration is the first item (`DURATION` leaf — the same HH:MM:SS wheel); see [`onscreen.md`](onscreen.md). The bare wheel has no other entry point (PRD #83 / #87). |
 | Middle short-press (Idle, Timer app) | Start the timer with the saved duration. |
 | Middle short-press (Running) | Pause. |
 | Middle short-press (Paused) | Resume. |
@@ -425,7 +420,7 @@ fallback (see above).
 | --- | --- |
 | `duration`, `buzzer mode`, `finished mode`, per-state icons | Yes (NVS namespace `"timer"`, keys `DUR` / `BUZ` / `FIN` / `ICON_IDLE` / `ICON_RUN` / `ICON_PAUSE` / `ICON_FIN`). Survives reboot, **but** any matching key in `dev.json` overrides NVS on every boot — see [`dev.md`](dev.md). |
 | `TIMER_FINISHED_HOLD`, `TIMER_REALERT_INTERVAL`, `TIMER_COUNTDOWN_SECONDS` | Yes (NVS namespace `"awtrix"`, keys `TFHOLD` / `TRALERT` / `TCDOWN`), written when the `TIMER` top menu's long-press save fires. Same dev.json-overrides-NVS rule applies. |
-| `TIMER_MAX_DURATION`, `TIMER_PUBLISH_INTERVAL`, `TIMER_CONFIG_TIMEOUT` (the three ADR-0004 behavior parameters) | Yes (NVS namespace `"awtrix"`, keys `TMAXD` / `TPUBI` / `TCFGT`), written by `parseCommand` whenever any of these keys is supplied on `{prefix}/timer`. Same dev.json-overrides-NVS rule applies. |
+| `TIMER_MAX_DURATION`, `TIMER_PUBLISH_INTERVAL` (the ADR-0004 behavior parameters; `app_config_timeout` removed in PRD #83 / #88) | Yes (NVS namespace `"awtrix"`, keys `TMAXD` / `TPUBI`), written by `parseCommand` whenever any of these keys is supplied on `{prefix}/timer`. Same dev.json-overrides-NVS rule applies. The old `TCFGT` key is left as dead bytes; inbound `app_config_timeout` is silently ignored. |
 | `TIMER_MELODY_TICK`, `TIMER_MELODY_END`, `TIMER_BAR_ENABLED`, `TIMER_BAR_COLOR` (the four ADR-0004 new options) | Yes (NVS namespace `"awtrix"`, keys `TMTICK` / `TMEND` / `TBAREN` / `TBARC`). Same dev.json-overrides-NVS rule applies. |
 | `TIMER_ICON_ENABLED` (ADR-0005) | Yes (NVS namespace `"awtrix"`, key `TICONEN`), written by `parseCommand` and by the on-device `TIMER` menu's `ICON` slot long-press save. Same dev.json-overrides-NVS rule applies. |
 | `TIMER_SYNC_FOLLOW`, `TIMER_SYNC_TARGETS` (ADR-0006, multi-device sync) | Yes (NVS namespace `"awtrix"`, keys `TSYNF` / `TSYNT`), written by `parseCommand`. Same dev.json-overrides-NVS rule applies. These are **local identity** and are never propagated to peers. |
@@ -445,7 +440,7 @@ are additionally user-editable via the on-device `TIMER` top menu (see
 [`onscreen.md`](onscreen.md)) — see ADR-0003.
 
 The remaining ADR-0004 behavior parameters (`TIMER_MAX_DURATION`,
-`TIMER_PUBLISH_INTERVAL`, `TIMER_CONFIG_TIMEOUT`) and the
+`TIMER_PUBLISH_INTERVAL`) and the
 melody/color options (`TIMER_MELODY_TICK`, `TIMER_MELODY_END`,
 `TIMER_BAR_COLOR`) reach the timer only via the `{prefix}/timer` /
 `POST /api/timer` / dev.json surfaces — no on-device menu, no HA *control*
@@ -466,7 +461,6 @@ observation only and never a write path.
 | `TIMER_FINISHED_HOLD` | `10` (s) | AutoClear notification hold time. |
 | `TIMER_REALERT_INTERVAL` | `15` (s) | Re-alert cadence in re-alert mode. |
 | `TIMER_COUNTDOWN_SECONDS` | `3` | Number of pre-expiry beep seconds in countdown buzzer mode. |
-| `TIMER_CONFIG_TIMEOUT` | `30` (s) | Idle timeout before the Timer-app config mode auto-exits (range: 5..300). |
 | `TIMER_MELODY_TICK` | `"timer_tick"` | Bare name resolved against `/MELODIES/<name>.txt` for countdown beeps. |
 | `TIMER_MELODY_END` | `"timer_end"` | Bare name resolved against `/MELODIES/<name>.txt` for the end melody. |
 | `TIMER_BAR_ENABLED` | `true` | When `false`, the Running/Paused progress bar is hidden. |

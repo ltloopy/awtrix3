@@ -349,18 +349,17 @@ bool TimerManager_::isValidAction(const String &s)
     return a == "start" || a == "pause" || a == "reset";
 }
 
-// The config-mode value logic AND timing (hold-to-repeat + 30 s auto-apply) live in
-// TimerConfigEditor; these methods stay as thin forwarders so TimerView/Apps.cpp/
-// PeripheryManager are unchanged. Only the run-state mutation (the enter-time 99h
-// clamp, the exit-time setDuration/drain/broadcast) stays here; each forwarder
-// noteInput()s the editor so any input resets its idle timer. See docs/adr/0011
-// (editor extraction) and docs/adr/0012 (timing moved into editor.tick()).
+// Legacy Timer-app config-mode forwarders. The TIMER menu's DURATION leaf replaced
+// this surface (#87), so these have no callers; they remain only so TimerView/
+// Apps.cpp/PeripheryManager keep compiling. The value logic and hold-to-repeat live
+// in TimerConfigEditor (the editor has no auto-apply timeout anymore, #88). Only the
+// run-state mutation (the enter-time 99h clamp, the exit-time setDuration/drain/
+// broadcast) stays here. See docs/adr/0011 (extraction) and docs/adr/0016.
 void TimerManager_::enterConfigMode()
 {
     if (state != TimerState::Idle) return;
     if (durationSec > kConfigHHMax) durationSec = kConfigHHMax;   // keep HH two-digit-editable (run-state)
     configEditor.enter(durationSec);
-    configEditor.noteInput(millis());   // seed the editor's no-input idle clock
 }
 
 void TimerManager_::exitConfigMode()
@@ -375,14 +374,12 @@ void TimerManager_::configCycleField()
 {
     if (!configEditor.isActive()) return;
     configEditor.cycleField();
-    configEditor.noteInput(millis());   // any input resets the editor's auto-apply timeout
 }
 
 void TimerManager_::configAdjust(int delta)
 {
     if (!configEditor.isActive()) return;
     configEditor.adjust(delta);
-    configEditor.noteInput(millis());   // any input resets the editor's auto-apply timeout
 }
 
 void TimerManager_::enterRunning()
@@ -506,16 +503,13 @@ void TimerManager_::tick()
 
     if (configEditor.isActive())
     {
-        // Config-mode timing (hold-to-repeat + 30 s auto-apply) lives in the editor,
-        // which reads injected button state and the current time. We only feed it the
-        // raw button presses and commit on its TimedOut signal. See docs/adr/0012.
+        // Legacy Timer-app config mode is no longer entered (the TIMER menu's
+        // DURATION leaf replaced it, #87); this only drives the editor's hold-to-
+        // repeat if it is ever active. There is no auto-apply timeout (#88).
         EasyButton *bL = PeripheryManager.buttonL;
         EasyButton *bR = PeripheryManager.buttonR;
         TimerConfigEditor::ButtonState buttons{ bL && bL->isPressed(), bR && bR->isPressed() };
-        if (configEditor.tick(now, buttons) == TimerConfigEditor::TickOutcome::TimedOut)
-        {
-            exitConfigMode();   // commit the edited duration through setDuration + drain + broadcast
-        }
+        configEditor.tick(now, buttons);
         return;
     }
 

@@ -98,7 +98,7 @@ storage. The five carriers and their bags:
 | `{id}_timer_fin` | select | `{realert_interval, finished_hold}` |
 | `{id}_timer_buz` | select | `{countdown_seconds, melody_tick, melody_end}` |
 | `{id}_timer_rem` | sensor | `{remaining_publish_interval}` |
-| `{id}_timer_state` | sensor | `{max_duration, remaining_publish_interval, app_config_timeout, icon_enabled, bar_enabled, bar_color, sync_follow, sync_targets}` — `max_duration` raw seconds `86400` |
+| `{id}_timer_state` | sensor | `{max_duration, remaining_publish_interval, icon_enabled, bar_enabled, bar_color, sync_follow, sync_targets}` — `max_duration` raw seconds `86400` (`app_config_timeout` removed, PRD #83 / #88) |
 
 - **vs. keeping per-key bespoke publish paths** (the PRD #17 `realert_interval` shape)
   — rejected: it does not scale to this many knobs across five carriers without drift

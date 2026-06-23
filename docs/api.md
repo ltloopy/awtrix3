@@ -388,7 +388,6 @@ All JSON properties are optional. When multiple are sent together, property sett
 | `countdown_seconds` | integer | 0–30   (s)           | Pre-expiry beep window (only meaningful when `buzzer = "countdown"`). Persists. |
 | `max_duration`               | integer | 1–604800 (s, 1 s .. 7 days) | Upper bound on accepted `duration` (ADR-0004). Persists. |
 | `remaining_publish_interval` | integer | 1–60 (s)             | How often `timer_rem` republishes while Running (ADR-0004). Persists. |
-| `app_config_timeout`         | integer | 5–300 (s)            | Idle window before Timer-app config mode auto-exits (ADR-0004). Persists. |
 | `melody_tick` | string | Bare name resolved against `/MELODIES/<name>.txt`; empty resets to default `"timer_tick"`; ≤32 chars | RTTTL countdown-beep melody (ADR-0004). Persists. |
 | `melody_end`  | string | Same. Empty resets to default `"timer_end"`. | RTTTL end melody (ADR-0004). Persists. |
 | `bar_enabled` | bool | `true` / `false` | Show/hide the Running/Paused progress bar (ADR-0004). Persists. |
@@ -463,7 +462,6 @@ Clear an override so the slot falls back to the Idle icon:
     "max_duration": 86400,
     "max_duration_str": "24:00:00",
     "remaining_publish_interval": 1,
-    "app_config_timeout": 30,
     "icon_enabled": true,
     "bar_enabled": true,
     "bar_color": "default",
@@ -513,7 +511,6 @@ Values are **raw** by default (interval seconds as integers, melodies and `sync_
 | `max_duration` | integer | Maximum settable duration, raw seconds. |
 | `max_duration_str` | string | `max_duration` as a trimmed clock string (carrier-native). |
 | `remaining_publish_interval` | integer | Seconds between `remaining` MQTT pushes. |
-| `app_config_timeout` | integer | Idle window before the on-device config menu auto-applies and exits. |
 | `icon_enabled` | bool | Whether per-state icons are shown. |
 | `bar_enabled` | bool | Whether the progress bar is shown. |
 | `bar_color` | string | `"#RRGGBB"` or `"default"` (carrier-native; not the raw integer). |

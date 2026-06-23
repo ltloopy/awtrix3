@@ -3,17 +3,18 @@
 
 #include <Arduino.h>
 
-// The Timer-app's on-device duration editor (HH/MM/SS wheels), extracted from
-// TimerManager as a display-free value object. It owns the config-mode working
-// state — the field cursor and the three edit buffers — the cap-aware adjust math,
-// and (since #23) the config-mode timing: the 30 s no-input auto-apply timeout and
-// the button hold-to-repeat. It has no DisplayManager dependency and no hardware
-// reference: tick(nowMs, buttonState) receives the current time and injected button
-// presses, so the cadence and timeout are testable without a real clock or buttons.
-// Duration flows in via enter() and back out via exit(); TimerManager commits the
-// result through setDuration() (on explicit exit or the tick() TimedOut signal).
+// The on-device duration editor (HH/MM/SS wheels), a display-free value object. It
+// owns the editing working state — the field cursor and the three edit buffers —
+// the cap-aware adjust math, and the button hold-to-repeat. It has no DisplayManager
+// dependency and no hardware reference: tick(nowMs, buttonState) receives the
+// current time and injected button presses, so the repeat cadence is testable
+// without a real clock or buttons. Duration flows in via enter() and back out via
+// exit(); the caller commits the result through setDuration().
+//
+// The no-input auto-apply timeout was removed with PRD #83 / issue #88 (the TIMER
+// menu — now the editor's only host — is timeout-free); only hold-to-repeat remains.
 // See docs/adr/0011-timer-config-editor-extraction.md (extraction) and
-// docs/adr/0012-timer-config-timing-in-editor.md (timing moved into tick()).
+// docs/adr/0012-timer-config-timing-in-editor.md (timing; auto-apply half removed).
 class TimerConfigEditor
 {
 public:
@@ -50,19 +51,9 @@ public:
         ButtonState(bool l, bool r) : leftPressed(l), rightPressed(r) {}
     };
 
-    // tick() result: TimedOut once the 30 s no-input window elapses (the caller
-    // commits the edit and exits); Active while editing continues.
-    enum class TickOutcome : uint8_t { Active, TimedOut };
-
-    // Reset the no-input idle clock to nowMs. Called by TimerManager on enter and
-    // on every external single-press input (the configAdjust/configCycleField
-    // forwarders), so any input resets the auto-apply timeout.
-    void noteInput(unsigned long nowMs);
-
-    // Drive config-mode timing: button hold-to-repeat (500 ms long-press threshold
-    // then 250 ms cadence, left = -1 / right = +1) and the 30 s no-input timeout
-    // (TIMER_CONFIG_TIMEOUT global). Returns TimedOut when the idle window elapsed.
-    TickOutcome tick(unsigned long nowMs, ButtonState buttons);
+    // Drive button hold-to-repeat: 500 ms long-press threshold then 250 ms cadence
+    // (left = -1 / right = +1). No timeout — the editor never auto-applies (#88).
+    void tick(unsigned long nowMs, ButtonState buttons);
 
     bool    isActive() const { return active_; }
     uint8_t field()    const { return field_; }
@@ -83,9 +74,7 @@ private:
     uint8_t mm_     = 0;
     uint8_t ss_     = 0;
 
-    // Config-mode timing state (issue #23): the no-input idle clock and the
-    // per-button hold-to-repeat bookkeeping. 0 = unpressed / no repeat yet.
-    unsigned long lastInputMs_       = 0;
+    // Per-button hold-to-repeat bookkeeping (issue #23). 0 = unpressed / no repeat yet.
     unsigned long leftPressStartMs_  = 0;
     unsigned long rightPressStartMs_ = 0;
     unsigned long leftRepeatMs_      = 0;

@@ -856,8 +856,8 @@ void test_U38_parseCommand_tuning_change_persists_via_saveSettings(void) {
 }
 
 // ============================================================================
-// U39 (ADR-0004) — Four behavior parameters accepted within their principled
-// ranges, applied to the globals.
+// U39 (ADR-0004) — Behavior parameters accepted within their principled ranges,
+// applied to the globals. (app_config_timeout was removed in PRD #83 / #88.)
 // ============================================================================
 void test_U39_parseCommand_behavior_params_accepted_in_range(void) {
     SHOW_TIMER = true;
@@ -865,19 +865,17 @@ void test_U39_parseCommand_behavior_params_accepted_in_range(void) {
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
                       static_cast<int>(TimerManager.parseCommand(
                           "{\"max_duration\":3600,"
-                          "\"remaining_publish_interval\":2,\"app_config_timeout\":60}")));
+                          "\"remaining_publish_interval\":2}")));
     TEST_ASSERT_EQUAL_UINT32(3600, TIMER_MAX_DURATION);
     TEST_ASSERT_EQUAL_UINT16(2,    TIMER_PUBLISH_INTERVAL);
-    TEST_ASSERT_EQUAL_UINT16(60,   TIMER_CONFIG_TIMEOUT);
 
     // Lower bounds.
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
                       static_cast<int>(TimerManager.parseCommand(
                           "{\"max_duration\":1,"
-                          "\"remaining_publish_interval\":1,\"app_config_timeout\":5}")));
+                          "\"remaining_publish_interval\":1}")));
     TEST_ASSERT_EQUAL_UINT32(1,  TIMER_MAX_DURATION);
     TEST_ASSERT_EQUAL_UINT16(1,  TIMER_PUBLISH_INTERVAL);
-    TEST_ASSERT_EQUAL_UINT16(5,  TIMER_CONFIG_TIMEOUT);
 
     // Reset max_duration so it doesn't reject other tests' duration commands.
     TIMER_MAX_DURATION = 86400;
@@ -886,10 +884,16 @@ void test_U39_parseCommand_behavior_params_accepted_in_range(void) {
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
                       static_cast<int>(TimerManager.parseCommand(
                           "{\"max_duration\":604800,"
-                          "\"remaining_publish_interval\":60,\"app_config_timeout\":300}")));
+                          "\"remaining_publish_interval\":60}")));
     TEST_ASSERT_EQUAL_UINT32(604800, TIMER_MAX_DURATION);
     TEST_ASSERT_EQUAL_UINT16(60,     TIMER_PUBLISH_INTERVAL);
-    TEST_ASSERT_EQUAL_UINT16(300,    TIMER_CONFIG_TIMEOUT);
+
+    // Back-compat: an inbound command still carrying the removed app_config_timeout
+    // key is accepted and the key silently ignored (unknown keys are not errors).
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand(
+                          "{\"max_duration\":3600,\"app_config_timeout\":60}")));
+    TEST_ASSERT_EQUAL_UINT32(3600, TIMER_MAX_DURATION);
 }
 
 // ============================================================================
@@ -899,7 +903,6 @@ void test_U40_parseCommand_behavior_params_atomic_reject(void) {
     SHOW_TIMER = true;
     TIMER_MAX_DURATION     = 86400;
     TIMER_PUBLISH_INTERVAL = 1;
-    TIMER_CONFIG_TIMEOUT   = 30;
 
     // max_duration below floor.
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
@@ -916,10 +919,10 @@ void test_U40_parseCommand_behavior_params_atomic_reject(void) {
                       static_cast<int>(TimerManager.parseCommand("{\"remaining_publish_interval\":0}")));
     TEST_ASSERT_EQUAL_UINT16(1, TIMER_PUBLISH_INTERVAL);
 
-    // app_config_timeout out of range.
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+    // The removed app_config_timeout key is now unknown: even an out-of-range value
+    // is accepted (silently ignored), not rejected (back-compat, #88).
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
                       static_cast<int>(TimerManager.parseCommand("{\"app_config_timeout\":4}")));
-    TEST_ASSERT_EQUAL_UINT16(30, TIMER_CONFIG_TIMEOUT);
 
     // Non-numeric is rejected.
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
@@ -1776,29 +1779,6 @@ void test_U51_setDuration_while_paused_resets_to_idle(void) {
     const PublishCall *rem = fixture::last_publish(fixture::TIMER_REMAINING_TOPIC);
     TEST_ASSERT_NOT_NULL(rem);
     TEST_ASSERT_EQUAL_STRING("600", rem->payload.c_str());
-}
-
-// ============================================================================
-// U52 — tick() delegates config-mode timing to the editor (issue #23): with the
-// editor active, 30 s of no input auto-applies the edit and exits to Idle. Proves
-// the timeout path runs through editor.tick() -> exitConfigMode -> setDuration.
-// ============================================================================
-void test_U52_tick_delegates_config_timeout_autoapplies_and_exits(void) {
-    TimerManager.setDuration(300);      // 00:05:00
-    TimerManager.enterConfigMode();     // millis()==0 seeds the idle clock
-    TEST_ASSERT_TRUE(TimerManager.isInConfig());
-
-    TimerManager.configAdjust(+1);      // HH 0 -> 1 (edit -> 01:05:00 = 3900s)
-    TEST_ASSERT_EQUAL_UINT8(1, TimerManager.getConfigHH());
-
-    // 30 s of no input: tick() must auto-apply through the editor and exit to Idle.
-    fixture::advance(30000);
-    TimerManager.tick();
-
-    TEST_ASSERT_FALSE(TimerManager.isInConfig());
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle),
-                      static_cast<int>(TimerManager.getState()));
-    TEST_ASSERT_EQUAL_UINT32(3900, TimerManager.getDuration());   // committed via setDuration
 }
 
 // ============================================================================
@@ -2693,14 +2673,14 @@ void test_T14_attribute_group_table_well_formed(void) {
 }
 
 // T15 — the state-sensor carrier's attribute bag (timerBuildAttributeGroup):
-// exactly the eight config-view keys in table order, carrying live values, with
+// exactly the seven config-view keys in table order, carrying live values, with
 // bar_color rendered as the human "#RRGGBB" string via the per-row formatter
 // (deliberately different from its raw-int config-snapshot form). sync_follow /
 // sync_targets ride here as read-only attributes despite inSnapshot=false.
+// (app_config_timeout was removed in PRD #83 / #88.)
 void test_T15_attribute_group_state_bag(void) {
     TIMER_MAX_DURATION     = 7200;
     TIMER_PUBLISH_INTERVAL = 5;
-    TIMER_CONFIG_TIMEOUT   = 45;
     TIMER_ICON_ENABLED     = false;
     TIMER_BAR_ENABLED      = true;
     TIMER_BAR_COLOR        = 0xFF8800;
@@ -2712,13 +2692,13 @@ void test_T15_attribute_group_state_bag(void) {
 
     TEST_ASSERT_EQUAL_UINT32(7200, doc["max_duration"].as<uint32_t>());
     TEST_ASSERT_EQUAL_UINT32(5,    doc["remaining_publish_interval"].as<uint32_t>());
-    TEST_ASSERT_EQUAL_UINT32(45,   doc["app_config_timeout"].as<uint32_t>());
+    TEST_ASSERT_TRUE(doc["app_config_timeout"].isNull());   // key gone
     TEST_ASSERT_FALSE(doc["icon_enabled"].as<bool>());
     TEST_ASSERT_TRUE(doc["bar_enabled"].as<bool>());
     TEST_ASSERT_EQUAL_STRING("#FF8800", doc["bar_color"].as<const char *>());
     TEST_ASSERT_TRUE(doc["sync_follow"].as<bool>());
     TEST_ASSERT_EQUAL_STRING("all", doc["sync_targets"].as<const char *>());
-    TEST_ASSERT_EQUAL_INT(8, (int)doc.as<JsonObjectConst>().size());
+    TEST_ASSERT_EQUAL_INT(7, (int)doc.as<JsonObjectConst>().size());
 }
 
 // T16 — the remaining-sensor carrier's attribute bag: exactly
@@ -2987,32 +2967,15 @@ void test_CE7_exit_recomposes_and_deactivates(void) {
 // See docs/adr/0012-timer-config-timing-in-editor.md.
 // ============================================================================
 
-// CE8 — 30 s of no input makes tick() report TimedOut so the caller auto-applies.
-// noteInput(0) seeds the idle clock; the window is TIMER_CONFIG_TIMEOUT seconds.
-void test_CE8_tick_times_out_after_no_input(void) {
-    TIMER_CONFIG_TIMEOUT = 30;
-    TimerConfigEditor ed;
-    ed.enter(60);
-    ed.noteInput(0);
-
-    TimerConfigEditor::ButtonState none;
-    TEST_ASSERT_EQUAL(TimerConfigEditor::TickOutcome::Active,
-                      ed.tick(29000, none));   // 29 s < 30 s window
-    TEST_ASSERT_EQUAL(TimerConfigEditor::TickOutcome::TimedOut,
-                      ed.tick(30000, none));   // 30 s elapsed
-}
-
 // CE9 — a held right button auto-repeats +1 on the current field: the hold clock
 // starts at the first tick the button is observed pressed; the first step fires
 // once the 500 ms long-press threshold is crossed, then one step per 250 ms cadence
 // window, and nothing in between. Field is SS (no cap interference).
 void test_CE9_held_button_autorepeats_at_cadence(void) {
     TIMER_MAX_DURATION = 0;        // disable cap: SS wraps at 59, predictable +1 steps
-    TIMER_CONFIG_TIMEOUT = 30;     // well above the cadence under test
     TimerConfigEditor ed;
     ed.enter(0);                   // 00:00:00, field=HH
     ed.cycleField(); ed.cycleField();   // -> SS
-    ed.noteInput(1000);
 
     TimerConfigEditor::ButtonState right; right.rightPressed = true;
 
@@ -3028,11 +2991,9 @@ void test_CE9_held_button_autorepeats_at_cadence(void) {
 // clock so a re-press must wait the full long-press threshold again (no instant step).
 void test_CE10_left_decrements_and_release_rewaits(void) {
     TIMER_MAX_DURATION = 0;
-    TIMER_CONFIG_TIMEOUT = 30;
     TimerConfigEditor ed;
     ed.enter(5);                   // 00:00:05, field=HH
     ed.cycleField(); ed.cycleField();   // -> SS = 5
-    ed.noteInput(1000);
 
     TimerConfigEditor::ButtonState left;  left.leftPressed  = true;
     TimerConfigEditor::ButtonState none;
@@ -3047,25 +3008,6 @@ void test_CE10_left_decrements_and_release_rewaits(void) {
     ed.tick(1900, left);  TEST_ASSERT_EQUAL_UINT8(3, ed.ss());   // press re-observed
     ed.tick(2399, left);  TEST_ASSERT_EQUAL_UINT8(3, ed.ss());   // 499 ms held < 500: no step
     ed.tick(2400, left);  TEST_ASSERT_EQUAL_UINT8(2, ed.ss());   // threshold crossed: step
-}
-
-// CE11 — holding a button past the 30 s window never times out: each auto-repeat
-// counts as input and resets the idle clock, so the editor stays Active throughout
-// (matching the on-device "holding to scrub keeps the edit alive" behaviour).
-void test_CE11_hold_suppresses_timeout(void) {
-    TIMER_MAX_DURATION = 0;
-    TIMER_CONFIG_TIMEOUT = 30;
-    TimerConfigEditor ed;
-    ed.enter(0);
-    ed.cycleField(); ed.cycleField();   // -> SS
-    ed.noteInput(1000);
-
-    TimerConfigEditor::ButtonState right; right.rightPressed = true;
-
-    // Tick at a steady on-device-like cadence across well past 30 s of holding.
-    for (unsigned long now = 1000; now <= 40000; now += 200) {
-        TEST_ASSERT_EQUAL(TimerConfigEditor::TickOutcome::Active, ed.tick(now, right));
-    }
 }
 
 // CE12 — regression guard for issue #25: ButtonState is constructible from two button
@@ -3430,14 +3372,14 @@ void test_W18_countdown_change_republishes_buzzer_group_only(void) {
 
 // ============================================================================
 // W19 — the state sensor's attribute bag on the wire (PRD #57 / issue #59):
-// publishAttributeGroup(State) puts the eight-key config view — live values,
+// publishAttributeGroup(State) puts the seven-key config view — live values,
 // bar_color as the "#RRGGBB" human string — on the state sensor's json_attr_t
 // topic, and only there. Proves the HASensor carrier rides the same wire seam.
+// (app_config_timeout was removed in PRD #83 / #88.)
 // ============================================================================
 void test_W19_publish_state_group_emits_full_config_view(void) {
     TIMER_MAX_DURATION     = 7200;
     TIMER_PUBLISH_INTERVAL = 5;
-    TIMER_CONFIG_TIMEOUT   = 45;
     TIMER_ICON_ENABLED     = false;
     TIMER_BAR_ENABLED      = true;
     TIMER_BAR_COLOR        = 0xFF8800;
@@ -3450,7 +3392,7 @@ void test_W19_publish_state_group_emits_full_config_view(void) {
     TEST_ASSERT_NOT_NULL(attr);
     TEST_ASSERT_EQUAL_STRING(
         "{\"max_duration\":7200,\"remaining_publish_interval\":5,"
-        "\"app_config_timeout\":45,\"icon_enabled\":false,\"bar_enabled\":true,"
+        "\"icon_enabled\":false,\"bar_enabled\":true,"
         "\"bar_color\":\"#FF8800\",\"sync_follow\":true,\"sync_targets\":\"all\"}",
         attr->payload.c_str());
     TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_STATE_ATTR_TOPIC));
@@ -3660,7 +3602,6 @@ int main(int, char **) {
     RUN_TEST(test_U43_parseCommand_bar_enabled_strict_bool);
     RUN_TEST(test_U50_parseCommand_icon_enabled_strict_bool);
     RUN_TEST(test_U51_setDuration_while_paused_resets_to_idle);
-    RUN_TEST(test_U52_tick_delegates_config_timeout_autoapplies_and_exits);
     RUN_TEST(test_U53_tick_runs_runstate_when_not_in_config);
     RUN_TEST(test_U32_descriptor_table_well_formed);
     RUN_TEST(test_U33_descriptor_ids_unique);
@@ -3740,10 +3681,8 @@ int main(int, char **) {
     RUN_TEST(test_CE5_adjust_decrement_wraps_to_dynamic_max);
     RUN_TEST(test_CE6_cycleField_rotates);
     RUN_TEST(test_CE7_exit_recomposes_and_deactivates);
-    RUN_TEST(test_CE8_tick_times_out_after_no_input);
     RUN_TEST(test_CE9_held_button_autorepeats_at_cadence);
     RUN_TEST(test_CE10_left_decrements_and_release_rewaits);
-    RUN_TEST(test_CE11_hold_suppresses_timeout);
     RUN_TEST(test_CE12_buttonstate_constructible_from_two_reads);
     RUN_TEST(test_W1_state_topic_builder_formats_canonical_topic);
     RUN_TEST(test_W2_start_publishes_running_on_state_topic);
