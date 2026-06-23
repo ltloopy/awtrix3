@@ -94,3 +94,13 @@ This ADR consolidates only how labels/strings are **encoded**, not how values ar
   to guard the HA option count, canonical spellings, and snapshot round-trip.
 - `build_src_filter` for `[env:native]` gains `+<TimerEnums.cpp>`; firmware envs pick it up via the
   normal `src/` glob. No NVS format change, no new HA entities, no behaviour moved.
+
+## Addendum — the `menu` column is now the bare leaf value (PRD #83, ADR-0016)
+
+With the `TIMER` menu's drill-in rework (ADR-0016), the on-device `menu` column becomes
+the **bare** value (`OFF`/`END`/`CDN`, `AUTO`/`HOLD`/`RALT`) rather than the prefixed
+label (`BZR END`, `FIN AUTO`). In the drill-in list the item **name** (`BUZZER`,
+`FINISH`) is shown while walking the list and the bare value only while editing the leaf,
+so the prefix is redundant. The `wire`, `ha`, and `aliases` columns are **unchanged** — no
+MQTT/HTTP/sync/HA string changes — so the B1 boundary holds. `test_T9` still asserts a
+non-empty `menu` per row; `test_M8` pins the bare values through `timerMenuValue`.

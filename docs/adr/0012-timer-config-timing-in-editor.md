@@ -91,3 +91,13 @@ timer exactly as the old `configLastInputMs = millis()` did.
 - No NVS format change, no new HA entities, no MQTT/HTTP surface change. Public `TimerManager` API
   (forwarders + getters) is unchanged. No `platformio.ini` change (`TimerConfigEditor.cpp` is
   already in the `[env:native]` `build_src_filter`).
+
+## Addendum — the auto-apply timeout is removed; hold-to-repeat survives (PRD #83 / issue #88)
+
+The two responsibilities this ADR moved into `editor.tick()` are now split: **hold-to-repeat
+is retained**, the **30 s no-input auto-apply timeout is removed**. The editor's only host is
+now the TIMER menu's `DURATION` leaf (#86), which is timeout-free, so the idle clock
+(`lastInputMs_`/`noteInput`) and the `TickOutcome::TimedOut` signal are gone; `tick()` now
+returns `void` and only drives the per-button repeat cadence. The `TIMER_CONFIG_TIMEOUT`
+global it read is removed (#88). See ADR-0016 for the drill-in menu that replaced the
+legacy Timer-app config mode.

@@ -46,7 +46,6 @@ The JSON object has the following properties:
 | `timer_finished_hold` | integer | Seconds the `00:00` Finished screen stays visible in Auto-clear finished mode (range 1–300). | `10` |
 | `timer_realert_interval` | integer | Seconds between buzzer re-fires in Re-alert finished mode (range 5–300). | `15` |
 | `timer_countdown_seconds` | integer | Tick window (seconds before zero) in Countdown buzzer mode (range 0–30). | `3` |
-| `timer_app_config_timeout` | integer | Seconds of no button input before the **Timer-app config mode** auto-applies and exits (range 5–300). Does not affect the TIMER global menu. Promoted per ADR-0004. **Renamed from `timer_config_timeout` on this branch.** | `30` |
 | `timer_icon_idle` | string | Bare icon name (resolved against `/ICONS/<name>.{jpg,gif}`) for the Timer app's **Idle** state. Also used as fallback for any other state with an empty slot. Empty/absent = no override of the NVS-stored value. Capped at 32 chars. **Overrides NVS on every boot.** | `""` |
 | `timer_icon_running` | string | Same, for the Running state. Empty falls back to `timer_icon_idle`. | `""` |
 | `timer_icon_paused` | string | Same, for the Paused state. Empty falls back to `timer_icon_idle`. | `""` |
