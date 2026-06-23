@@ -101,3 +101,42 @@ live, exactly as before. See the addendum on ADR-0008.
   value. `wire`/`ha`/`aliases` are unchanged.
 - **ADR-0003 (on-device tuning knobs)** — its control scheme (short-press cycles fields,
   left/right changes value) is superseded by the drill-in model for the `TIMER` menu.
+
+## Addendum — the DURATION leaf (issue #86)
+
+`DURATION` is added as the **first** list row, folding the HH:MM:SS duration editing into the
+menu so there is one on-device place to set every timer value.
+
+- **A new `Duration` slot kind** (no settings-storage row) delegates to the existing
+  display-free `TimerConfigEditor` edit engine (ADR-0011) — the wheel math is **reused, not
+  reimplemented**. The state machine grows a `TimerNavLeaf ∈ {Value, DurationEditable,
+  DurationReadOnly}`: a value leaf confirms back on a short press, while the duration leaf
+  **cycles the H/M/S field** on a short press and **steps the field** on left/right. The
+  device hands the leaf kind to the nav via `timerMenuLeafKind(slot, state)` (host-tested),
+  so the gating decision lives in testable code, not in `MenuManager`.
+- **Idle-only.** The duration leaf is editable only when the timer is **Idle**; while
+  Running/Paused it is read-only (no underline, left/right no-op, any press returns to the
+  list) — you cannot disturb a running timer's length (PRD user story 27).
+- **Run-state commit, separate from the config batch.** The duration is run-state, not
+  config: it commits immediately via the normal `setDuration` path on **leaf back-out**, not
+  on the list → main transition. The single config `PersistBatch` commit is unchanged.
+- **Timeout-free.** The menu owns its own editor instance and drives the engine's
+  hold-to-repeat each frame while ignoring the engine's no-input `TimedOut` (the menu has no
+  auto-apply timeout, unlike the legacy Timer-app config mode). Host tests: `test_N9`
+  (Idle-only gating), `test_N10` (editable leaf inputs), `test_N11` (read-only leaf).
+
+The Timer-app idle long-press still opens the legacy standalone wheel here; issue #87
+reroutes it to open this menu, after which the `DURATION` leaf is the only path to the wheel.
+
+## Addendum — Timer-app entry + context-aware exit (issue #87)
+
+The context-aware exit designed above is now fully wired. `MenuManager` gains
+`openTimerMenuFromApp()`, which opens the menu at the top of the list with `origin = App`;
+the Timer app's **idle long-press** calls it instead of `TimerManager.enterConfigMode()`, so
+the bare duration wheel has **no entry point other than the `DURATION` leaf**. A long-press
+out of the list maps the nav's `ExitMenu` outcome to closing the menu (the Timer app
+reappears) when `origin = App`, and `GoToMainMenu` to the main menu when `origin = Menu`;
+`MAIN` always commits and goes to the main menu regardless of entry (`test_N6`/`test_N7`).
+The Timer app's other long-press actions are unchanged (Finished → start, Running → reset).
+`TimerManager`'s now-unreachable config-mode forwarders (`enterConfigMode` etc.) are left as
+dead code for a follow-up cleanup; the editor *class* remains in use behind the leaf.

@@ -30,15 +30,14 @@ Persisted in NVS namespace `"awtrix"` (keys `TFHOLD` / `TRALERT` / `TCDOWN`). `d
 
 ### Timer behavior parameters
 
-Three user-editable parameters that shape Timer behavior outside of the **per-mode timing knobs** above. **Each is a distinct category** — they are *not* "tuning knobs" in the ADR-0003 sense. Listed individually so future readers don't lump them. See ADR-0004.
+Two user-editable parameters that shape Timer behavior outside of the **per-mode timing knobs** above. **Each is a distinct category** — they are *not* "tuning knobs" in the ADR-0003 sense. Listed individually so future readers don't lump them. See ADR-0004. (A third, `app_config_timeout`, was **removed** in PRD #83 / #88 — the on-device TIMER menu is timeout-free, so the no-input auto-apply window no longer has a place. Inbound commands still carrying the key are silently ignored; the stored NVS `TCFGT` key is left as dead bytes, no migration.)
 
 | Parameter | Category | Variable | Default | Controls |
 |---|---|---|---|---|
 | **Max duration** | Input bound | `TIMER_MAX_DURATION` | 86400 (24 h) | Upper bound on accepted `duration` commands. Out-of-range is rejected, not clamped (ADR-0001). |
 | **Remaining publish interval** | Output cadence | `TIMER_PUBLISH_INTERVAL` | 1 s | How often `timer_rem` republishes while Running (also drives the HA `{id}_timer_rem` sensor). |
-| **App config timeout** | UI timing | `TIMER_CONFIG_TIMEOUT` | 30 s | No-input idle window before **Timer-app config mode** auto-applies and exits to `Idle`. Does **not** apply to the **TIMER global menu**. |
 
-All three reach: `dev.json` (`timer_max_duration` / `timer_remaining_publish_interval` / `timer_app_config_timeout`), MQTT/HTTP `{prefix}/timer` (`max_duration` / `remaining_publish_interval` / `app_config_timeout`), NVS namespace `"awtrix"` (keys `TMAXD` / `TPUBI` / `TCFGT`). `dev.json` overrides NVS on every boot. No on-device menu; no HA *entity* — but all three are **observable** as read-only HA attributes (`max_duration` on the state sensor as raw seconds **and** on the `{id}_timer_dur` Duration entity in `H:MM:SS` clock form (#68); `app_config_timeout` on the state sensor; `remaining_publish_interval` on the remaining + state sensors) per **Timer HA presence** below.
+Both reach: `dev.json` (`timer_max_duration` / `timer_remaining_publish_interval`), MQTT/HTTP `{prefix}/timer` (`max_duration` / `remaining_publish_interval`), NVS namespace `"awtrix"` (keys `TMAXD` / `TPUBI`). `dev.json` overrides NVS on every boot. No on-device menu; no HA *entity* — but both are **observable** as read-only HA attributes (`max_duration` on the state sensor as raw seconds **and** on the `{id}_timer_dur` Duration entity in `H:MM:SS` clock form (#68); `remaining_publish_interval` on the remaining + state sensors) per **Timer HA presence** below.
 
 _Avoid_: "tuning knobs" (reserved for the three per-mode knobs above); "compile-time globals" (they aren't — they're runtime-mutable as of ADR-0004).
 
@@ -51,27 +50,36 @@ Two different `icon`/`bar`-named families on the Timer surface; do not conflate 
 
 _Avoid_: reading `icon_enabled` as "enable the idle icon" or as a member of the `icon_<state>` family — it is the master on/off for the whole icon region.
 
-### Two on-device timer-config surfaces
+### On-device timer-config surface
 
-There are two physically distinct on-device places to configure the Timer; use the right name for the right one.
+The **TIMER global menu** is the **single** on-device place to configure the Timer —
+including its **duration** (the `DURATION` leaf, #86). Both ways in lead to the same menu:
+the main-menu `TIMER` entry (origin = Menu) and the **Timer-app idle long-press** (origin =
+App, #87). The display-free duration **edit engine** is reused behind the `DURATION` leaf;
+the bare HH:MM:SS wheel has no standalone entry point anymore.
 
-- **Timer-app config mode** — long-press middle from `Idle` while the Timer app is on screen. Edits **duration only** (HH/MM/SS wheels, auto-repeat on hold, 30 s no-input auto-applies). The display-free editor — field cursor, the three edit buffers, the cap-aware adjust math, and the config-mode timing (the 30 s auto-apply timeout and the button hold-to-repeat, via `tick(nowMs, buttonState)` with injected time + button state) — lives in `TimerConfigEditor` ([TimerConfigEditor.cpp](src/TimerConfigEditor.cpp)); `TimerManager` keeps thin forwarders (`enterConfigMode`/`exitConfigMode`/`configCycleField`/`configAdjust`), feeds the editor button presses from its `tick()`, and commits the edited duration through `setDuration`. See [ADR-0011](docs/adr/0011-timer-config-editor-extraction.md) (extraction) and [ADR-0012](docs/adr/0012-timer-config-timing-in-editor.md) (timing).
-- **TIMER global menu** — long-press middle from any app to open the global menu, navigate to the `TIMER` top entry (which now sits **before** `APPS`). A **drill-in navigable list** (ADR-0016, consistent with every other on-device menu): left/right walks the named items and a short press drills into the highlighted item's editor. It edits **buzzer mode, finished mode, the three per-mode timing knobs, and the two display-element toggles** (`ICON` / `BAR`, see below), plus a `MAIN` item back to the main menu. Lives in `MenuManager` ([MenuManager.cpp](src/MenuManager.cpp)) over the `TimerMenuNav` state machine ([TimerMenuNav.cpp](src/TimerMenuNav.cpp)).
+- **TIMER global menu** — open it via the main menu's `TIMER` entry (now **before** `APPS`) or by long-pressing middle from the Timer app while **Idle**. A **drill-in navigable list** (ADR-0016, consistent with every other on-device menu): left/right walks the named items and a short press drills into the highlighted item's editor. It edits **duration** (the `DURATION` leaf — the HH:MM:SS wheel, read-only while the timer is Running/Paused), **buzzer mode, finished mode, the three per-mode timing knobs, and the two display-element toggles** (`ICON` / `BAR`, see below), plus a `MAIN` item back to the main menu. Lives in `MenuManager` ([MenuManager.cpp](src/MenuManager.cpp)) over the `TimerMenuNav` state machine ([TimerMenuNav.cpp](src/TimerMenuNav.cpp)). **Context-aware exit:** a long-press out of the list returns to the Timer app when entered from the app, or to the main menu when entered from the main menu; `MAIN` always commits and goes to the main menu.
+- **Duration edit engine** — the display-free `TimerConfigEditor` ([TimerConfigEditor.cpp](src/TimerConfigEditor.cpp)): field cursor, the three edit buffers, the cap-aware adjust math, and the button hold-to-repeat (via `tick(nowMs, buttonState)` with injected time + button state). It powers the `DURATION` leaf (a `MenuManager`-owned instance, timeout-free); the edited duration commits through `setDuration` on leaf back-out. See [ADR-0011](docs/adr/0011-timer-config-editor-extraction.md) (extraction) and [ADR-0012](docs/adr/0012-timer-config-timing-in-editor.md) (timing).
 
-ADR-0001 originally named "the on-device config buttons" as the timer's single on-device control surface — that referred to the Timer-app config mode. With the global `TIMER` menu added, on-device timer configuration now spans both surfaces; ADR-0003 documents the addition.
+ADR-0001 originally named "the on-device config buttons" as the timer's single on-device control surface — that referred to the Timer-app duration wheel. The global `TIMER` menu (ADR-0003) now carries on-device timer configuration, the `DURATION` leaf folds the duration wheel into it (#86), and the Timer-app idle long-press now opens this menu (#87) — so it is once again a single surface, just the richer menu.
 
 ### TIMER menu slot table
 
 The data model behind the **TIMER global menu**'s drill-in list: the table `TIMER_MENU_SLOTS`
 ([src/TimerMenu.h](src/TimerMenu.h)), a member of the Timer descriptor-table family
 alongside `TIMER_SETTINGS_DESCS`, `TIMER_MEMBER_CONFIG_DESCS` and `TIMER_HA_DESCRIPTORS`.
-The eight rows are the seven value settings plus the `MAIN` (back-to-main) row, last. Two
-accessors split the old label: `timerMenuName(slot)` returns the **list label** (the item
-name, e.g. `BUZZER`, shown while walking the list) and `timerMenuValue(slot)` returns the
-**bare leaf value** (e.g. `END`, `30`, `ON`, shown while editing). `MenuManager` keeps only
-the drawing + commit; the module is display-free, so the name/value/clamp/wrap/cycle logic
-is host-tested. Four slot kinds:
+The nine rows are `DURATION` (first), the seven value settings, and the `MAIN` (back-to-main)
+row, last. Two accessors split the old label: `timerMenuName(slot)` returns the **list
+label** (the item name, e.g. `BUZZER`, shown while walking the list) and `timerMenuValue(slot)`
+returns the **bare leaf value** (e.g. `END`, `30`, `ON`, or the `HH:MM:SS` clock for
+`DURATION`, shown while editing). `MenuManager` keeps only the drawing + commit; the module
+is display-free, so the name/value/clamp/wrap/cycle logic is host-tested. Five slot kinds:
 
+- **Duration slot** (`DURATION`, first) carries no storage row; it delegates to the existing
+  display-free `TimerConfigEditor` edit engine (the HH:MM:SS wheel, ADR-0011). `timerMenuLeafKind(slot, state)`
+  (host-tested) gates it: an editable wheel only while the timer is **Idle**, read-only
+  otherwise. Its value commits via `setDuration` on leaf back-out (run-state, separate from
+  the list → main config batch).
 - **Table-backed slots** (`SteppedRange`, `BoolToggle`) carry only a `cmdKey`; the dispatch
   reads both *storage* and *range* (`lo`/`hi`) from the matching `TIMER_SETTINGS_DESCS` row.
   The menu reuses the settings table's pointer and bounds, so it cannot drift from it.
@@ -98,8 +106,9 @@ long-press *inside a leaf* just steps back to the list (value already live in RA
 not commit. Enum slots defer their NVS write via the `persist=false` argument on
 `setBuzzerMode`/`setFinishedMode` (sibling to `setIcon*`'s `publish` flag).
 
-_Avoid_: calling this the "Timer-app config mode" (that is the separate HH/MM/SS duration
-editor) or implying enum edits persist per-press (they no longer do, per ADR-0008).
+_Avoid_: implying enum edits persist per-press (they no longer do, per ADR-0008), or
+conflating the `DURATION` leaf's run-state commit (on leaf back-out, via `setDuration`) with
+the value slots' config commit (once, on the list → main transition).
 
 ### Control surface vs. observation surface
 
@@ -191,7 +200,7 @@ happens at zero"), the `{id}_timer_buz` buzzer select carries `{countdown_second
 melody_tick, melody_end}`, the `{id}_timer_rem` remaining sensor carries
 `{remaining_publish_interval}` (its own cadence), and the `{id}_timer_state` state
 sensor carries the full config bag `{max_duration, remaining_publish_interval,
-app_config_timeout, icon_enabled, bar_enabled, bar_color, sync_follow, sync_targets}`.
+icon_enabled, bar_enabled, bar_color, sync_follow, sync_targets}`.
 `remaining_publish_interval` and `max_duration` each ride **two** carriers (one settings
 row, two table rows). A per-row formatter renders a key in its **carrier-native
 representation** (see the general principle below): a multi-carrier key may therefore

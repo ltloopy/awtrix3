@@ -4,6 +4,7 @@
 #include <Arduino.h>
 
 #include "TimerEnums.h"
+#include "TimerMenuNav.h"   // TimerNavLeaf (the leaf-kind the device hands the nav SM)
 
 // TIMER menu slot table: the data model behind the on-device TIMER global menu's
 // drill-in list (the third member of the Timer descriptor-table family, alongside
@@ -21,9 +22,10 @@
 //     setEnum defers the NVS write to the menu commit (setBuzzerMode(m, persist=false)).
 
 // Slot kinds. The value kinds (EnumCycle / SteppedRange / BoolToggle) drill into a
-// leaf editor; Navigation is the lone non-value row (MAIN) that walks the device
-// back to the main menu (PRD #83).
-enum class TimerMenuKind : uint8_t { EnumCycle, SteppedRange, BoolToggle, Navigation };
+// leaf editor; Duration drills into the HH:MM:SS wheel (delegating to the existing
+// TimerConfigEditor edit engine, no settings-storage row); Navigation is the lone
+// non-value row (MAIN) that walks the device back to the main menu (PRD #83).
+enum class TimerMenuKind : uint8_t { Duration, EnumCycle, SteppedRange, BoolToggle, Navigation };
 
 struct TimerMenuSlot
 {
@@ -45,9 +47,18 @@ extern const size_t        TIMER_MENU_SLOT_COUNT;
 String timerMenuName(uint8_t slot);
 
 // The slot's BARE LEAF VALUE (shown while editing the leaf), e.g. "END", "10",
-// "ON". The item name already gives the context, so no prefix. Navigation rows
-// (MAIN) have no value and return "". Returns "" for an out-of-range index.
+// "ON". The item name already gives the context, so no prefix. The Duration row
+// returns the current duration as a zero-padded "HH:MM:SS" clock string;
+// Navigation rows (MAIN) have no value and return "". Returns "" for an
+// out-of-range index.
 String timerMenuValue(uint8_t slot);
+
+// How the leaf for `slot` behaves, given the timer's current state `st`. The
+// Duration row is an editable HH:MM:SS wheel only when the timer is Idle; while
+// Running/Paused it is read-only (PRD #83 user story 27). Every other row is a
+// plain Value leaf. The device hands the result to TimerMenuNav, so the Idle-only
+// gating decision is host-testable.
+TimerNavLeaf timerMenuLeafKind(uint8_t slot, TimerState st);
 
 // Adjust the slot by one step in the given direction (dir > 0 = right/increment,
 // dir <= 0 = left/decrement). Stepped ranges saturate at the descriptor's lo/hi;

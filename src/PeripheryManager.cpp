@@ -259,7 +259,9 @@ void select_button_pressed_long()
             }
             if (CURRENT_APP == "Timer" && ts == TimerState::Idle)
             {
-                TimerManager.enterConfigMode();
+                // Open the TIMER menu (origin = App) instead of the bare duration
+                // wheel; the wheel is now reachable only as the DURATION leaf (#87).
+                MenuManager.openTimerMenuFromApp();
                 return;
             }
             if (CURRENT_APP == "Timer")

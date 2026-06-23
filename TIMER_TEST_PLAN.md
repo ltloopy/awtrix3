@@ -28,11 +28,11 @@ Only features added on `feat-timer-standalone`:
 
 | Area | Items |
 | --- | --- |
-| **dev.json config** | `show_timer` plus the ~20 `timer_*` keys; the two renames (`timer_publish_interval`→`timer_remaining_publish_interval`, `timer_config_timeout`→`timer_app_config_timeout`); the "dev.json overrides NVS on every boot" rule. |
+| **dev.json config** | `show_timer` plus the `timer_*` keys; the `timer_publish_interval`→`timer_remaining_publish_interval` rename; the "dev.json overrides NVS on every boot" rule. (`timer_app_config_timeout` was removed in PRD #83 / #88 — the menu is timeout-free; an old key in the payload is silently ignored.) |
 | **New API calls** | `POST /api/timer` (atomic-reject validation, `200`/`400`/`409`); `GET /api/timer` (read-only observation snapshot). |
 | **MQTT calls** | `{prefix}/timer` command topic; retained `{prefix}/timer/icons`; the new `TIMER` key on `{prefix}/settings`. |
 | **Home Assistant** | The 8 discovery entities and discovery prune on `SHOW_TIMER` off. |
-| **Supporting / interacting** | State machine (Idle/Running/Paused/Finished), buzzer & finished modes, on-device `TIMER` global menu + Timer-app config mode, display reflow (`icon_enabled`/`bar_enabled`), multi-device UDP sync (port 4212). |
+| **Supporting / interacting** | State machine (Idle/Running/Paused/Finished), buzzer & finished modes, the on-device `TIMER` global menu (drill-in list incl. the `DURATION` leaf; opened from the main menu or the Timer-app idle long-press), display reflow (`icon_enabled`/`bar_enabled`), multi-device UDP sync (port 4212). |
 
 ### 1.3 Scope — Out
 
@@ -113,7 +113,7 @@ with `show_timer=true` and factory-default timer config.
 | DEV-02 | P1 | PASS | `show_timer:false` removes app and suppresses HA | HA_DISCOVERY on; HA paired | 1. Set `show_timer:false` in `dev.json`. 2. Reboot. 3. Inspect app rotation, HA device card, and `POST /api/timer`. | Timer app absent from rotation; 8 HA entities not published (pruned via empty retained discovery after reconnect); `POST`/`{prefix}/timer` return/behave as disabled; any running timer reset. |
 | DEV-03 | P1 | Pass | dev.json overrides NVS on every boot | Set duration/buzzer/finished to non-default values via MQTT (writes NVS) first | 1. Confirm NVS values active. 2. Add conflicting values to `dev.json` (e.g. `timer_bar_enabled:false`, `timer_buzzer`-equivalent keys). 3. Reboot. | On boot, `dev.json` values win over the stored NVS values; changing them back requires editing/removing the dev.json key. |
 | DEV-04 | P2 | Pass | Renamed key: `timer_remaining_publish_interval` | HA paired or MQTT monitor on `{prefix}/...timer_rem` | 1. Set `timer_remaining_publish_interval:5`. 2. Reboot, start a timer. 3. Observe `timer_rem` publish cadence. | `timer_rem` republishes every ~5 s while Running. Old `timer_publish_interval` name ignored. |
-| DEV-05 | P2 | Pass | Renamed key: `timer_app_config_timeout` | — | 1. Set `timer_app_config_timeout:10`. 2. Reboot, enter Timer-app config mode, leave untouched. | Config mode auto-applies & exits after ~10 s. Old `timer_config_timeout` name ignored. |
+| DEV-05 | P2 | Pass | Removed key: `timer_app_config_timeout` ignored | — | 1. Set `timer_app_config_timeout:10` in dev.json and/or send it on `{prefix}/timer`. 2. Reboot, open the TIMER menu / DURATION leaf, leave untouched. | The key is silently ignored (no error, no rejection). The menu never auto-exits on idle (timeout-free, #88). |
 | DEV-06 | P2 | Pass | Per-state icon keys load from dev.json | Valid icon files in `/ICONS/` | 1. Set `timer_icon_idle`/`timer_icon_running`/`timer_icon_paused`/`timer_icon_finished` to existing bare names. 2. Reboot. 3. Cycle states. | Each state shows its configured icon; an empty slot falls back to `timer_icon_idle`; values mirrored to retained `{prefix}/timer/icons`. |
 | DEV-07 | P2 | — | Melody override keys | `/MELODIES/<name>.txt` present | 1. Set `timer_melody_tick`/`timer_melody_end` to existing names. 2. Reboot, run countdown-buzzer timer. | Configured RTTTL melodies play for ticks/end; empty value resets to `timer_tick`/`timer_end`. |
 | DEV-08 | P3 | Pass | Display toggles via dev.json | — | 1. Set `timer_bar_enabled:false` and `timer_icon_enabled:false`. 2. Reboot, start a timer. | Progress bar hidden; icon region suppressed and time text + bar reflow across the full 32px panel (ADR-0005). |
@@ -187,15 +187,16 @@ with `show_timer=true` and factory-default timer config.
 | SYNC-08 | P2 | — | Disabled peer ignores inbound | B: `show_timer=false`; A targets B | On A: start | B ignores the packet (its `parseCommand` is disabled). |
 | SYNC-09 | P3 | — | Packet-loss self-heal | Peers; introduce a dropped frame if possible | Cause/observe a missed run-state packet, then issue a fresh start on leader | Each packet sent 3× and de-duplicated by `(src,seq)`; a single drop rarely desyncs; next start/reset re-establishes shared state. |
 
-### 4.6 On-device controls (Timer-app config mode + `TIMER` global menu)
+### 4.6 On-device controls (the `TIMER` global menu, drill-in)
 
 | Test ID | Priority | Test Result | Test Description | Pre-requisites | Test Steps | Expected Results |
 | --- | --- | --- | --- | --- | --- | --- |
-| DEV-DEVICE-01 | P1 | Pass | Timer-app config mode duration edit | Timer app on screen, Idle | Long-press SELECT; cycle HH→MM→SS with short SELECT; adjust with LEFT/RIGHT; long-press SELECT to save | Underline marks active field; LEFT/RIGHT step by 1; HH wraps 99↔0, MM/SS wrap 59↔0 (no carry); saved value clamped to `[1, max_duration]`. |
-| DEV-DEVICE-02 | P2 | Pass | Config-mode hold auto-repeat & timeout | In config mode | Hold RIGHT ≥500 ms; separately, leave idle for the config timeout | Hold auto-repeats ~4/s; no input for `timer_app_config_timeout` s auto-applies & exits to Idle. |
-| DEV-DEVICE-03 | P2 | Pass | Notifications buffered during config | In config mode | Trigger a notification while editing | Notification deferred (up to 10), shown on exit; editing session not disturbed. |
-| DEV-DEVICE-04 | P1 | Pass | `TIMER` global menu walk | Any app on screen | Open global menu → `TIMER`; walk the 7 slots: BUZZER, CDOWN, FINISH, CLEAR, ALERT, ICON, BAR | Order correct; LEFT/RIGHT cycles enums / steps numbers (step 5 CLEAR/ALERT, step 1 CDOWN) / flips ICON & BAR; BUZZER & FINISH apply+publish immediately each press; numeric/toggle commit on long-press save. |
-| DEV-DEVICE-05 | P2 | Pass | Physical buttons drive state machine | Timer app current | Short SELECT to start (idle)/pause (running)/resume (paused)/restart (finished); long SELECT to reset | Behaviour per `docs/apps.md`; while in `finished`, SELECT works from any app screen. |
+| DEV-DEVICE-01 | P1 | — | `DURATION` leaf duration edit | TIMER menu open, timer Idle | Select `DURATION`; cycle HH→MM→SS with short SELECT; adjust with LEFT/RIGHT; long-press SELECT to save & return to the list | Underline marks active field; LEFT/RIGHT step by 1; HH wraps 99↔0, MM/SS wrap 59↔0 (no carry); saved value clamped to `[1, max_duration]`; the duration commits on leaf back-out. |
+| DEV-DEVICE-02 | P2 | — | `DURATION` hold auto-repeat; no idle timeout | In the `DURATION` leaf | Hold RIGHT ≥500 ms; separately, leave the menu idle for >30 s | Hold auto-repeats ~4/s; the menu **never** auto-exits on idle (timeout-free, #88). |
+| DEV-DEVICE-03 | P2 | — | `DURATION` read-only while Running/Paused | Timer Running or Paused | Open the TIMER menu, select `DURATION` | Leaf shows the current value with **no** underline; LEFT/RIGHT do nothing; any press returns to the list (running timer undisturbed). |
+| DEV-DEVICE-04 | P1 | — | `TIMER` global menu drill-in walk | Any app on screen | Open the menu → `TIMER` (now before `APPS`); walk the 9 items: DURATION, BUZZER, COUNTDOWN, FINISH, AUTOCLEAR, REALERT, ICON, BAR, MAIN; drill into each value item | LEFT/RIGHT walk the named list and wrap; short SELECT drills into the leaf (bare value shown); LEFT/RIGHT then cycle enums / step numbers (step 5 AUTOCLEAR/REALERT, step 1 COUNTDOWN) / flip ICON & BAR; short SELECT confirms back, long SELECT saves & returns; BUZZER & FINISH apply+publish immediately; numeric/toggle persist once on leaving the list. |
+| DEV-DEVICE-06 | P1 | — | Entry points & context-aware exit | — | (a) Open from main menu, long-press out of the list. (b) Open from the Timer-app idle long-press, long-press out of the list. (c) From either, select `MAIN`. | (a) returns to the main menu; (b) returns to the Timer app; (c) always returns to the main menu. The bare duration wheel has no other entry point. |
+| DEV-DEVICE-05 | P2 | Pass | Physical buttons drive state machine | Timer app current | Short SELECT to start (idle)/pause (running)/resume (paused)/restart (finished); long SELECT to reset | Behaviour per `docs/apps.md`; while in `finished`, SELECT works from any app screen. Idle long-press now opens the TIMER menu (not the bare wheel). |
 
 ---
 
@@ -250,7 +251,7 @@ expected, reproduction steps, and screenshots/serial-log where relevant.
 | EC-15 | Combined request where setter is valid but action invalid (or vice-versa) | Whole command rejected atomically; nothing applied. |
 | EC-16 | Sync: dropped UDP frame | 3× send + `(src,seq)` de-dup absorbs a single drop; next start/reset self-heals. |
 | EC-17 | Sync: leader reset vs follower locally paused | Follower obeys leader's reset (consent assumed via follow); local desync resolves on shared start/reset. |
-| EC-18 | Notification arrives during Timer-app config mode | Deferred (up to 10), shown on exit; remote command exits config first (saving in-progress edit) then executes. |
+| EC-18 | `app_config_timeout` sent on `{prefix}/timer` / dev.json | Silently ignored (unknown key, no rejection); the TIMER menu remains timeout-free. No NVS migration of the dead `TCFGT` key. |
 | EC-19 | Oversized JSON body to `POST /api/timer` | Exceeds parse buffer → `400 ErrorParsingJson`. |
 | EC-20 | Clearing the Finished alert (per finished-mode) | The finished `0:00` is a native Timer-app screen, **not** a notification (ADR-0002): `notify/dismiss` has no effect on it. Auto-clear returns to Idle after `timer_finished_hold` s automatically; Hold and Re-alert are cleared only by an explicit `start`/`reset` (on-device button, `POST`/`{prefix}/timer`, or HA Start/Reset). |
 
