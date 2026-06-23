@@ -13,9 +13,9 @@ const size_t TIMER_BUZZER_CODEC_COUNT =
     sizeof(TIMER_BUZZER_CODEC) / sizeof(TIMER_BUZZER_CODEC[0]);
 
 const TimerEnumCodec TIMER_FINISHED_CODEC[] = {
-    {"auto-clear", "AUTO", "Auto-clear", "autoclear"},
-    {"hold",       "HOLD", "Hold",       nullptr},
-    {"re-alert",   "RALT", "Re-alert",   "realert"},
+    {"auto-clear", "CLEAR",    "Auto-clear", "autoclear"},
+    {"hold",       "HOLD",     "Hold",       nullptr},
+    {"re-alert",   "RE-ALERT", "Re-alert",   "realert"},
 };
 const size_t TIMER_FINISHED_CODEC_COUNT =
     sizeof(TIMER_FINISHED_CODEC) / sizeof(TIMER_FINISHED_CODEC[0]);

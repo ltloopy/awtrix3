@@ -2192,10 +2192,10 @@ void test_M6_name_and_bare_value(void) {
     TEST_ASSERT_EQUAL_STRING("BUZZER",    timerMenuName(1).c_str());
     TEST_ASSERT_EQUAL_STRING("COUNTDOWN", timerMenuName(2).c_str());
     TEST_ASSERT_EQUAL_STRING("FINISH",    timerMenuName(3).c_str());
-    TEST_ASSERT_EQUAL_STRING("AUTOCLEAR", timerMenuName(4).c_str());
-    TEST_ASSERT_EQUAL_STRING("REALERT",   timerMenuName(5).c_str());
-    TEST_ASSERT_EQUAL_STRING("ICON",      timerMenuName(6).c_str());
-    TEST_ASSERT_EQUAL_STRING("BAR",       timerMenuName(7).c_str());
+    TEST_ASSERT_EQUAL_STRING("CLEAR DELAY",       timerMenuName(4).c_str());
+    TEST_ASSERT_EQUAL_STRING("RE-ALERT INTERVAL", timerMenuName(5).c_str());
+    TEST_ASSERT_EQUAL_STRING("ICON",              timerMenuName(6).c_str());
+    TEST_ASSERT_EQUAL_STRING("PROGRESS BAR",      timerMenuName(7).c_str());
     TEST_ASSERT_EQUAL_STRING("MAIN",      timerMenuName(8).c_str());
 
     // Bare values: no prefix.
@@ -2243,8 +2243,11 @@ void test_M8_enum_labels_source_from_codec(void) {
         TEST_ASSERT_EQUAL_STRING(TIMER_FINISHED_CODEC[i].menu, timerMenuValue(3).c_str());
     }
     // The codec menu column is now the BARE value (no "BZR "/"FIN " prefix).
-    TEST_ASSERT_EQUAL_STRING("END",  TIMER_BUZZER_CODEC[(int)BuzzerMode::End].menu);
-    TEST_ASSERT_EQUAL_STRING("AUTO", TIMER_FINISHED_CODEC[(int)FinishedMode::AutoClear].menu);
+    TEST_ASSERT_EQUAL_STRING("END",   TIMER_BUZZER_CODEC[(int)BuzzerMode::End].menu);
+    // FINISH on-device labels are plain language (PRD #96): auto-clear -> CLEAR,
+    // re-alert -> RE-ALERT. The wire/ha carrier columns are unchanged (ADR-0010).
+    TEST_ASSERT_EQUAL_STRING("CLEAR",    TIMER_FINISHED_CODEC[(int)FinishedMode::AutoClear].menu);
+    TEST_ASSERT_EQUAL_STRING("RE-ALERT", TIMER_FINISHED_CODEC[(int)FinishedMode::ReAlert].menu);
 }
 
 // M9 — the TIMER-menu long-press commit is ONE PersistBatch window (#45): enum

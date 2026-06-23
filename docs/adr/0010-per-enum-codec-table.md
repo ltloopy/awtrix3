@@ -98,8 +98,8 @@ This ADR consolidates only how labels/strings are **encoded**, not how values ar
 ## Addendum — the `menu` column is now the bare leaf value (PRD #83, ADR-0016)
 
 With the `TIMER` menu's drill-in rework (ADR-0016), the on-device `menu` column becomes
-the **bare** value (`OFF`/`END`/`CDN`, `AUTO`/`HOLD`/`RALT`) rather than the prefixed
-label (`BZR END`, `FIN AUTO`). In the drill-in list the item **name** (`BUZZER`,
+the **bare** value (`OFF`/`END`/`CDN`, `CLEAR`/`HOLD`/`RE-ALERT`) rather than the prefixed
+label (`BZR END`, `FIN CLEAR`). In the drill-in list the item **name** (`BUZZER`,
 `FINISH`) is shown while walking the list and the bare value only while editing the leaf,
 so the prefix is redundant. The `wire`, `ha`, and `aliases` columns are **unchanged** — no
 MQTT/HTTP/sync/HA string changes — so the B1 boundary holds. `test_T9` still asserts a

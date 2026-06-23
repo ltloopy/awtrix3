@@ -49,7 +49,7 @@ no Home Assistant or MQTT subscription required. `dev.json` keys override NVS on
 | Max duration (1–604800 s, dflt 86400) | `max_duration` ✅ | `timer_max_duration` ✅ | 👁 `config.max_duration` (raw) + `config.max_duration_str` (clock form) | 👁 attr on state sensor (raw seconds) + Duration entity (clock form) | — (caps config editor) |
 | Remaining publish interval (1–60 s, dflt 1) | `remaining_publish_interval` ✅ | `timer_remaining_publish_interval` ✅ | 👁 `config.remaining_publish_interval` | 👁 attr on remaining + state sensors (also governs sensor cadence) | — |
 | Icon enabled (dflt true) | `icon_enabled` ✅ | `timer_icon_enabled` ✅ | 👁 `config.icon_enabled` | 👁 attr on state sensor | `TIMER` menu (`ICON`) ✅ |
-| Bar enabled (dflt true) | `bar_enabled` ✅ | `timer_bar_enabled` ✅ | 👁 `config.bar_enabled` | 👁 attr on state sensor | `TIMER` menu (`BAR`) ✅ |
+| Bar enabled (dflt true) | `bar_enabled` ✅ | `timer_bar_enabled` ✅ | 👁 `config.bar_enabled` | 👁 attr on state sensor | `TIMER` menu (`PROGRESS BAR`) ✅ |
 | Bar color (hex / `#RRGGBB`, dflt 0 = text color) | `bar_color` ✅ | `timer_bar_color` ✅ | 👁 `config.bar_color` (as `"default"`/`"#RRGGBB"`) | 👁 attr on state sensor (as `"default"`/`"#RRGGBB"`) | — |
 | Tick melody (dflt `timer_tick`) | `melody_tick` ✅ | `timer_melody_tick` ✅ | 👁 `config.melody_tick` | 👁 attr on buzzer select | — |
 | End melody (dflt `timer_end`) | `melody_end` ✅ | `timer_melody_end` ✅ | 👁 `config.melody_end` | 👁 attr on buzzer select | — |
@@ -446,7 +446,7 @@ melody/color options (`TIMER_MELODY_TICK`, `TIMER_MELODY_END`,
 `POST /api/timer` / dev.json surfaces — no on-device menu, no HA *control*
 entity. The two display toggles `TIMER_ICON_ENABLED` (ADR-0005) and
 `TIMER_BAR_ENABLED` (ADR-0004) reach the timer via those same three surfaces
-**and** the on-device `TIMER` menu's `ICON` / `BAR` slots — still no HA
+**and** the on-device `TIMER` menu's `ICON` / `PROGRESS BAR` slots — still no HA
 control entity. All persist to NVS namespace `"awtrix"`; any matching `dev.json`
 key still overrides NVS on every boot. Most of these are, however, **observable**
 in HA as read-only JSON attributes on a carrier entity (PRD #57 / ADR-0014) — see
