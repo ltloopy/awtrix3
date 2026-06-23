@@ -91,6 +91,46 @@ void TimerManager_::returnToIdle()
     _overrideActive = false;
 }
 
+// Honest observation carriers (issue #101): swap the SAVED config block into live
+// storage for the duration of a carrier projection, then restore the effective
+// (one-shot) values. Only the config-block state the projections read is swapped —
+// the table inSnapshot rows (sync_* excluded by construction) and the member-backed
+// half (buzzer/finished/icons). Run-state (duration) and the resolved melody RAM are
+// not touched. No-op when no override is active.
+TimerManager_::SavedConfigScope::SavedConfigScope(const TimerManager_ &t)
+    : tm(const_cast<TimerManager_ &>(t)), active(t._overrideActive)
+{
+    if (!active) return;
+    // Stash the effective (one-shot) config block, then present the saved config.
+    timerSettingsCaptureSnapshot(effTable);
+    effBuzzer       = tm.buzzerMode;
+    effFinished     = tm.finishedMode;
+    effIconIdle     = tm.iconIdle;
+    effIconRunning  = tm.iconRunning;
+    effIconPaused   = tm.iconPaused;
+    effIconFinished = tm.iconFinished;
+
+    timerSettingsRestoreSnapshot(tm._snapTable);
+    tm.buzzerMode   = tm._snapBuzzer;
+    tm.finishedMode = tm._snapFinished;
+    tm.iconIdle     = tm._snapIconIdle;
+    tm.iconRunning  = tm._snapIconRunning;
+    tm.iconPaused   = tm._snapIconPaused;
+    tm.iconFinished = tm._snapIconFinished;
+}
+
+TimerManager_::SavedConfigScope::~SavedConfigScope()
+{
+    if (!active) return;
+    timerSettingsRestoreSnapshot(effTable);
+    tm.buzzerMode   = effBuzzer;
+    tm.finishedMode = effFinished;
+    tm.iconIdle     = effIconIdle;
+    tm.iconRunning  = effIconRunning;
+    tm.iconPaused   = effIconPaused;
+    tm.iconFinished = effIconFinished;
+}
+
 void TimerManager_::setup()
 {
     timerPrefs.begin("timer", false);
@@ -284,7 +324,12 @@ String TimerManager_::getStateJson() const
     // POST. Built in a temp doc by the pure table-walking projection, then
     // deep-copied in -- duration stays top-level only (run-state, not config).
     DynamicJsonDocument cfg(kTimerCmdJsonSize);
-    timerBuildFullConfig(cfg);
+    {
+        // During a one-shot override the `config` mirror reports the SAVED config,
+        // while the top-level run-state above stays effective (issue #101 / ADR-0015).
+        SavedConfigScope saved(*this);
+        timerBuildFullConfig(cfg);
+    }
     doc["config"] = cfg.as<JsonObject>();
 
     String out;
@@ -893,7 +938,13 @@ void TimerManager_::publishAttributeGroup(TimerHaEntity carrier)
     // 512: the state sensor's bag is the largest (eight config-view keys incl.
     // two strings), which overflows 256 on a 64-bit host (issue #59).
     DynamicJsonDocument doc(512);
-    timerBuildAttributeGroup(carrier, doc);
+    {
+        // A republish (e.g. on reconnect) during a one-shot override serializes the
+        // SAVED config, so HA attribute bags never show transient one-off values
+        // (issue #101 / ADR-0014).
+        SavedConfigScope saved(*this);
+        timerBuildAttributeGroup(carrier, doc);
+    }
     if (doc.as<JsonObjectConst>().size() == 0) return;
     String payload;
     serializeJson(doc, payload);
@@ -988,6 +1039,11 @@ void TimerManager_::buildConfigSnapshot(JsonDocument &doc) const
     // rows and TIMER_MEMBER_CONFIG_DESCS (the member-backed half, B1, ADR-0007/0009).
     // Each table also feeds the parseCommand broadcast trigger, so the snapshot can't
     // drift from what fires a broadcast.
+    // Under a one-shot override the propagated snapshot reports the SAVED config, so a
+    // follower never receives transient one-off values it has no notion of reverting
+    // (issue #101 / ADR-0006). broadcastConfig is itself suppressed during an override
+    // (issue #100), so this is also a defensive guarantee for any other caller.
+    SavedConfigScope saved(*this);
     timerSettingsBuildSnapshot(doc);
     timerMemberConfigBuildSnapshot(doc);
 }

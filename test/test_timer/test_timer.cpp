@@ -700,6 +700,70 @@ void test_OS8_save_false_suppresses_config_broadcast(void) {
 }
 
 // ============================================================================
+// Honest observation carriers under one-shot override (PRD #99 / issue #101).
+// While a save:false run is active, every observation/sync carrier keeps reporting
+// the SAVED configuration, never the one-off values; run-state stays live.
+// ============================================================================
+
+// HC1 (AC1) — GET /api/timer's `config` mirror shows the SAVED values during an
+// active override, while the top-level run-state stays effective (the live one-shot
+// duration; top-level buzzer/finished are the effective run values too).
+void test_HC1_get_config_mirror_saved_during_override(void) {
+    // saved defaults: finished_hold=10, buzzer=end, duration=300.
+    TimerManager.parseCommand(
+        "{\"duration\":900,\"finished_hold\":99,\"buzzer\":\"countdown\","
+        "\"action\":\"start\",\"save\":false}");
+
+    DynamicJsonDocument doc(2048);
+    TEST_ASSERT_FALSE(deserializeJson(doc, TimerManager.getStateJson()));
+    JsonObject config = doc["config"].as<JsonObject>();
+    TEST_ASSERT_FALSE(config.isNull());
+
+    // config mirror = SAVED values (not the one-off override).
+    TEST_ASSERT_EQUAL_UINT16(10, config["finished_hold"].as<uint16_t>());
+    TEST_ASSERT_EQUAL_STRING("end", config["buzzer"]);
+
+    // top-level run-state = EFFECTIVE (live one-shot) values.
+    TEST_ASSERT_EQUAL_UINT32(900, doc["duration"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_STRING("countdown", doc["buzzer"]);
+}
+
+// HC2 (AC3) — a Home Assistant attribute bag, republished (e.g. on reconnect) while
+// an override is active, serializes the SAVED config, not the one-off values.
+void test_HC2_ha_attribute_bag_saved_during_override(void) {
+    // saved countdown_seconds=3; a one-shot run overrides it (and buzzer).
+    TimerManager.parseCommand(
+        "{\"countdown_seconds\":25,\"buzzer\":\"countdown\",\"action\":\"start\",\"save\":false}");
+
+    MQTTManager.__test_reset();                                 // clear, then simulate a reconnect republish
+    TimerManager.publishAttributeGroup(TimerHaEntity::Buzzer);
+
+    const PublishCall *bag = fixture::last_publish(fixture::TIMER_BUZZER_ATTR_TOPIC);
+    TEST_ASSERT_NOT_NULL(bag);
+    DynamicJsonDocument doc(512);
+    TEST_ASSERT_FALSE(deserializeJson(doc, bag->payload));
+    TEST_ASSERT_EQUAL_UINT16(3, doc["countdown_seconds"].as<uint16_t>());   // saved, not the one-off 25
+}
+
+// HC3 (AC2 + AC4) — under an active override the config is NOT propagated to sync
+// followers (broadcastConfig suppressed), but run-state IS — and the run-state
+// packet carries the live one-shot duration so synced timers still start together.
+void test_HC3_runstate_propagates_config_does_not(void) {
+    TIMER_SYNC_TARGETS = "all";                                 // enable propagation
+
+    TimerManager.parseCommand(
+        "{\"duration\":900,\"finished_hold\":99,\"action\":\"start\",\"save\":false}");
+
+    // Exactly one packet: the run-state (start + one-shot duration), no config snapshot.
+    TEST_ASSERT_EQUAL_INT(1, fixture::sync_packet_count());
+    DynamicJsonDocument pkt(2048);
+    TEST_ASSERT_FALSE(deserializeJson(pkt, fixture::last_sync_payload()));
+    TEST_ASSERT_EQUAL_STRING("start", pkt["action"]);
+    TEST_ASSERT_EQUAL_UINT32(900, pkt["duration"].as<uint32_t>());   // one-shot duration reaches followers
+    TEST_ASSERT_FALSE(pkt.containsKey("finished_hold"));             // config did not propagate
+}
+
+// ============================================================================
 // U22 (M1) — parseCommand while in config: drop partial edit, drain deferred,
 // accept command. The partial edit must NOT be committed to durationSec.
 // ============================================================================
@@ -3746,6 +3810,9 @@ int main(int, char **) {
     RUN_TEST(test_OS6_non_boolean_save_atomic_reject);
     RUN_TEST(test_OS7_save_false_action_duration_harmless);
     RUN_TEST(test_OS8_save_false_suppresses_config_broadcast);
+    RUN_TEST(test_HC1_get_config_mirror_saved_during_override);
+    RUN_TEST(test_HC2_ha_attribute_bag_saved_during_override);
+    RUN_TEST(test_HC3_runstate_propagates_config_does_not);
     RUN_TEST(test_U22_parseCommand_aborts_config_without_committing_edit);
     RUN_TEST(test_U23_formatHMS_trimmed);
     RUN_TEST(test_U24_parseHMS_accepts);
