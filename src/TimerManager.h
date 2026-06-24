@@ -90,6 +90,29 @@ private:
     void restoreSnapshot();   // write the snapshot back (no publish/persist side effects)
     void returnToIdle();      // revert seam shared by reset() and the tick auto-clear transition
 
+    // Honest observation carriers (issue #101). RAII: while an override is active,
+    // present the SAVED config block (table inSnapshot rows + member-backed half) in
+    // live storage so a carrier projection reads saved values, then restore the
+    // effective (one-shot) values on scope exit. No-op when no override is active.
+    // The const_cast is sound — the singleton is non-const and the swap is fully
+    // reverted, so wrapping a const projection method stays observably const. Run-state
+    // (duration) and sync_* (inSnapshot=false) are intentionally untouched.
+    class SavedConfigScope
+    {
+    public:
+        explicit SavedConfigScope(const TimerManager_ &t);
+        ~SavedConfigScope();
+        SavedConfigScope(const SavedConfigScope &) = delete;
+        SavedConfigScope &operator=(const SavedConfigScope &) = delete;
+    private:
+        TimerManager_ &tm;
+        bool           active;
+        TcValue        effTable[TIMER_SETTINGS_DESC_CAP];
+        BuzzerMode     effBuzzer     = BuzzerMode::End;
+        FinishedMode   effFinished   = FinishedMode::AutoClear;
+        String         effIconIdle, effIconRunning, effIconPaused, effIconFinished;
+    };
+
     void buildConfigSnapshot(JsonDocument &doc) const;   // config keys only; no action/duration/sync_*
     void addSyncEnvelope(JsonObject &sync);              // src/seq/tgt
     bool syncTargetsMe(JsonVariantConst tgt) const;      // does _sync.tgt cover this clock's uniqueID?

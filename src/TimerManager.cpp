@@ -91,6 +91,46 @@ void TimerManager_::returnToIdle()
     _overrideActive = false;
 }
 
+// Honest observation carriers (issue #101): swap the SAVED config block into live
+// storage for the duration of a carrier projection, then restore the effective
+// (one-shot) values. Only the config-block state the projections read is swapped —
+// the table inSnapshot rows (sync_* excluded by construction) and the member-backed
+// half (buzzer/finished/icons). Run-state (duration) and the resolved melody RAM are
+// not touched. No-op when no override is active.
+TimerManager_::SavedConfigScope::SavedConfigScope(const TimerManager_ &t)
+    : tm(const_cast<TimerManager_ &>(t)), active(t._overrideActive)
+{
+    if (!active) return;
+    // Stash the effective (one-shot) config block, then present the saved config.
+    timerSettingsCaptureSnapshot(effTable);
+    effBuzzer       = tm.buzzerMode;
+    effFinished     = tm.finishedMode;
+    effIconIdle     = tm.iconIdle;
+    effIconRunning  = tm.iconRunning;
+    effIconPaused   = tm.iconPaused;
+    effIconFinished = tm.iconFinished;
+
+    timerSettingsRestoreSnapshot(tm._snapTable);
+    tm.buzzerMode   = tm._snapBuzzer;
+    tm.finishedMode = tm._snapFinished;
+    tm.iconIdle     = tm._snapIconIdle;
+    tm.iconRunning  = tm._snapIconRunning;
+    tm.iconPaused   = tm._snapIconPaused;
+    tm.iconFinished = tm._snapIconFinished;
+}
+
+TimerManager_::SavedConfigScope::~SavedConfigScope()
+{
+    if (!active) return;
+    timerSettingsRestoreSnapshot(effTable);
+    tm.buzzerMode   = effBuzzer;
+    tm.finishedMode = effFinished;
+    tm.iconIdle     = effIconIdle;
+    tm.iconRunning  = effIconRunning;
+    tm.iconPaused   = effIconPaused;
+    tm.iconFinished = effIconFinished;
+}
+
 void TimerManager_::setup()
 {
     timerPrefs.begin("timer", false);
@@ -284,7 +324,12 @@ String TimerManager_::getStateJson() const
     // POST. Built in a temp doc by the pure table-walking projection, then
     // deep-copied in -- duration stays top-level only (run-state, not config).
     DynamicJsonDocument cfg(kTimerCmdJsonSize);
-    timerBuildFullConfig(cfg);
+    {
+        // During a one-shot override the `config` mirror reports the SAVED config,
+        // while the top-level run-state above stays effective (issue #101 / ADR-0015).
+        SavedConfigScope saved(*this);
+        timerBuildFullConfig(cfg);
+    }
     doc["config"] = cfg.as<JsonObject>();
 
     String out;
@@ -647,6 +692,15 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     // is range-defining for duration: capture its staged value so a payload that raises
     // the ceiling and sets a duration within it in the same call is accepted atomically
     // (ADR-0001 addendum).
+    // Inline RTTTL melodies (PRD #99 / issue #102): melody_end/melody_tick accept
+    // EITHER a bare file-name token (the normal table path below) OR an inline tune
+    // (detected by content). An inline tune is validated as RTTTL here, staged into
+    // RAM, and the table row is excluded from the bare-name store — the saved melody
+    // name global is never touched. An inline tune is always one-shot (it has no
+    // persistable file form), so its presence forces the command one-shot.
+    String inlineEnd, inlineTick;
+    bool   haveInlineEnd = false, haveInlineTick = false;
+
     TcValue  tableStaged[TIMER_SETTINGS_DESC_COUNT];
     bool     tablePresent[TIMER_SETTINGS_DESC_COUNT];
     uint32_t effectiveMaxDuration = TIMER_MAX_DURATION;
@@ -655,6 +709,21 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
         const TimerSettingDesc &d = TIMER_SETTINGS_DESCS[i];
         tablePresent[i] = doc.containsKey(d.cmdKey);
         if (!tablePresent[i]) continue;
+
+        bool isMelodyKey = (strcmp(d.cmdKey, "melody_end") == 0 || strcmp(d.cmdKey, "melody_tick") == 0);
+        if (isMelodyKey)
+        {
+            String mv = doc[d.cmdKey].as<String>();
+            if (timerMelodyIsInline(mv))
+            {
+                if (!timerMelodyValidateInline(mv)) return TimerCmdResult::BadField;
+                if (strcmp(d.cmdKey, "melody_end") == 0) { inlineEnd = mv;  haveInlineEnd = true; }
+                else                                     { inlineTick = mv; haveInlineTick = true; }
+                tablePresent[i] = false;   // excluded from the bare-name parse/store/snapshot
+                continue;
+            }
+        }
+
         if (!timerSettingParse(d, doc[d.cmdKey], tableStaged[i])) return TimerCmdResult::BadField;
         if (strcmp(d.cmdKey, "max_duration") == 0) effectiveMaxDuration = tableStaged[i].num;
     }
@@ -708,7 +777,9 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
         if (!sv.is<bool>()) return TimerCmdResult::BadField;
         saveFlag = sv.as<bool>();
     }
-    bool oneShot = !saveFlag;
+    // An inline melody (issue #102) is always one-shot, so its presence forces the
+    // whole command one-shot regardless of `save` — it has no persistable file form.
+    bool oneShot = !saveFlag || haveInlineEnd || haveInlineTick;
 
     // -- Command is known-good: only now disturb device state. --
     if (configEditor.isActive())
@@ -757,6 +828,12 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     }
 
     if (melodyChanged) loadMelodiesCached();
+    // Inline melodies (issue #102): use the tune directly as the resolved RAM, after
+    // any bare-name re-resolve above so it wins. The saved name globals are untouched,
+    // so the config mirror keeps showing the saved name; the snapshot captured the
+    // saved-resolved RAM, so returnToIdle() reverts these on return to Idle.
+    if (haveInlineEnd)  endRtttl  = inlineEnd;
+    if (haveInlineTick) tickRtttl = inlineTick;
 
     // configInCommand: this payload carries a config-block key (table inSnapshot half
     // OR the member-backed half). Drives both the rebaseline trigger and the config
@@ -893,7 +970,13 @@ void TimerManager_::publishAttributeGroup(TimerHaEntity carrier)
     // 512: the state sensor's bag is the largest (eight config-view keys incl.
     // two strings), which overflows 256 on a 64-bit host (issue #59).
     DynamicJsonDocument doc(512);
-    timerBuildAttributeGroup(carrier, doc);
+    {
+        // A republish (e.g. on reconnect) during a one-shot override serializes the
+        // SAVED config, so HA attribute bags never show transient one-off values
+        // (issue #101 / ADR-0014).
+        SavedConfigScope saved(*this);
+        timerBuildAttributeGroup(carrier, doc);
+    }
     if (doc.as<JsonObjectConst>().size() == 0) return;
     String payload;
     serializeJson(doc, payload);
@@ -988,6 +1071,11 @@ void TimerManager_::buildConfigSnapshot(JsonDocument &doc) const
     // rows and TIMER_MEMBER_CONFIG_DESCS (the member-backed half, B1, ADR-0007/0009).
     // Each table also feeds the parseCommand broadcast trigger, so the snapshot can't
     // drift from what fires a broadcast.
+    // Under a one-shot override the propagated snapshot reports the SAVED config, so a
+    // follower never receives transient one-off values it has no notion of reverting
+    // (issue #101 / ADR-0006). broadcastConfig is itself suppressed during an override
+    // (issue #100), so this is also a defensive guarantee for any other caller.
+    SavedConfigScope saved(*this);
     timerSettingsBuildSnapshot(doc);
     timerMemberConfigBuildSnapshot(doc);
 }

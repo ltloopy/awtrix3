@@ -700,6 +700,204 @@ void test_OS8_save_false_suppresses_config_broadcast(void) {
 }
 
 // ============================================================================
+// Honest observation carriers under one-shot override (PRD #99 / issue #101).
+// While a save:false run is active, every observation/sync carrier keeps reporting
+// the SAVED configuration, never the one-off values; run-state stays live.
+// ============================================================================
+
+// HC1 (AC1) — GET /api/timer's `config` mirror shows the SAVED values during an
+// active override, while the top-level run-state stays effective (the live one-shot
+// duration; top-level buzzer/finished are the effective run values too).
+void test_HC1_get_config_mirror_saved_during_override(void) {
+    // saved defaults: finished_hold=10, buzzer=end, duration=300.
+    TimerManager.parseCommand(
+        "{\"duration\":900,\"finished_hold\":99,\"buzzer\":\"countdown\","
+        "\"action\":\"start\",\"save\":false}");
+
+    DynamicJsonDocument doc(2048);
+    TEST_ASSERT_FALSE(deserializeJson(doc, TimerManager.getStateJson()));
+    JsonObject config = doc["config"].as<JsonObject>();
+    TEST_ASSERT_FALSE(config.isNull());
+
+    // config mirror = SAVED values (not the one-off override).
+    TEST_ASSERT_EQUAL_UINT16(10, config["finished_hold"].as<uint16_t>());
+    TEST_ASSERT_EQUAL_STRING("end", config["buzzer"]);
+
+    // top-level run-state = EFFECTIVE (live one-shot) values.
+    TEST_ASSERT_EQUAL_UINT32(900, doc["duration"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_STRING("countdown", doc["buzzer"]);
+}
+
+// HC2 (AC3) — a Home Assistant attribute bag, republished (e.g. on reconnect) while
+// an override is active, serializes the SAVED config, not the one-off values.
+void test_HC2_ha_attribute_bag_saved_during_override(void) {
+    // saved countdown_seconds=3; a one-shot run overrides it (and buzzer).
+    TimerManager.parseCommand(
+        "{\"countdown_seconds\":25,\"buzzer\":\"countdown\",\"action\":\"start\",\"save\":false}");
+
+    MQTTManager.__test_reset();                                 // clear, then simulate a reconnect republish
+    TimerManager.publishAttributeGroup(TimerHaEntity::Buzzer);
+
+    const PublishCall *bag = fixture::last_publish(fixture::TIMER_BUZZER_ATTR_TOPIC);
+    TEST_ASSERT_NOT_NULL(bag);
+    DynamicJsonDocument doc(512);
+    TEST_ASSERT_FALSE(deserializeJson(doc, bag->payload));
+    TEST_ASSERT_EQUAL_UINT16(3, doc["countdown_seconds"].as<uint16_t>());   // saved, not the one-off 25
+}
+
+// HC3 (AC2 + AC4) — under an active override the config is NOT propagated to sync
+// followers (broadcastConfig suppressed), but run-state IS — and the run-state
+// packet carries the live one-shot duration so synced timers still start together.
+void test_HC3_runstate_propagates_config_does_not(void) {
+    TIMER_SYNC_TARGETS = "all";                                 // enable propagation
+
+    TimerManager.parseCommand(
+        "{\"duration\":900,\"finished_hold\":99,\"action\":\"start\",\"save\":false}");
+
+    // Exactly one packet: the run-state (start + one-shot duration), no config snapshot.
+    TEST_ASSERT_EQUAL_INT(1, fixture::sync_packet_count());
+    DynamicJsonDocument pkt(2048);
+    TEST_ASSERT_FALSE(deserializeJson(pkt, fixture::last_sync_payload()));
+    TEST_ASSERT_EQUAL_STRING("start", pkt["action"]);
+    TEST_ASSERT_EQUAL_UINT32(900, pkt["duration"].as<uint32_t>());   // one-shot duration reaches followers
+    TEST_ASSERT_FALSE(pkt.containsKey("finished_hold"));             // config did not propagate
+}
+
+// ============================================================================
+// Inline RTTTL melodies on melody_end / melody_tick (PRD #99 / issue #102).
+// A melody key accepts either a bare saved file-name token (as today) or an inline
+// RTTTL tune; an inline tune is always one-shot, played for the run only and never
+// written to flash, and never appears in the config mirror or HA bags.
+// ============================================================================
+
+// IM1 (AC1) — the pure RTTTL classifier/validator: bare-name vs inline detection,
+// valid vs invalid inline syntax, and the edge cases (colons, empty, oversize).
+void test_IM1_rtttl_classifier_and_validator(void) {
+    // Classifier: bare file-name tokens are NOT inline (no colon).
+    TEST_ASSERT_FALSE(timerMelodyIsInline("timer_end"));
+    TEST_ASSERT_FALSE(timerMelodyIsInline("alarm-1"));
+    TEST_ASSERT_FALSE(timerMelodyIsInline(""));                       // empty = bare (reset-to-default)
+    // Classifier: anything carrying a colon is treated as an inline tune.
+    TEST_ASSERT_TRUE(timerMelodyIsInline("alarm:d=4,o=5,b=120:c,e,g"));
+    TEST_ASSERT_TRUE(timerMelodyIsInline(":d=4,o=5,b=120:c"));        // empty name still inline
+    TEST_ASSERT_TRUE(timerMelodyIsInline("alarm:c,e,g"));             // malformed but inline-intent
+
+    // Validator: well-formed inline tunes pass.
+    TEST_ASSERT_TRUE(timerMelodyValidateInline("alarm:d=4,o=5,b=120:c,e,g"));
+    TEST_ASSERT_TRUE(timerMelodyValidateInline("x:b=120:c"));         // minimal control section
+    TEST_ASSERT_TRUE(timerMelodyValidateInline(":d=4,o=5,b=120:c"));  // empty name allowed
+
+    // Validator: malformed inline tunes fail.
+    TEST_ASSERT_FALSE(timerMelodyValidateInline("alarm:c,e,g"));      // only one colon
+    TEST_ASSERT_FALSE(timerMelodyValidateInline("alarm::"));          // empty control + notes
+    TEST_ASSERT_FALSE(timerMelodyValidateInline("alarm::c"));         // empty control section
+    TEST_ASSERT_FALSE(timerMelodyValidateInline("alarm:d=4,o=5,b=120:")); // empty notes section
+    TEST_ASSERT_FALSE(timerMelodyValidateInline("alarm:foo=4:c"));    // control without d/o/b
+    TEST_ASSERT_FALSE(timerMelodyValidateInline("a:b:c:d"));          // three colons
+
+    // Validator: oversize is rejected.
+    String big = "x:d=4,o=5,b=120:";
+    for (int i = 0; i < 300; i++) big += "c,";
+    TEST_ASSERT_FALSE(timerMelodyValidateInline(big));
+}
+
+// IM2 (AC2) — an inline melody_end plays for the run, never overwrites the saved
+// bare name, writes nothing to flash, and reverts on return to Idle (the next run
+// uses the saved melody again).
+void test_IM2_inline_melody_end_plays_reverts_no_persist(void) {
+    const char *tune = "alarm:d=4,o=5,b=120:c,e,g";
+    saveSettings_calls = 0;
+    int begin_before = Preferences::begin_calls;
+
+    String cmd = String("{\"duration\":1,\"melody_end\":\"") + tune + "\",\"action\":\"start\"}";
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand(cmd.c_str())));
+
+    TEST_ASSERT_EQUAL_STRING("timer_end", TIMER_MELODY_END.c_str());    // saved name not overwritten
+    TEST_ASSERT_EQUAL_INT(0, saveSettings_calls);                       // one-shot: no "awtrix" flush
+    TEST_ASSERT_EQUAL_INT(0, Preferences::begin_calls - begin_before);  // one-shot: no "timer" flush
+
+    // Run to finish -> enterFinished plays the resolved end melody (the inline tune).
+    PeripheryManager.__test_reset();
+    fixture::advance(1000);
+    TimerManager.tick();
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Finished),
+                      static_cast<int>(TimerManager.getState()));
+    bool playedInline = false;
+    for (auto &p : PeripheryManager.play_calls) if (p == String(tune)) playedInline = true;
+    TEST_ASSERT_TRUE(playedInline);
+
+    // Revert on Idle: the next run plays the SAVED melody, not the inline tune.
+    TimerManager.reset();
+    PeripheryManager.__test_reset();
+    TimerManager.setDuration(1);
+    TimerManager.start();
+    fixture::advance(1000);
+    TimerManager.tick();
+    bool inlineCarriedOver = false;
+    for (auto &p : PeripheryManager.play_calls) if (p == String(tune)) inlineCarriedOver = true;
+    TEST_ASSERT_FALSE(inlineCarriedOver);
+}
+
+// IM3 (AC3) — an inline melody_tick plays during the countdown for the run only and
+// never persists.
+void test_IM3_inline_melody_tick_plays_no_persist(void) {
+    const char *tune = "beep:d=16,o=6,b=200:c,c";
+    saveSettings_calls = 0;
+
+    String cmd = String("{\"duration\":5,\"melody_tick\":\"") + tune +
+                 "\",\"buzzer\":\"countdown\",\"countdown_seconds\":5,\"action\":\"start\"}";
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand(cmd.c_str())));
+
+    TEST_ASSERT_EQUAL_STRING("timer_tick", TIMER_MELODY_TICK.c_str());  // saved name not overwritten
+    TEST_ASSERT_EQUAL_INT(0, saveSettings_calls);                       // one-shot: no flush
+
+    // Advance one second into the countdown window -> plays the inline tick tune.
+    PeripheryManager.__test_reset();
+    PeripheryManager.__test_set_playing(false);
+    fixture::advance(1000);
+    TimerManager.tick();
+    bool played = false;
+    for (auto &p : PeripheryManager.play_calls) if (p == String(tune)) played = true;
+    TEST_ASSERT_TRUE(played);
+}
+
+// IM4 (AC4) — a bare file-name token still resolves and persists exactly as before.
+void test_IM4_bare_melody_name_still_persists(void) {
+    saveSettings_calls = 0;
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"melody_end\":\"custom_alarm\"}")));
+    TEST_ASSERT_EQUAL_STRING("custom_alarm", TIMER_MELODY_END.c_str()); // stored to the name global
+    TEST_ASSERT_GREATER_THAN_INT(0, saveSettings_calls);               // persisted (save:true default)
+}
+
+// IM5 (AC5) — an inline tune never appears in the GET config mirror; the mirror
+// shows the SAVED bare melody name throughout the inline-melody override.
+void test_IM5_inline_never_in_config_mirror(void) {
+    const char *tune = "alarm:d=4,o=5,b=120:c,e,g";
+    String cmd = String("{\"melody_end\":\"") + tune + "\",\"action\":\"start\",\"save\":false}";
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand(cmd.c_str())));
+
+    DynamicJsonDocument doc(2048);
+    TEST_ASSERT_FALSE(deserializeJson(doc, TimerManager.getStateJson()));
+    JsonObject config = doc["config"].as<JsonObject>();
+    TEST_ASSERT_EQUAL_STRING("timer_end", config["melody_end"]);       // saved name, never the tune
+}
+
+// IM6 (AC6) — a malformed inline RTTTL rejects the whole payload atomically; no
+// sibling field is applied.
+void test_IM6_malformed_inline_atomic_reject(void) {
+    // ':' present (inline-classified) but only one colon -> malformed.
+    TimerCmdResult r = TimerManager.parseCommand(
+        "{\"finished_hold\":50,\"melody_end\":\"alarm:c,e,g\"}");
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField), static_cast<int>(r));
+    TEST_ASSERT_EQUAL_UINT16(10, TIMER_FINISHED_HOLD);                  // sibling not applied (atomic)
+    TEST_ASSERT_EQUAL_STRING("timer_end", TIMER_MELODY_END.c_str());    // melody unchanged
+}
+
+// ============================================================================
 // U22 (M1) — parseCommand while in config: drop partial edit, drain deferred,
 // accept command. The partial edit must NOT be committed to durationSec.
 // ============================================================================
@@ -3746,6 +3944,15 @@ int main(int, char **) {
     RUN_TEST(test_OS6_non_boolean_save_atomic_reject);
     RUN_TEST(test_OS7_save_false_action_duration_harmless);
     RUN_TEST(test_OS8_save_false_suppresses_config_broadcast);
+    RUN_TEST(test_HC1_get_config_mirror_saved_during_override);
+    RUN_TEST(test_HC2_ha_attribute_bag_saved_during_override);
+    RUN_TEST(test_HC3_runstate_propagates_config_does_not);
+    RUN_TEST(test_IM1_rtttl_classifier_and_validator);
+    RUN_TEST(test_IM2_inline_melody_end_plays_reverts_no_persist);
+    RUN_TEST(test_IM3_inline_melody_tick_plays_no_persist);
+    RUN_TEST(test_IM4_bare_melody_name_still_persists);
+    RUN_TEST(test_IM5_inline_never_in_config_mirror);
+    RUN_TEST(test_IM6_malformed_inline_atomic_reject);
     RUN_TEST(test_U22_parseCommand_aborts_config_without_committing_edit);
     RUN_TEST(test_U23_formatHMS_trimmed);
     RUN_TEST(test_U24_parseHMS_accepts);
