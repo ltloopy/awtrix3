@@ -129,6 +129,11 @@ const TimerSettingDesc TIMER_SETTINGS_DESCS[] = {
 
 const size_t TIMER_SETTINGS_DESC_COUNT = sizeof(TIMER_SETTINGS_DESCS) / sizeof(TIMER_SETTINGS_DESCS[0]);
 
+// The header's compile-time extent (used to size the one-shot snapshot buffer) must
+// match the actual table. If a row is added, bump TIMER_SETTINGS_DESC_CAP.
+static_assert(sizeof(TIMER_SETTINGS_DESCS) / sizeof(TIMER_SETTINGS_DESCS[0]) == TIMER_SETTINGS_DESC_CAP,
+              "TIMER_SETTINGS_DESC_CAP must equal the descriptor row count");
+
 bool timerSettingParse(const TimerSettingDesc &d, JsonVariantConst v, TcValue &out)
 {
     if (d.bespoke) return d.bespoke(v, out);
@@ -265,12 +270,95 @@ void timerSettingsBuildSnapshot(JsonDocument &doc)
     }
 }
 
+void timerSettingsCaptureSnapshot(TcValue out[])
+{
+    for (size_t i = 0; i < TIMER_SETTINGS_DESC_COUNT; ++i)
+    {
+        const TimerSettingDesc &d = TIMER_SETTINGS_DESCS[i];
+        if (!d.inSnapshot) continue;   // sync_* (local identity) excluded by construction
+        switch (d.type)
+        {
+            case TcType::U16:  out[i].num = *static_cast<uint16_t *>(d.storage); break;
+            case TcType::U32:  out[i].num = *static_cast<uint32_t *>(d.storage); break;
+            case TcType::Bool: out[i].b   = *static_cast<bool *>    (d.storage); break;
+            case TcType::Str:  out[i].str = *static_cast<String *>  (d.storage); break;
+        }
+    }
+}
+
+void timerSettingsRestoreSnapshot(const TcValue in[])
+{
+    for (size_t i = 0; i < TIMER_SETTINGS_DESC_COUNT; ++i)
+    {
+        const TimerSettingDesc &d = TIMER_SETTINGS_DESCS[i];
+        if (!d.inSnapshot) continue;
+        timerSettingStore(d, in[i]);   // dispatch-by-type write; equality-skip return ignored
+    }
+}
+
 const TimerSettingDesc *timerSettingByCmdKey(const char *cmdKey)
 {
     for (size_t i = 0; i < TIMER_SETTINGS_DESC_COUNT; ++i)
         if (strcmp(TIMER_SETTINGS_DESCS[i].cmdKey, cmdKey) == 0)
             return &TIMER_SETTINGS_DESCS[i];
     return nullptr;
+}
+
+// Inline RTTTL classifier/validator (issue #102). Pure, no globals touched.
+namespace
+{
+    // RTTTL tunes for a single timer alarm/tick are short; cap so a pathological
+    // payload can't bloat the one-shot run state.
+    constexpr size_t kInlineRtttlMaxLen = 256;
+
+    // True iff the comma-separated control section carries at least one RTTTL default
+    // token -- a token whose key is exactly d/o/b (duration/octave/beat). Checks the
+    // token PREFIX (not a substring), so "foo=4" is not mistaken for an "o=" default.
+    bool controlHasDefaultToken(const String &control)
+    {
+        int start = 0;
+        const int n = control.length();
+        while (start <= n)
+        {
+            int comma = control.indexOf(',', start);
+            if (comma < 0) comma = n;
+            String tok = control.substring(start, comma);
+            tok.trim();
+            tok.toLowerCase();
+            if (tok.startsWith("d=") || tok.startsWith("o=") || tok.startsWith("b=")) return true;
+            if (comma == n) break;
+            start = comma + 1;
+        }
+        return false;
+    }
+}
+
+bool timerMelodyIsInline(const String &s)
+{
+    // A bare melody file-name token is [A-Za-z0-9_-]* and never contains a colon;
+    // an inline RTTTL tune always carries ':' separators. Content is the only signal.
+    return s.indexOf(':') >= 0;
+}
+
+bool timerMelodyValidateInline(const String &s)
+{
+    if (s.length() == 0 || s.length() > kInlineRtttlMaxLen) return false;
+
+    // RTTTL is name:control:notes -- exactly two colons (name may be empty).
+    int c1 = s.indexOf(':');
+    if (c1 < 0) return false;
+    int c2 = s.indexOf(':', c1 + 1);
+    if (c2 < 0) return false;
+    if (s.indexOf(':', c2 + 1) >= 0) return false;   // a third colon is malformed
+
+    String control = s.substring(c1 + 1, c2);
+    String notes   = s.substring(c2 + 1);
+    if (control.length() == 0 || notes.length() == 0) return false;
+
+    // The control section must carry at least one RTTTL default token (d=/o=/b=).
+    if (!controlHasDefaultToken(control)) return false;
+
+    return true;
 }
 
 // ---------------------------------------------------------------------------

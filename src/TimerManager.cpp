@@ -46,6 +46,91 @@ void TimerManager_::loadMelodiesCached()
     tickRtttl = PeripheryManager.resolveRtttl(tickName, FALLBACK_TICK_RTTTL);
 }
 
+// One-shot override (PRD #99 / issue #100). captureSnapshot records the SAVED config
+// before a save:false command applies on top of it; restoreSnapshot writes it back
+// when the timer returns to Idle. The table half (Family A inSnapshot rows) is captured
+// generically over TIMER_SETTINGS_DESCS; the member-backed half (Family B) plus the
+// run-state duration and the resolved melody RAM are TimerManager's own members, so they
+// are captured/restored directly. Restore writes members directly (no setter), so it
+// triggers no persist/publish side effects — carriers reported saved values throughout.
+void TimerManager_::captureSnapshot()
+{
+    timerSettingsCaptureSnapshot(_snapTable);
+    _snapBuzzer       = buzzerMode;
+    _snapFinished     = finishedMode;
+    _snapIconIdle     = iconIdle;
+    _snapIconRunning  = iconRunning;
+    _snapIconPaused   = iconPaused;
+    _snapIconFinished = iconFinished;
+    _snapDuration     = durationSec;
+    _snapEndRtttl     = endRtttl;
+    _snapTickRtttl    = tickRtttl;
+}
+
+void TimerManager_::restoreSnapshot()
+{
+    timerSettingsRestoreSnapshot(_snapTable);
+    buzzerMode    = _snapBuzzer;
+    finishedMode  = _snapFinished;
+    iconIdle      = _snapIconIdle;
+    iconRunning   = _snapIconRunning;
+    iconPaused    = _snapIconPaused;
+    iconFinished  = _snapIconFinished;
+    durationSec   = _snapDuration;
+    endRtttl      = _snapEndRtttl;
+    tickRtttl     = _snapTickRtttl;
+}
+
+// The single revert seam shared by reset() and the tick auto-clear transition: if a
+// one-shot override is active, restore the saved config and clear the flag. A no-op
+// otherwise, so the normal return-to-Idle paths are unaffected.
+void TimerManager_::returnToIdle()
+{
+    if (!_overrideActive) return;
+    restoreSnapshot();
+    _overrideActive = false;
+}
+
+// Honest observation carriers (issue #101): swap the SAVED config block into live
+// storage for the duration of a carrier projection, then restore the effective
+// (one-shot) values. Only the config-block state the projections read is swapped —
+// the table inSnapshot rows (sync_* excluded by construction) and the member-backed
+// half (buzzer/finished/icons). Run-state (duration) and the resolved melody RAM are
+// not touched. No-op when no override is active.
+TimerManager_::SavedConfigScope::SavedConfigScope(const TimerManager_ &t)
+    : tm(const_cast<TimerManager_ &>(t)), active(t._overrideActive)
+{
+    if (!active) return;
+    // Stash the effective (one-shot) config block, then present the saved config.
+    timerSettingsCaptureSnapshot(effTable);
+    effBuzzer       = tm.buzzerMode;
+    effFinished     = tm.finishedMode;
+    effIconIdle     = tm.iconIdle;
+    effIconRunning  = tm.iconRunning;
+    effIconPaused   = tm.iconPaused;
+    effIconFinished = tm.iconFinished;
+
+    timerSettingsRestoreSnapshot(tm._snapTable);
+    tm.buzzerMode   = tm._snapBuzzer;
+    tm.finishedMode = tm._snapFinished;
+    tm.iconIdle     = tm._snapIconIdle;
+    tm.iconRunning  = tm._snapIconRunning;
+    tm.iconPaused   = tm._snapIconPaused;
+    tm.iconFinished = tm._snapIconFinished;
+}
+
+TimerManager_::SavedConfigScope::~SavedConfigScope()
+{
+    if (!active) return;
+    timerSettingsRestoreSnapshot(effTable);
+    tm.buzzerMode   = effBuzzer;
+    tm.finishedMode = effFinished;
+    tm.iconIdle     = effIconIdle;
+    tm.iconRunning  = effIconRunning;
+    tm.iconPaused   = effIconPaused;
+    tm.iconFinished = effIconFinished;
+}
+
 void TimerManager_::setup()
 {
     timerPrefs.begin("timer", false);
@@ -239,7 +324,12 @@ String TimerManager_::getStateJson() const
     // POST. Built in a temp doc by the pure table-walking projection, then
     // deep-copied in -- duration stays top-level only (run-state, not config).
     DynamicJsonDocument cfg(kTimerCmdJsonSize);
-    timerBuildFullConfig(cfg);
+    {
+        // During a one-shot override the `config` mirror reports the SAVED config,
+        // while the top-level run-state above stays effective (issue #101 / ADR-0015).
+        SavedConfigScope saved(*this);
+        timerBuildFullConfig(cfg);
+    }
     doc["config"] = cfg.as<JsonObject>();
 
     String out;
@@ -450,6 +540,7 @@ void TimerManager_::pause()
 void TimerManager_::reset()
 {
     PeripheryManager.stopSound();
+    returnToIdle();                 // one-shot: restore saved config before deriving remaining (issue #100)
     state = TimerState::Idle;
     remainingSec = durationSec;
     publishState();
@@ -553,6 +644,7 @@ void TimerManager_::tick()
             && (now - enteredFinishedMs >= (unsigned long)TIMER_FINISHED_HOLD * 1000UL))
         {
             PeripheryManager.stopSound();
+            returnToIdle();             // one-shot: restore saved config (shared seam, issue #100)
             state = TimerState::Idle;
             remainingSec = durationSec;
             publishState();
@@ -600,6 +692,15 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     // is range-defining for duration: capture its staged value so a payload that raises
     // the ceiling and sets a duration within it in the same call is accepted atomically
     // (ADR-0001 addendum).
+    // Inline RTTTL melodies (PRD #99 / issue #102): melody_end/melody_tick accept
+    // EITHER a bare file-name token (the normal table path below) OR an inline tune
+    // (detected by content). An inline tune is validated as RTTTL here, staged into
+    // RAM, and the table row is excluded from the bare-name store — the saved melody
+    // name global is never touched. An inline tune is always one-shot (it has no
+    // persistable file form), so its presence forces the command one-shot.
+    String inlineEnd, inlineTick;
+    bool   haveInlineEnd = false, haveInlineTick = false;
+
     TcValue  tableStaged[TIMER_SETTINGS_DESC_COUNT];
     bool     tablePresent[TIMER_SETTINGS_DESC_COUNT];
     uint32_t effectiveMaxDuration = TIMER_MAX_DURATION;
@@ -608,6 +709,21 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
         const TimerSettingDesc &d = TIMER_SETTINGS_DESCS[i];
         tablePresent[i] = doc.containsKey(d.cmdKey);
         if (!tablePresent[i]) continue;
+
+        bool isMelodyKey = (strcmp(d.cmdKey, "melody_end") == 0 || strcmp(d.cmdKey, "melody_tick") == 0);
+        if (isMelodyKey)
+        {
+            String mv = doc[d.cmdKey].as<String>();
+            if (timerMelodyIsInline(mv))
+            {
+                if (!timerMelodyValidateInline(mv)) return TimerCmdResult::BadField;
+                if (strcmp(d.cmdKey, "melody_end") == 0) { inlineEnd = mv;  haveInlineEnd = true; }
+                else                                     { inlineTick = mv; haveInlineTick = true; }
+                tablePresent[i] = false;   // excluded from the bare-name parse/store/snapshot
+                continue;
+            }
+        }
+
         if (!timerSettingParse(d, doc[d.cmdKey], tableStaged[i])) return TimerCmdResult::BadField;
         if (strcmp(d.cmdKey, "max_duration") == 0) effectiveMaxDuration = tableStaged[i].num;
     }
@@ -650,6 +766,21 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     bool haveAction = doc.containsKey("action");
     if (haveAction && !isValidAction(doc["action"].as<String>())) return TimerCmdResult::BadField;
 
+    // One-shot flag (PRD #99 / issue #100): a payload-level boolean, default true.
+    // A non-boolean rejects the whole command (atomic-reject, ADR-0001). save:false
+    // makes this command one-shot — its config applies to the current run only and
+    // reverts when the timer next returns to Idle (see the override block below).
+    bool saveFlag = true;
+    if (doc.containsKey("save"))
+    {
+        JsonVariantConst sv = doc["save"];
+        if (!sv.is<bool>()) return TimerCmdResult::BadField;
+        saveFlag = sv.as<bool>();
+    }
+    // An inline melody (issue #102) is always one-shot, so its presence forces the
+    // whole command one-shot regardless of `save` — it has no persistable file form.
+    bool oneShot = !saveFlag || haveInlineEnd || haveInlineTick;
+
     // -- Command is known-good: only now disturb device state. --
     if (configEditor.isActive())
     {
@@ -668,10 +799,21 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     //    it (ADR-0001 addendum). Then duration (run-state, B1; applied before any
     //    member-config side effects), then the member-backed applies via their
     //    publish-aware setters. --
+    // One-shot override (issue #100): before applying, snapshot the saved config so
+    // returnToIdle() can restore it. Only the first save:false in a run captures
+    // (latest-command-wins, single snapshot); a later save:false applies on top of
+    // the same baseline.
+    if (oneShot && !_overrideActive)
+    {
+        captureSnapshot();
+        _overrideActive = true;
+    }
+
     bool snapshotChanged = false;   // any config-block (inSnapshot) table key -> broadcastConfig()
     bool melodyChanged   = false;
     {
         PersistBatch batch(*this);
+        if (oneShot) batch.setTransient();   // one-shot: scope exit writes nothing to flash
         for (size_t i = 0; i < TIMER_SETTINGS_DESC_COUNT; ++i)
         {
             if (!tablePresent[i]) continue;
@@ -686,20 +828,49 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     }
 
     if (melodyChanged) loadMelodiesCached();
+    // Inline melodies (issue #102): use the tune directly as the resolved RAM, after
+    // any bare-name re-resolve above so it wins. The saved name globals are untouched,
+    // so the config mirror keeps showing the saved name; the snapshot captured the
+    // saved-resolved RAM, so returnToIdle() reverts these on return to Idle.
+    if (haveInlineEnd)  endRtttl  = inlineEnd;
+    if (haveInlineTick) tickRtttl = inlineTick;
+
+    // configInCommand: this payload carries a config-block key (table inSnapshot half
+    // OR the member-backed half). Drives both the rebaseline trigger and the config
+    // broadcast. sync_* (inSnapshot=false) and action/duration (run-state) are excluded.
+    bool configInCommand = snapshotChanged || timerDocTouchesMemberConfig(doc);
+
+    // Rebaseline (issue #100, story 21): a normal (save:true) config command arriving
+    // during an active one-shot run commits the live config — including prior one-shot
+    // values — as the new saved baseline and ends the override, so a later revert
+    // leaves the promoted truth in place. A pure action/duration command does NOT
+    // rebaseline (it carries no config to commit), so the override survives to revert.
+    if (!oneShot && _overrideActive && configInCommand)
+    {
+        persist();        // member half: full live state -> "timer" NVS
+        saveSettings();   // table half: full live state -> "awtrix" NVS
+        _overrideActive = false;
+    }
+
     // Settings projected as read-only HA attributes (PRD #57) are not wire rows
     // with their own setters, so republish each affected carrier's bag here when
     // any of its mapped keys was in the command. Table-driven, so a multi-carrier
     // key republishes every carrier; deduped so a carrier publishes at most once.
     // Fires on the remote-apply path too (not _remoteApply-gated), keeping each
     // synced peer's HA attributes consistent with no extra code (generalizes #52).
-    bool attrCarrierDirty[(size_t)TimerHaEntity::COUNT] = {false};
-    for (size_t i = 0; i < TIMER_ATTR_GROUP_DESC_COUNT; ++i)
+    // Suppressed under a one-shot command so the retained HA attribute bags keep
+    // reporting the saved config (carriers stay honest, issue #101 builds on this).
+    if (!oneShot)
     {
-        const TimerAttrGroupDesc &g = TIMER_ATTR_GROUP_DESCS[i];
-        if (doc.containsKey(g.cmdKey)) attrCarrierDirty[(size_t)g.carrier] = true;
+        bool attrCarrierDirty[(size_t)TimerHaEntity::COUNT] = {false};
+        for (size_t i = 0; i < TIMER_ATTR_GROUP_DESC_COUNT; ++i)
+        {
+            const TimerAttrGroupDesc &g = TIMER_ATTR_GROUP_DESCS[i];
+            if (doc.containsKey(g.cmdKey)) attrCarrierDirty[(size_t)g.carrier] = true;
+        }
+        for (size_t c = 0; c < (size_t)TimerHaEntity::COUNT; ++c)
+            if (attrCarrierDirty[c]) publishAttributeGroup((TimerHaEntity)c);
     }
-    for (size_t c = 0; c < (size_t)TimerHaEntity::COUNT; ++c)
-        if (attrCarrierDirty[c]) publishAttributeGroup((TimerHaEntity)c);
 
     if (haveAction)
     {
@@ -729,8 +900,10 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
         bool runStateChanged = haveAction || haveDuration;
         // configChanged = any config-block key edited. Snapshot membership IS the
         // broadcast trigger (one flag, ADR-0006): the table half via inSnapshot, the
-        // member-backed half via the TIMER_MEMBER_CONFIG_DESCS table.
-        bool configChanged = snapshotChanged || timerDocTouchesMemberConfig(doc);
+        // member-backed half via the TIMER_MEMBER_CONFIG_DESCS table. Suppressed under
+        // a one-shot command — config must not propagate to sync followers, who have
+        // no notion of revert (ADR-0006). Run-state still propagates below (story 19).
+        bool configChanged = configInCommand && !oneShot;
 
         if (configChanged) broadcastConfig();
         if (runStateChanged)
@@ -797,7 +970,13 @@ void TimerManager_::publishAttributeGroup(TimerHaEntity carrier)
     // 512: the state sensor's bag is the largest (eight config-view keys incl.
     // two strings), which overflows 256 on a 64-bit host (issue #59).
     DynamicJsonDocument doc(512);
-    timerBuildAttributeGroup(carrier, doc);
+    {
+        // A republish (e.g. on reconnect) during a one-shot override serializes the
+        // SAVED config, so HA attribute bags never show transient one-off values
+        // (issue #101 / ADR-0014).
+        SavedConfigScope saved(*this);
+        timerBuildAttributeGroup(carrier, doc);
+    }
     if (doc.as<JsonObjectConst>().size() == 0) return;
     String payload;
     serializeJson(doc, payload);
@@ -892,6 +1071,11 @@ void TimerManager_::buildConfigSnapshot(JsonDocument &doc) const
     // rows and TIMER_MEMBER_CONFIG_DESCS (the member-backed half, B1, ADR-0007/0009).
     // Each table also feeds the parseCommand broadcast trigger, so the snapshot can't
     // drift from what fires a broadcast.
+    // Under a one-shot override the propagated snapshot reports the SAVED config, so a
+    // follower never receives transient one-off values it has no notion of reverting
+    // (issue #101 / ADR-0006). broadcastConfig is itself suppressed during an override
+    // (issue #100), so this is also a defensive guarantee for any other caller.
+    SavedConfigScope saved(*this);
     timerSettingsBuildSnapshot(doc);
     timerMemberConfigBuildSnapshot(doc);
 }

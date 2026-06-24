@@ -52,6 +52,12 @@ struct TimerSettingDesc
 extern const TimerSettingDesc TIMER_SETTINGS_DESCS[];
 extern const size_t           TIMER_SETTINGS_DESC_COUNT;
 
+// Compile-time row count (TIMER_SETTINGS_DESC_COUNT is only known at runtime, so it
+// cannot size a fixed array). A static_assert in TimerSettings.cpp pins it equal to
+// the table extent, so it cannot drift. Used by the one-shot override controller
+// (PRD #99 / issue #100) to stack a config snapshot buffer over the table.
+constexpr size_t TIMER_SETTINGS_DESC_CAP = 12;
+
 // Validate + coerce one field into `out`. Never writes a global (pure parse). Strict
 // JSON types match the legacy parseCommand: numbers reject bool/string/null; bools
 // require a real JSON bool. Returns false on any violation.
@@ -79,8 +85,34 @@ void timerSettingEmitValue(const TimerSettingDesc &d, JsonDocument &doc);
 // Emit the inSnapshot rows into `doc` (the propagated config block, table half).
 void timerSettingsBuildSnapshot(JsonDocument &doc);
 
+// One-shot override (PRD #99 / issue #100): capture/restore the table half's config
+// block (the inSnapshot rows; sync_* are inSnapshot=false and excluded by
+// construction) into a caller-owned TcValue buffer of TIMER_SETTINGS_DESC_CAP slots,
+// indexed by row. Capture reads each storage by type; restore writes it back via
+// timerSettingStore. Generic over the table, so no per-key code is required.
+void timerSettingsCaptureSnapshot(TcValue out[]);
+void timerSettingsRestoreSnapshot(const TcValue in[]);
+
 // Lookup by command key (used by MenuManager to reuse a row's range bounds).
 const TimerSettingDesc *timerSettingByCmdKey(const char *cmdKey);
+
+// ---------------------------------------------------------------------------
+// Inline RTTTL classifier/validator (PRD #99 / issue #102) -- a pure, reusable pair
+// reused by command validation and melody resolution. `melody_end`/`melody_tick`
+// accept EITHER a bare file-name token (as today) OR an inline RTTTL tune; the two
+// are distinguished by content. An inline tune is always one-shot (it has no
+// persistable file form), so it is never written to a melody name global.
+
+// True iff `s` is an inline RTTTL tune rather than a bare melody file-name token.
+// A bare token is [A-Za-z0-9_-]* (never contains a colon); an inline tune carries
+// RTTTL structure, so the presence of a ':' is the discriminator.
+bool timerMelodyIsInline(const String &s);
+
+// Validate an inline RTTTL tune's syntax: `name:control:notes` (exactly two colons),
+// a non-empty control section carrying a d=/o=/b= token, a non-empty notes section,
+// within a length cap. Returns false on any violation (a malformed inline tune is
+// BadField/400, atomic-reject). Name may be empty.
+bool timerMelodyValidateInline(const String &s);
 
 // ---------------------------------------------------------------------------
 // HA attribute-group projection (PRD #57) -- the descriptor-table family's fifth

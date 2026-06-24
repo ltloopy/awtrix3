@@ -102,11 +102,12 @@ timer in one publish.
 | `countdown_seconds` | integer | 0–30   (seconds) | Pre-expiry beep window (only meaningful when `buzzer = "countdown"`). Persists to NVS `"awtrix"`. Same value as the `CDOWN` slot of the on-device `TIMER` menu. |
 | `max_duration`               | integer | 1–604800 (seconds, 1 s .. 7 days) | Upper bound on accepted `duration` commands. Out-of-range duration is rejected, not clamped (ADR-0001). Persists to NVS `"awtrix"`. See ADR-0004. |
 | `remaining_publish_interval` | integer | 1–60 (seconds) | How often `timer_rem` republishes while Running (drives the HA `{id}_timer_rem` sensor cadence). Persists to NVS `"awtrix"`. See ADR-0004. |
-| `melody_tick` | string | Bare name resolved against `/MELODIES/<name>.txt`; empty resets to default `"timer_tick"`; capped at 32 chars (alphanumeric, `_`, `-` only) | RTTTL melody played for each countdown beep when `buzzer = "countdown"`. Persists to NVS `"awtrix"`. See ADR-0004. |
-| `melody_end`  | string | Same. Empty resets to default `"timer_end"`. | RTTTL melody played on timer expiry (subject to `buzzer` mode). Persists to NVS `"awtrix"`. See ADR-0004. |
+| `melody_tick` | string | **Either** a bare name resolved against `/MELODIES/<name>.txt` (≤32 chars, alphanumeric/`_`/`-`) **or** an inline RTTTL tune | RTTTL melody played for each countdown beep when `buzzer = "countdown"`. A bare name persists to NVS `"awtrix"` and obeys `save`; an **inline tune is always one-shot** (never saved — see [One-shot commands & inline melodies](#one-shot-commands--inline-melodies)). See ADR-0004 / ADR-0017. |
+| `melody_end`  | string | Same. A bare empty string resets to default `"timer_end"`. | RTTTL melody played on timer expiry (subject to `buzzer` mode). Bare name persists & obeys `save`; inline tune always one-shot. See ADR-0004 / ADR-0017. |
 | `bar_enabled` | bool | `true` / `false` | When `false`, the progress bar is hidden in Running/Paused. Persists to NVS `"awtrix"`. See ADR-0004. |
 | `icon_enabled` | bool | `true` / `false` | When `false`, the timer icon (including the built-in hourglass fallback) is hidden and the time text + progress bar reflow to span the full 32px panel. Persists to NVS `"awtrix"`. See ADR-0005. |
 | `bar_color`   | int or hex string | Numeric (0..0xFFFFFF) or `"#RRGGBB"` / `"RRGGBB"` | Progress-bar color. `0` follows `TEXTCOLOR_888` (the global default). Persists to NVS `"awtrix"`. See ADR-0004. |
+| `save`     | bool | `true` (default) / `false` | `save:false` makes the **whole command one-shot**: its config applies to the current run only and reverts to the saved settings when the timer next returns to Idle, writing nothing to flash. A non-boolean is rejected (atomic-reject). See [One-shot commands & inline melodies](#one-shot-commands--inline-melodies) / ADR-0017. |
 | `action`   | string | `"start"`, `"pause"`, `"reset"` (case-insensitive) | Drives the state machine. |
 
 ### Examples
@@ -187,6 +188,54 @@ Set per-state icons in one publish (Idle stays as fallback; Running uses
 an animated GIF; clear the Paused slot):
 ```json
 {"icon_idle": "64936", "icon_running": "74706", "icon_paused": ""}
+```
+
+### One-shot commands & inline melodies
+
+By default every config key you send **persists to flash and becomes your new
+default**. Add **`save:false`** to run a timer **once** with custom parameters
+without overwriting the settings you keep for next time. See
+[ADR-0017](adr/0017-one-shot-timer-commands.md).
+
+- **`save` is one payload-level flag** (default `true`). `save:false` makes the
+  *whole* command one-shot: every config key in it — duration, buzzer, finished
+  mode, the timing knobs, bar/icon toggles, colours, melodies — applies to the
+  **current run only**.
+- **Revert on return to Idle.** The moment the timer returns to Idle (a `reset`,
+  or auto-clear after a Finished run) the one-off values revert to your saved
+  settings and **nothing is written to flash**. The *next* run uses your saved
+  defaults again.
+- **Observation stays honest.** While a one-shot run is active, `GET /api/timer`'s
+  `config` mirror, the Home Assistant attribute entities, and device-to-device
+  sync all keep reporting your **saved** configuration, never the one-off values.
+  The top-level `duration` (and `buzzer`/`finished`) of `GET /api/timer` still
+  show the **live** one-shot values so you can observe what is counting down.
+- **Run-state still syncs.** Start/pause/reset and the one-off `duration` still
+  propagate to your sync followers (so synced timers start together), but the
+  one-off *config* does not (followers have no notion of revert).
+- **Commit mid-run if you choose.** A normal (`save:true`) config command sent
+  *during* an active one-shot run becomes your new saved baseline.
+- **Inline melodies.** `melody_end`/`melody_tick` accept **either** a bare saved
+  file name (as before) **or** an inline RTTTL tune (a literal melody string, e.g.
+  `"alarm:d=4,o=5,b=120:c,e,g"`). An inline tune is detected by content (it
+  contains `:` separators and a `d=`/`o=`/`b=` control section); a malformed inline
+  tune rejects the whole command (`400`). An **inline tune is always one-shot
+  regardless of `save`** — it is played for that run only, never written to flash,
+  and never overwrites your saved melody name (the `config` mirror keeps showing
+  the saved bare name throughout). A bare name persists and obeys `save` exactly
+  as before.
+- **The on-device TIMER menu always persists** — physical edits never go through
+  `save:false`, so they behave predictably and commit to NVS.
+
+Run a 5-minute timer **once** with a custom inline alarm — the next bare
+`{"action":"start"}` uses your saved duration and saved melody again:
+```json
+{"duration": 300, "melody_end": "alarm:d=4,o=5,b=120:c,e,g", "action": "start", "save": false}
+```
+
+Run one timer with a one-off finished mode and hold delay, leaving your defaults:
+```json
+{"finished": "re-alert", "realert_interval": 30, "action": "start", "save": false}
 ```
 
 ### Published icon state
