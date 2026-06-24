@@ -156,6 +156,13 @@ void TimerManager_::setup()
     _suspendPersist = false;
     _dirty = false;        // just loaded from NVS: RAM matches it, nothing pending
 
+    // A (re)boot knows no peers and has emitted no beacon yet — the peer registry is
+    // pure RAM/LAN-derived state, repopulated by inbound beacons (#111 / ADR-0019).
+    for (uint8_t i = 0; i < _peerCount; ++i) _peers[i].uniqueID = String();
+    _peerCount        = 0;
+    _lastPresenceMs   = 0;
+    _presenceEverSent = false;
+
     loadMelodiesCached();
 }
 
@@ -923,6 +930,70 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     return TimerCmdResult::Ok;
 }
 
+// HA control adapter (issue #109): each HA timer callback re-enters the control
+// surface through parseCommand, exactly as the propagation surface does, rather
+// than poking a deep setter. The minimal JSON each entity builds is the SAME shape
+// the {prefix}/timer MQTT topic accepts, so HA edits inherit atomic-reject
+// validation, run-state propagation, and the per-enum codec spellings for free —
+// nothing about duration parsing or enum encoding is duplicated in the HA layer.
+TimerCmdResult TimerManager_::timerHaApply(TimerHaEntity entity, const String &rawValue)
+{
+    StaticJsonDocument<128> doc;
+    switch (entity)
+    {
+    case TimerHaEntity::Buzzer:
+    {
+        // The select callback hands us the chosen option index; map it through the
+        // per-enum codec (ADR-0010) so the emitted wire string is the one
+        // parseCommand accepts — the two cannot drift.
+        long idx = rawValue.toInt();
+        if (idx < 0 || (size_t)idx >= TIMER_BUZZER_CODEC_COUNT) return TimerCmdResult::BadField;
+        doc["buzzer"] = TIMER_BUZZER_CODEC[idx].wire;
+        break;
+    }
+    case TimerHaEntity::Finished:
+    {
+        long idx = rawValue.toInt();
+        if (idx < 0 || (size_t)idx >= TIMER_FINISHED_CODEC_COUNT) return TimerCmdResult::BadField;
+        doc["finished"] = TIMER_FINISHED_CODEC[idx].wire;
+        break;
+    }
+    case TimerHaEntity::Duration:
+        // The raw HH:MM:SS text rides straight into parseCommand, which owns the
+        // parse/validate (parseHMS + range, reject-not-clamp). On a non-Ok result
+        // the caller echoes the canonical live value back (snap-back).
+        doc["duration"] = rawValue;
+        break;
+    case TimerHaEntity::Start:  doc["action"] = "start"; break;
+    case TimerHaEntity::Pause:  doc["action"] = "pause"; break;
+    case TimerHaEntity::Reset:  doc["action"] = "reset"; break;
+    case TimerHaEntity::SyncFollow:
+        // The switch callback hands us the new bool ("1"/"0"); emit the strict
+        // bool parseCommand's sync_follow validator (TcCheck::Bool) accepts. Local
+        // identity (inSnapshot=false), so it persists but never propagates.
+        doc["sync_follow"] = (rawValue.toInt() != 0);
+        break;
+    case TimerHaEntity::SyncTargets:
+    {
+        // The select callback hands us the chosen STATIC option index (issue #110);
+        // map it through TimerSyncTargetsOption to the wire value the bespoke
+        // sync_targets validator accepts: Off -> "" (off), All -> "all". Reject any
+        // index outside the static list (atomic-reject parity).
+        long idx = rawValue.toInt();
+        if (idx == (long)TimerSyncTargetsOption::Off)      doc["sync_targets"] = "";
+        else if (idx == (long)TimerSyncTargetsOption::All) doc["sync_targets"] = "all";
+        else return TimerCmdResult::BadField;
+        break;
+    }
+    default:
+        return TimerCmdResult::BadField;   // not a control entity
+    }
+
+    String json;
+    serializeJson(doc, json);
+    return parseCommand(json.c_str());
+}
+
 void TimerManager_::onShowTimerChange(bool prev, bool now)
 {
     if (prev && !now) reset();
@@ -1185,6 +1256,17 @@ void TimerManager_::applySyncCommand(const char *json)
 
     String src = sync["src"].as<String>();
     if (src.length() == 0 || src == uniqueID) return; // malformed / own echo
+
+    // Presence beacon (#111 / ADR-0019): harvest the sender's uniqueID into the peer
+    // registry UNGATED — presence is informational, not a command, so it bypasses the
+    // follow/target gate, applies NO timer state, and changes nothing else. It carries
+    // no action/duration/config; short-circuit before the command path entirely.
+    if (doc["presence"].as<bool>())
+    {
+        recordPeer(src, millis());
+        return;
+    }
+
     if (!TIMER_SYNC_FOLLOW) return;                   // consent gate
     if (!syncTargetsMe(sync["tgt"])) return;          // not addressed to this clock
     if (syncSeenRecently(src, sync["seq"].as<uint32_t>(), millis())) return; // redundant copy
@@ -1194,4 +1276,92 @@ void TimerManager_::applySyncCommand(const char *json)
     _remoteApply = true;
     parseCommand(json);
     _remoteApply = false;
+}
+
+// ---------------------------------------------------------------------------
+// Peer presence registry (#111 / ADR-0019). A bounded set of {uniqueID, lastSeen}
+// learned from inbound presence beacons; the backend the dynamic HA Targets select
+// (#112) consumes. Own id is never stored; entries age out past kPeerTtlMs.
+// ---------------------------------------------------------------------------
+
+void TimerManager_::recordPeer(const String &src, unsigned long nowMs)
+{
+    if (src.length() == 0 || src == uniqueID) return;   // never store our own id
+    unsigned long seen = (nowMs == 0) ? 1 : nowMs;      // 0 doubles as "never"
+
+    // Refresh an existing entry.
+    for (uint8_t i = 0; i < _peerCount; ++i)
+    {
+        if (_peers[i].uniqueID == src)
+        {
+            _peers[i].lastSeen = seen;
+            return;
+        }
+    }
+
+    // New peer: append while bounded; otherwise overwrite the stalest slot so a busy
+    // LAN keeps the freshest peers rather than rejecting all new ones once full.
+    if (_peerCount < kPeerMax)
+    {
+        _peers[_peerCount].uniqueID = src;
+        _peers[_peerCount].lastSeen = seen;
+        ++_peerCount;
+        return;
+    }
+    uint8_t oldest = 0;
+    for (uint8_t i = 1; i < _peerCount; ++i)
+        if (_peers[i].lastSeen < _peers[oldest].lastSeen) oldest = i;
+    _peers[oldest].uniqueID = src;
+    _peers[oldest].lastSeen = seen;
+}
+
+void TimerManager_::prunePeers(unsigned long nowMs)
+{
+    uint8_t w = 0;
+    for (uint8_t i = 0; i < _peerCount; ++i)
+    {
+        if ((nowMs - _peers[i].lastSeen) <= kPeerTtlMs)
+        {
+            if (w != i) _peers[w] = _peers[i];
+            ++w;
+        }
+    }
+    for (uint8_t i = w; i < _peerCount; ++i) _peers[i].uniqueID = String();
+    _peerCount = w;
+}
+
+bool TimerManager_::hasPeer(const String &id) const
+{
+    for (uint8_t i = 0; i < _peerCount; ++i)
+        if (_peers[i].uniqueID == id) return true;
+    return false;
+}
+
+void TimerManager_::broadcastPresence()
+{
+    // A small unconditional beacon: {_sync:{src,seq}, presence:true}. No tgt — it is
+    // informational, harvested ungated by every receiver. Independent of sync targets
+    // so even a clock that commands nobody is still discoverable.
+    StaticJsonDocument<128> doc;
+    JsonObject sync = doc.createNestedObject("_sync");
+    sync["src"] = uniqueID;
+    sync["seq"] = ++_syncSeq;
+    doc["presence"] = true;
+
+    String out; serializeJson(doc, out);
+    ServerManager.sendTimerSync(out);   // also AP-gated at the transport (defense in depth)
+}
+
+void TimerManager_::tickPresence(unsigned long nowMs)
+{
+    prunePeers(nowMs);
+
+    if (AP_MODE) return;   // no beacon in AP mode (a standalone clock with no real LAN)
+
+    if (!_presenceEverSent || (nowMs - _lastPresenceMs) >= kPresenceIntervalMs)
+    {
+        broadcastPresence();
+        _lastPresenceMs   = nowMs;
+        _presenceEverSent = true;
+    }
 }

@@ -58,6 +58,7 @@ uint32_t TIMER_BAR_COLOR        = 0;
 bool        TIMER_SYNC_FOLLOW   = false;
 String      TIMER_SYNC_TARGETS  = "";
 const char *uniqueID            = "awtrix_self";
+bool        AP_MODE             = false;
 
 uint32_t TEXTCOLOR_888 = 0xFFFFFF;
 

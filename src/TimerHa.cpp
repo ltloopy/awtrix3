@@ -1,6 +1,7 @@
 #include "TimerHa.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "TimerEnums.h"
 
@@ -65,6 +66,21 @@ static const char HAtimerResetID[] PROGMEM   = {"%s_timer_reset"};
 static const char HAtimerResetIcon[] PROGMEM = {"mdi:restore"};
 static const char HAtimerResetName[] PROGMEM = {"Timer reset"};
 
+// Sync-control entities (issue #110): the two sync settings — until now read-only
+// HA attributes on the state sensor — become writable. The Follow switch carries
+// the receive-consent toggle; the Targets select ships STATIC Off/All only (it
+// becomes dynamic in a later peer-discovery slice).
+static const char HAtimerSyncFollowID[] PROGMEM   = {"%s_timer_sync_follow"};
+static const char HAtimerSyncFollowIcon[] PROGMEM = {"mdi:account-sync"};
+static const char HAtimerSyncFollowName[] PROGMEM = {"Timer sync follow"};
+
+static const char HAtimerSyncTargetsID[] PROGMEM   = {"%s_timer_sync_targets"};
+static const char HAtimerSyncTargetsIcon[] PROGMEM = {"mdi:target-account"};
+static const char HAtimerSyncTargetsName[] PROGMEM = {"Timer sync targets"};
+// Static option list, in TimerSyncTargetsOption order (Off=0, All=1). The select's
+// state index reflects sync_targets via timerSyncTargetsSelectIndex.
+static const char HAtimerSyncTargetsOptions[] PROGMEM = {"Off;All"};
+
 const TimerHaDescriptor TIMER_HA_DESCRIPTORS[TIMER_HA_DESCRIPTOR_COUNT] = {
     {TimerHaEntity::Duration, "text",   HAtimerDurID,   HAtimerDurIcon,   HAtimerDurName,   nullptr,            nullptr,         nullptr},
     {TimerHaEntity::Remaining,"sensor", HAtimerRemID,   HAtimerRemIcon,   HAtimerRemName,   nullptr,            HAtimerRemUnit,  HAtimerRemClass},
@@ -74,7 +90,19 @@ const TimerHaDescriptor TIMER_HA_DESCRIPTORS[TIMER_HA_DESCRIPTOR_COUNT] = {
     {TimerHaEntity::Start,    "button", HAtimerStartID, HAtimerStartIcon, HAtimerStartName, nullptr,            nullptr,         nullptr},
     {TimerHaEntity::Pause,    "button", HAtimerPauseID, HAtimerPauseIcon, HAtimerPauseName, nullptr,            nullptr,         nullptr},
     {TimerHaEntity::Reset,    "button", HAtimerResetID, HAtimerResetIcon, HAtimerResetName, nullptr,            nullptr,         nullptr},
+    {TimerHaEntity::SyncFollow,  "switch", HAtimerSyncFollowID,  HAtimerSyncFollowIcon,  HAtimerSyncFollowName,  nullptr,                   nullptr, nullptr},
+    {TimerHaEntity::SyncTargets, "select", HAtimerSyncTargetsID, HAtimerSyncTargetsIcon, HAtimerSyncTargetsName, HAtimerSyncTargetsOptions, nullptr, nullptr},
 };
+
+int8_t timerSyncTargetsSelectIndex(const char *syncTargets)
+{
+    if (syncTargets == nullptr) return (int8_t)TimerSyncTargetsOption::Off;
+    if (syncTargets[0] == '\0') return (int8_t)TimerSyncTargetsOption::Off;   // "" -> Off
+    // Case-sensitive match on the canonical "all" wire spelling (parseSyncTargets
+    // accepts exactly "all"); any other non-empty value is a specific-ID CSV.
+    if (strcmp(syncTargets, "all") == 0) return (int8_t)TimerSyncTargetsOption::All;
+    return -1;   // specific-ID CSV -> unknown (HASelect: no option selected)
+}
 
 void formatTimerHaEntityId(const TimerHaDescriptor &d, const char *macSuffix, char *out, size_t outLen)
 {

@@ -72,6 +72,24 @@ private:
     uint8_t  _syncSeenIdx = 0;
     bool syncSeenRecently(const String &src, uint32_t seq, unsigned long nowMs);
 
+    // -- Peer presence registry (#111 / ADR-0019) --
+    // Which peer clocks are on the LAN, keyed by stable uniqueID (the targeting
+    // key; the mutable hostname is unsuitable). Harvested UNGATED from inbound
+    // presence beacons (presence is informational, not a command — it bypasses the
+    // follow/target gate and applies no timer state). Bounded; own id excluded;
+    // entries age out after ~3 missed beacons (kPeerTtlMs) on each tickPresence().
+    struct Peer { String uniqueID; unsigned long lastSeen = 0; };
+    static constexpr uint8_t       kPeerMax           = 16;
+    static constexpr unsigned long kPresenceIntervalMs = 30000;   // beacon cadence
+    static constexpr unsigned long kPeerTtlMs          = 100000;  // ~3 missed beacons
+    Peer          _peers[kPeerMax];
+    uint8_t       _peerCount         = 0;
+    unsigned long _lastPresenceMs    = 0;
+    bool          _presenceEverSent  = false;
+    void recordPeer(const String &src, unsigned long nowMs);   // add/refresh; own id & full-registry guarded
+    void prunePeers(unsigned long nowMs);                      // drop entries past kPeerTtlMs
+    void broadcastPresence();                                  // emit one {_sync,presence:true} beacon
+
     // -- One-shot override (save:false), PRD #99 / issue #100 --
     // A save:false command applies its config for the CURRENT RUN only: the saved
     // config is snapshotted, the command applies live, and returnToIdle() restores
@@ -263,6 +281,25 @@ public:
 
     TimerCmdResult parseCommand(const char *json);
 
+    // -- Home Assistant control adapter (issue #109) --
+    // Route a single HA timer callback through parseCommand instead of a deep
+    // setter, so HA edits get the SAME atomic-reject validation, the same
+    // propagation, and the same codec strings as the {prefix}/timer MQTT surface.
+    // Each entity builds the minimal JSON command it represents and hands it to
+    // parseCommand, mirroring the sync receive path. Display-free (no ArduinoHA,
+    // no MQTT client) so the HA->parseCommand path is host-testable.
+    //
+    // rawValue per entity:
+    //   * Buzzer / Finished : the selected select-option INDEX as a decimal
+    //     string; mapped through the per-enum codec (ADR-0010) to the canonical
+    //     wire spelling, so emitted and accepted JSON cannot drift.
+    //   * Duration          : the raw HH:MM:SS text; parseCommand owns the
+    //     parse/validate (parseHMS + range), so that logic is NOT duplicated here.
+    //   * Start/Pause/Reset : ignored; the entity selects the action.
+    // Returns parseCommand's result so the caller can echo the canonical live
+    // value back on a non-Ok result (snap-back to the last valid value).
+    TimerCmdResult timerHaApply(TimerHaEntity entity, const String &rawValue);
+
     // -- Propagation surface --
     // Emit one UDP broadcast mirroring a locally-accepted action to peers. No-ops
     // when sync is off (empty target list) or while applying an inbound packet
@@ -271,8 +308,19 @@ public:
     void broadcastRunState(const char *action);
     void broadcastConfig();
     // Validate, gate (echo/follow/target/dedup), then apply an inbound sync packet
-    // through parseCommand under the _remoteApply guard.
+    // through parseCommand under the _remoteApply guard. A presence beacon
+    // (presence:true) is harvested into the peer registry UNGATED and short-circuits
+    // before any command path (it carries no action/config and changes no state).
     void applySyncCommand(const char *json);
+
+    // Peer presence (#111 / ADR-0019). Called from the device loop with the current
+    // millis(): emits a presence beacon at most once per kPresenceIntervalMs when on
+    // a real network (NEVER in AP mode — broadcasts unconditionally otherwise so a
+    // standalone clock is still discoverable), and ages out stale peers each call.
+    void tickPresence(unsigned long nowMs);
+    // Peer registry observers (consumed by the dynamic HA Targets select in #112).
+    int  peerCount() const { return _peerCount; }
+    bool hasPeer(const String &id) const;
 
     void onShowTimerChange(bool prev, bool now);
 

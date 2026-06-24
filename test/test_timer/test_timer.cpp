@@ -1514,7 +1514,9 @@ static int count_ha_options(const char *opts) {
 // U32 — exactly one descriptor per slot, in slot order, with a sane component
 // and a "%s"-bearing unique-id format.
 void test_U32_descriptor_table_well_formed(void) {
-    TEST_ASSERT_EQUAL_UINT(8, (unsigned)TIMER_HA_DESCRIPTOR_COUNT);
+    // 8 original entities + the two sync-control entities (issue #110): the Follow
+    // switch and the static Off/All Targets select.
+    TEST_ASSERT_EQUAL_UINT(10, (unsigned)TIMER_HA_DESCRIPTOR_COUNT);
     for (size_t i = 0; i < TIMER_HA_DESCRIPTOR_COUNT; ++i) {
         const TimerHaDescriptor &d = TIMER_HA_DESCRIPTORS[i];
         // Row i must describe slot i (setup/teardown index the array by slot).
@@ -1524,6 +1526,7 @@ void test_U32_descriptor_table_well_formed(void) {
             strcmp(d.component, "text")   == 0 ||
             strcmp(d.component, "sensor") == 0 ||
             strcmp(d.component, "select") == 0 ||
+            strcmp(d.component, "switch") == 0 ||
             strcmp(d.component, "button") == 0;
         TEST_ASSERT_TRUE_MESSAGE(validComponent, d.component);
 
@@ -2195,6 +2198,135 @@ void test_SR4_follower_forces_oneshot_regardless_of_save(void) {
 
     TimerManager.reset();
     TEST_ASSERT_EQUAL_UINT16(10, TIMER_FINISHED_HOLD);   // reverted to own saved
+}
+
+// ============================================================================
+// Peer presence subsystem (#111 / ADR-0019). A presence beacon + a bounded peer
+// registry keyed by stable uniqueID, harvested UNGATED (presence is informational,
+// never a command) so a clock learns which peers are on the LAN.
+// ============================================================================
+
+// PP1 — a received presence packet adds/refreshes the sender in the registry and
+// changes NO timer state. Harvest is ungated: neither follow nor targeting apply.
+void test_PP1_presence_harvest_ungated_no_timer_state(void) {
+    SHOW_TIMER = true;
+    fixture::advance(1000);
+
+    // Follow OFF and the packet carries no tgt at all: a real command would be
+    // dropped by the gates, but presence is harvested regardless.
+    TIMER_SYNC_FOLLOW = false;
+    TEST_ASSERT_EQUAL_INT(0, TimerManager.peerCount());
+
+    TimerManager.applySyncCommand(
+        "{\"_sync\":{\"src\":\"awtrix_o\",\"seq\":1},\"presence\":true}");
+
+    TEST_ASSERT_EQUAL_INT(1, TimerManager.peerCount());
+    TEST_ASSERT_TRUE(TimerManager.hasPeer("awtrix_o"));
+    // No timer state changed.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle), static_cast<int>(TimerManager.getState()));
+
+    // A later beacon from the same peer refreshes lastSeen without duplicating.
+    fixture::advance(5000);
+    TimerManager.applySyncCommand(
+        "{\"_sync\":{\"src\":\"awtrix_o\",\"seq\":2},\"presence\":true}");
+    TEST_ASSERT_EQUAL_INT(1, TimerManager.peerCount());
+}
+
+// PP2 — presence is never treated as a command: even a packet that ALSO carries
+// action/duration is harvested as presence only, applying NO timer state, with no
+// follow/target gate. (presence:true short-circuits before parseCommand.)
+void test_PP2_presence_never_treated_as_command(void) {
+    SHOW_TIMER = true;
+    TIMER_SYNC_FOLLOW = true;          // gates would otherwise let a command through
+    fixture::advance(1000);
+
+    TimerManager.applySyncCommand(
+        "{\"_sync\":{\"src\":\"awtrix_o\",\"seq\":1,\"tgt\":\"all\"},"
+        "\"presence\":true,\"action\":\"start\",\"duration\":300}");
+
+    TEST_ASSERT_TRUE(TimerManager.hasPeer("awtrix_o"));
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle), static_cast<int>(TimerManager.getState()));
+}
+
+// PP3 — the registry excludes the clock's own id and is bounded (~16). Own-src
+// presence is dropped (own echo); flooding distinct peers never exceeds the bound.
+void test_PP3_registry_excludes_self_and_is_bounded(void) {
+    SHOW_TIMER = true;
+    fixture::advance(1000);
+
+    // Own id is never registered (own echo, like a real command).
+    TimerManager.applySyncCommand(
+        "{\"_sync\":{\"src\":\"awtrix_self\",\"seq\":1},\"presence\":true}");
+    TEST_ASSERT_EQUAL_INT(0, TimerManager.peerCount());
+    TEST_ASSERT_FALSE(TimerManager.hasPeer("awtrix_self"));
+
+    // Flood 20 distinct peers; the registry caps at the bound (16).
+    for (int i = 0; i < 20; ++i) {
+        char buf[96];
+        snprintf(buf, sizeof(buf),
+                 "{\"_sync\":{\"src\":\"awtrix_p%02d\",\"seq\":%d},\"presence\":true}", i, i + 10);
+        TimerManager.applySyncCommand(buf);
+    }
+    TEST_ASSERT_LESS_OR_EQUAL_INT(16, TimerManager.peerCount());
+    TEST_ASSERT_EQUAL_INT(16, TimerManager.peerCount());
+}
+
+// PP4 — peers age out after the TTL (~3 missed beacons, ~100s). tickPresence(now)
+// prunes entries not seen within the TTL.
+void test_PP4_peers_age_out_past_ttl(void) {
+    SHOW_TIMER = true;
+    fixture::advance(1000);
+
+    TimerManager.applySyncCommand(
+        "{\"_sync\":{\"src\":\"awtrix_o\",\"seq\":1},\"presence\":true}");
+    TEST_ASSERT_EQUAL_INT(1, TimerManager.peerCount());
+
+    // Still within TTL: a prune keeps the peer.
+    fixture::advance(50000);
+    TimerManager.tickPresence(fixture::virtual_now());
+    TEST_ASSERT_EQUAL_INT(1, TimerManager.peerCount());
+    TEST_ASSERT_TRUE(TimerManager.hasPeer("awtrix_o"));
+
+    // Past TTL (>100s since last seen): the peer ages out.
+    fixture::advance(60000);   // ~110s total since harvest
+    TimerManager.tickPresence(fixture::virtual_now());
+    TEST_ASSERT_EQUAL_INT(0, TimerManager.peerCount());
+    TEST_ASSERT_FALSE(TimerManager.hasPeer("awtrix_o"));
+}
+
+// PP5 — the beacon is emitted periodically on a real network but NEVER in AP mode.
+void test_PP5_beacon_periodic_not_in_ap_mode(void) {
+    SHOW_TIMER = true;
+    TIMER_SYNC_TARGETS = "";     // beacon is unconditional, independent of sync targets
+    fixture::advance(1000);
+
+    // AP mode: no beacon, ever.
+    AP_MODE = true;
+    TimerManager.tickPresence(fixture::virtual_now());
+    fixture::advance(60000);
+    TimerManager.tickPresence(fixture::virtual_now());
+    TEST_ASSERT_EQUAL_INT(0, fixture::sync_packet_count());
+
+    // Real network: first tick emits a beacon, then it throttles to the period.
+    AP_MODE = false;
+    ServerManager.__test_reset();
+    TimerManager.tickPresence(fixture::virtual_now());
+    TEST_ASSERT_EQUAL_INT(1, fixture::sync_packet_count());
+
+    DynamicJsonDocument doc(256);
+    TEST_ASSERT_FALSE(deserializeJson(doc, fixture::last_sync_payload()));
+    TEST_ASSERT_TRUE(doc["presence"].as<bool>());
+    TEST_ASSERT_EQUAL_STRING("awtrix_self", doc["_sync"]["src"]);
+
+    // Within the period: no new beacon.
+    fixture::advance(5000);
+    TimerManager.tickPresence(fixture::virtual_now());
+    TEST_ASSERT_EQUAL_INT(1, fixture::sync_packet_count());
+
+    // After the period (~30s) elapses: another beacon.
+    fixture::advance(30000);
+    TimerManager.tickPresence(fixture::virtual_now());
+    TEST_ASSERT_EQUAL_INT(2, fixture::sync_packet_count());
 }
 
 // ============================================================================
@@ -4010,6 +4142,211 @@ void test_W26_max_duration_change_republishes_state_and_duration(void) {
     TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_REMAINING_ATTR_TOPIC));
 }
 
+// ============================================================================
+// HA1..HA6 — the display-free timerHaApply(entity, rawValue) adapter routes each
+// HA timer callback through parseCommand (issue #109). The adapter builds the
+// minimal JSON command its entity represents and hands it to parseCommand, so HA
+// edits get the same atomic-reject validation, the same propagation, and the same
+// codec strings as the MQTT/HTTP control surface — no deep setters, no duplicated
+// parse logic in the HA layer.
+// ============================================================================
+
+// HA1 — the buzzer select routes through parseCommand: the selected option index
+// maps through the per-enum codec (ADR-0010) to the canonical wire string, so the
+// applied mode matches the equivalent {"buzzer":"countdown"} command exactly.
+void test_HA1_buzzer_select_routes_through_parsecommand(void) {
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::Buzzer,
+            String((int)BuzzerMode::Countdown))));
+    TEST_ASSERT_EQUAL(static_cast<int>(BuzzerMode::Countdown),
+                      static_cast<int>(TimerManager.getBuzzerMode()));
+
+    // Parity: same observable result as the equivalent parseCommand JSON.
+    TimerManager.parseCommand("{\"buzzer\":\"end\"}");
+    TEST_ASSERT_EQUAL(static_cast<int>(BuzzerMode::End),
+                      static_cast<int>(TimerManager.getBuzzerMode()));
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::Buzzer,
+            String((int)BuzzerMode::Countdown))));
+    TEST_ASSERT_EQUAL(static_cast<int>(BuzzerMode::Countdown),
+                      static_cast<int>(TimerManager.getBuzzerMode()));
+}
+
+// HA2 — the finished select routes through parseCommand via the codec wire string.
+void test_HA2_finished_select_routes_through_parsecommand(void) {
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::Finished,
+            String((int)FinishedMode::ReAlert))));
+    TEST_ASSERT_EQUAL(static_cast<int>(FinishedMode::ReAlert),
+                      static_cast<int>(TimerManager.getFinishedMode()));
+}
+
+// HA3 — the duration text routes its raw HH:MM:SS string through parseCommand,
+// which owns the parse/validate (parseHMS + range): a valid clock string applies.
+void test_HA3_duration_text_routes_through_parsecommand(void) {
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::Duration, "0:02:30")));
+    TEST_ASSERT_EQUAL_UINT32(150, TimerManager.getDuration());
+}
+
+// HA4 — an invalid duration is rejected wholesale (atomic-reject parity): the
+// adapter returns a non-Ok result and the live value is unchanged, so the HA field
+// snaps back to the last valid value. Covers malformed AND out-of-range.
+void test_HA4_invalid_duration_rejected_and_snaps_back(void) {
+    TimerManager.setDuration(300);   // last valid value
+
+    // Malformed clock string -> BadField, nothing applied.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::Duration, "not a time")));
+    TEST_ASSERT_EQUAL_UINT32(300, TimerManager.getDuration());
+
+    // Out-of-range (> 24h cap) -> BadField, nothing applied (reject, never clamp).
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::Duration, "30:00:00")));
+    TEST_ASSERT_EQUAL_UINT32(300, TimerManager.getDuration());
+
+    // The canonical live value to echo back is the unchanged 300 ("5:00").
+    TEST_ASSERT_EQUAL_STRING("5:00", TimerManager_::formatHMS(TimerManager.getDuration()).c_str());
+}
+
+// HA5 — the Start/Pause/Reset buttons route through parseCommand action commands,
+// producing the same run-state transitions as the equivalent JSON.
+void test_HA5_buttons_route_through_parsecommand(void) {
+    TimerManager.setDuration(300);
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::Start, "")));
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Running),
+                      static_cast<int>(TimerManager.getState()));
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::Pause, "")));
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Paused),
+                      static_cast<int>(TimerManager.getState()));
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::Reset, "")));
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle),
+                      static_cast<int>(TimerManager.getState()));
+}
+
+// HA6 — HA Start/Pause/Reset propagate run-state to peers exactly like the MQTT
+// surface: routing through parseCommand fires broadcastRunState. A Start emits the
+// combined run-scoped packet (action+duration), a Pause emits a run-state-only
+// packet. This is the propagation parity the issue calls for.
+void test_HA6_buttons_propagate_run_state_to_peers(void) {
+    SHOW_TIMER = true;
+    TIMER_SYNC_TARGETS = "all";   // leader: relays its own local actions
+    TimerManager.setDuration(180);
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::Start, "")));
+    TEST_ASSERT_EQUAL_INT(1, fixture::sync_packet_count());
+
+    DynamicJsonDocument doc(2048);
+    TEST_ASSERT_FALSE(deserializeJson(doc, fixture::last_sync_payload()));
+    TEST_ASSERT_EQUAL_STRING("start", doc["action"]);
+    TEST_ASSERT_EQUAL_UINT32(180, doc["duration"].as<uint32_t>());
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::Pause, "")));
+    TEST_ASSERT_EQUAL_INT(2, fixture::sync_packet_count());
+    DynamicJsonDocument doc2(512);
+    TEST_ASSERT_FALSE(deserializeJson(doc2, fixture::last_sync_payload()));
+    TEST_ASSERT_EQUAL_STRING("pause", doc2["action"]);
+}
+
+// ============================================================================
+// HA7..HA11 — the two writable sync-control entities (issue #110). The Follow
+// switch (sync_follow) and the static Off/All Targets select (sync_targets) both
+// route through the timerHaApply(entity, rawValue) adapter into parseCommand, so
+// they inherit the same atomic-reject validation and NVS persistence as the
+// {prefix}/timer surface. sync_* are local identity (inSnapshot=false) and must
+// NEVER propagate to peers.
+// ============================================================================
+
+// HA7 — the Follow switch routes a bool through parseCommand: on -> sync_follow
+// true, off -> false, each persisting to NVS (the table half saved by parseCommand).
+void test_HA7_sync_follow_switch_routes_through_parsecommand(void) {
+    TIMER_SYNC_FOLLOW = false;
+    saveSettings_calls = 0;
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncFollow, "1")));
+    TEST_ASSERT_TRUE(TIMER_SYNC_FOLLOW);
+    // Persists: sync_follow is a table-backed ("awtrix") key, so a real change
+    // flushes that namespace exactly once (saveSettings).
+    TEST_ASSERT_EQUAL_INT(1, saveSettings_calls);
+
+    saveSettings_calls = 0;
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncFollow, "0")));
+    TEST_ASSERT_FALSE(TIMER_SYNC_FOLLOW);
+    TEST_ASSERT_EQUAL_INT(1, saveSettings_calls);
+}
+
+// HA8 — the Targets select routes its option index through parseCommand: Off (0)
+// -> sync_targets "", All (1) -> "all", each persisting to NVS.
+void test_HA8_sync_targets_select_routes_through_parsecommand(void) {
+    TIMER_SYNC_TARGETS = "";
+    saveSettings_calls = 0;
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncTargets, "1")));
+    TEST_ASSERT_EQUAL_STRING("all", TIMER_SYNC_TARGETS.c_str());
+    // Persists: sync_targets is a table-backed key, flushed once on the change.
+    TEST_ASSERT_EQUAL_INT(1, saveSettings_calls);
+
+    saveSettings_calls = 0;
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncTargets, "0")));
+    TEST_ASSERT_EQUAL_STRING("", TIMER_SYNC_TARGETS.c_str());
+    TEST_ASSERT_EQUAL_INT(1, saveSettings_calls);
+}
+
+// HA9 — the select-reflection helper maps the current sync_targets value to its
+// option index: "" -> Off (0), "all" -> All (1), and a specific-ID CSV (set
+// out-of-band via API/dev.json) -> -1 (unknown), so the select shows blank while
+// the read-only attribute stays authoritative for the exact value.
+void test_HA9_sync_targets_select_index_reflects_value(void) {
+    TEST_ASSERT_EQUAL_INT(0,  timerSyncTargetsSelectIndex(""));
+    TEST_ASSERT_EQUAL_INT(1,  timerSyncTargetsSelectIndex("all"));
+    TEST_ASSERT_EQUAL_INT(-1, timerSyncTargetsSelectIndex("awtrix_ab12,awtrix_cd34"));
+    TEST_ASSERT_EQUAL_INT(-1, timerSyncTargetsSelectIndex("awtrix_peer"));
+}
+
+// HA10 — an invalid Targets write is rejected wholesale (atomic-reject parity):
+// an out-of-range option index returns a non-Ok result and changes nothing, so the
+// select snaps back to the value actually applied.
+void test_HA10_invalid_sync_targets_write_rejected(void) {
+    TIMER_SYNC_TARGETS = "all";   // last applied value
+
+    // Option index past the static Off/All list -> BadField, nothing applied.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncTargets, "2")));
+    TEST_ASSERT_EQUAL_STRING("all", TIMER_SYNC_TARGETS.c_str());
+    // A negative index is rejected too.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncTargets, "-1")));
+    TEST_ASSERT_EQUAL_STRING("all", TIMER_SYNC_TARGETS.c_str());
+    // The applied value still reflects All in the select.
+    TEST_ASSERT_EQUAL_INT(1, timerSyncTargetsSelectIndex(TIMER_SYNC_TARGETS.c_str()));
+}
+
+// HA11 — applying sync_follow / sync_targets through the HA adapter NEVER
+// propagates to peers (local identity, inSnapshot=false): no sync packet goes out.
+void test_HA11_sync_control_writes_do_not_propagate(void) {
+    SHOW_TIMER = true;
+    TIMER_SYNC_FOLLOW = true;
+    TIMER_SYNC_TARGETS = "all";   // this clock would relay its own local edits
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncFollow, "0")));
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncTargets, "0")));
+    TEST_ASSERT_EQUAL_INT(0, fixture::sync_packet_count());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
@@ -4106,6 +4443,11 @@ int main(int, char **) {
     RUN_TEST(test_SR2_bare_duration_edit_propagates_duration_only);
     RUN_TEST(test_SR3_follower_applies_oneshot_and_reverts);
     RUN_TEST(test_SR4_follower_forces_oneshot_regardless_of_save);
+    RUN_TEST(test_PP1_presence_harvest_ungated_no_timer_state);
+    RUN_TEST(test_PP2_presence_never_treated_as_command);
+    RUN_TEST(test_PP3_registry_excludes_self_and_is_bounded);
+    RUN_TEST(test_PP4_peers_age_out_past_ttl);
+    RUN_TEST(test_PP5_beacon_periodic_not_in_ap_mode);
     RUN_TEST(test_T1_table_uintrange_boundaries);
     RUN_TEST(test_T2_table_strict_types);
     RUN_TEST(test_T3_table_bespoke_validators);
@@ -4185,5 +4527,16 @@ int main(int, char **) {
     RUN_TEST(test_W24_clearAllAttributeGroups_empties_each_carrier);
     RUN_TEST(test_W25_refresh_after_clear_repopulates_attributes);
     RUN_TEST(test_W26_max_duration_change_republishes_state_and_duration);
+    RUN_TEST(test_HA1_buzzer_select_routes_through_parsecommand);
+    RUN_TEST(test_HA2_finished_select_routes_through_parsecommand);
+    RUN_TEST(test_HA3_duration_text_routes_through_parsecommand);
+    RUN_TEST(test_HA4_invalid_duration_rejected_and_snaps_back);
+    RUN_TEST(test_HA5_buttons_route_through_parsecommand);
+    RUN_TEST(test_HA6_buttons_propagate_run_state_to_peers);
+    RUN_TEST(test_HA7_sync_follow_switch_routes_through_parsecommand);
+    RUN_TEST(test_HA8_sync_targets_select_routes_through_parsecommand);
+    RUN_TEST(test_HA9_sync_targets_select_index_reflects_value);
+    RUN_TEST(test_HA10_invalid_sync_targets_write_rejected);
+    RUN_TEST(test_HA11_sync_control_writes_do_not_propagate);
     return UNITY_END();
 }
