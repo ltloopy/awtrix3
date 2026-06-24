@@ -123,6 +123,7 @@ void loop()
   ServerManager.tick();
   DisplayManager.tick();
   TimerManager.tick();
+  TimerManager.tickPresence(millis());   // peer presence beacon + registry aging (#111)
   PeripheryManager.tick();
   if (ServerManager.isConnected)
   {

@@ -117,6 +117,24 @@ peers cannot hijack each other's targeting. Making a value *observable* is ortho
 to making it *propagated* or *writable*; [ADR-0006](0006-timer-multi-device-sync.md)
 stands unchanged.
 
+**Addendum (PRD #27, issue #110): the sync rows become writable HA control
+entities.** The two sync keys now also get dedicated **writable** entities — a
+Follow `HASwitch` (`sync_follow`) and a static `Off`/`All` Targets `HASelect`
+(`sync_targets`) — so they join the **control surface** as well as the observation
+surface. This *narrows* §4's "non-writable from HA" without reversing its load-bearing
+half: writes funnel through `parseCommand` (the HA callback adapter of issue #109), so
+they inherit the same atomic-reject validation (`sync_follow` strict-bool,
+`sync_targets` bespoke validator) and NVS persistence as every other control input —
+no second control surface, no bypass. The keys stay `inSnapshot=false` local identity
+and are **still never propagated** to peers, so [ADR-0006](0006-timer-multi-device-sync.md)
+remains unchanged. The read-only state-sensor attribute stays **authoritative for the
+exact `sync_targets` value**: the static select renders only `Off`/`All` and reflects
+**unknown** (HASelect index `-1`) when `sync_targets` holds a specific-ID CSV set
+out-of-band (the select becomes a dynamic peer list in a later peer-discovery slice).
+The entity count rises from **8** to **10**. The Follow switch is the Timer's first
+`HASwitch`; its discovery payload (and the static select's) is pinned on the host under
+the `native_ha` env (`test_hasync`).
+
 ## Consequences
 
 - Adding or moving a knob's HA projection is now a **single row** in

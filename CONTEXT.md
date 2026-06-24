@@ -131,9 +131,9 @@ _Avoid_: reading `save` as the MQTT *retain* flag or as the custom-apps `save` k
 
 ### Saved config vs effective run config
 
-The distinction the one-shot model rests on. **Saved config** is the flash (NVS) truth that *every* observation/sync carrier reports; **effective run config** is what the active run actually uses. A `save:false` command writes only the **effective** layer: it captures a snapshot of the saved config (generically over the two descriptor tables — `TIMER_SETTINGS_DESCS`' `inSnapshot` rows + `TIMER_MEMBER_CONFIG_DESCS` — plus `durationSec` and the resolved melody RAM), applies live, and suppresses the persist/`broadcastConfig`/HA-attribute side effects. While an override is active the carriers stay **honest** — the `GET /api/timer` `config` mirror, the device-to-device sync snapshot, and the HA attribute bags all serialize from the **saved** snapshot — while the **top-level run-state** (`duration`, `buzzer`, `finished` at the top level of `GET /api/timer`) stays **effective**. The split is: *top level = effective (what is running now), `config` = saved (what is persisted)*. `sync_*` (local identity) and `duration` (run-state) are excluded from the snapshot by construction. See ADR-0017.
+The distinction the one-shot model rests on. **Saved config** is the flash (NVS) truth that *every* observation/sync carrier reports; **effective run config** is what the active run actually uses. A `save:false` command writes only the **effective** layer: it captures a snapshot of the saved config (generically over the two descriptor tables — `TIMER_SETTINGS_DESCS`' `inSnapshot` rows + `TIMER_MEMBER_CONFIG_DESCS` — plus `durationSec` and the resolved melody RAM), applies live, and suppresses the persist/`broadcastConfig`/HA-attribute side effects. While an override is active the **read** carriers stay **honest** — the `GET /api/timer` `config` mirror and the HA attribute bags serialize from the **saved** snapshot — while the **top-level run-state** (`duration`, `buzzer`, `finished` at the top level of `GET /api/timer`) stays **effective**. The split is: *top level = effective (what is running now), `config` = saved (what is persisted)*. The one deliberate exception is the **device-to-device sync carrier**: the config snapshot bundled with a `start` reports **effective** config (ADR-0018 §4), precisely so a leader's own one-shot run mirrors to followers — the follower then applies it one-shot and reverts on its own return to Idle. `sync_*` (local identity) and `duration` (run-state) are excluded from the snapshot by construction. See ADR-0017 and ADR-0018.
 
-_Avoid_: implying the `config` mirror or the sync snapshot reports the one-off values during an override (they report **saved**); implying top-level `duration` reverts to saved during a run (it shows the **live** one-shot value).
+_Avoid_: implying the `config` mirror or the HA attribute bags report the one-off values during an override (they report **saved**); implying the **sync** snapshot reports saved during an override (it reports **effective** — the run-scoped config mirror, ADR-0018); implying top-level `duration` reverts to saved during a run (it shows the **live** one-shot value).
 
 ### Inline melody
 
@@ -189,12 +189,19 @@ anywhere but the TimerHa builders.
 
 ### Timer HA presence
 
-With `HA_DISCOVERY = true` and `SHOW_TIMER = true`, the Timer advertises **eight
+With `HA_DISCOVERY = true` and `SHOW_TIMER = true`, the Timer advertises **ten
 MQTT-discovery entities** — the HA face of its **control** and **observation
 surfaces**: the `{id}_timer_dur` text (discovery face of the `{prefix}/timer`
 control surface), the `{id}_timer_rem` / `{id}_timer_state` sensors (observation),
-the `{id}_timer_buz` / `{id}_timer_fin` selects, and the `start` / `pause` / `reset`
-buttons. Their ids, names, icons and option strings come from the
+the `{id}_timer_buz` / `{id}_timer_fin` selects, the `start` / `pause` / `reset`
+buttons, and the two **sync-control** entities — a `{id}_timer_sync_follow` `HASwitch`
+and a static `Off`/`All` `{id}_timer_sync_targets` `HASelect` (issue #110) that make
+the two sync settings writable from HA (routed through `parseCommand`, so they inherit
+atomic-reject validation and NVS persistence; both stay `inSnapshot=false` local
+identity and never propagate to peers — ADR-0006/0014). The Targets select reflects
+`Off`/`All`, or **unknown** when `sync_targets` holds a specific-ID CSV set out-of-band
+(the read-only state-sensor attribute stays authoritative for the exact value). Their
+ids, names, icons and option strings come from the
 `TIMER_HA_DESCRIPTORS` descriptor table — a member of the Timer descriptor-table
 family alongside `TIMER_SETTINGS_DESCS`, `TIMER_MEMBER_CONFIG_DESCS`,
 `TIMER_MENU_SLOTS` and `TIMER_ATTR_GROUP_DESCS` — and the full list lives in
@@ -256,7 +263,10 @@ consumers; another entity type can adopt attributes by opting in, with no shared
 change — as `HAText` did for the Duration entity (#67), the third device type to adopt.
 
 _Avoid_: calling an attribute key an HA *entity* (it is an attribute of its carrier
-entity) or *writable from HA* (read-only — the config key is the only write path);
+entity) or *writable from HA* (the attribute projection is read-only — the config key
+is the write path; note `sync_follow` / `sync_targets` ALSO have their own dedicated
+writable control entities since issue #110, but that is a separate switch/select, not
+the read-only attribute on the state sensor);
 implying the attributes capability is Timer-specific (it is a general per-type opt-in on
 `HASelect`/`HASensor`/`HAText`) or that it should be lifted into the base device type;
 assuming a key reads the same on every carrier (a multi-carrier key renders in each
@@ -293,20 +303,27 @@ triggers and must not be conflated:
   `duration` is **run-state, not config**: it defines "the same countdown," so it
   travels with the run-state, never inside the config block. A bare start never clobbers
   a peer's config.
-- **Config propagation** — carries a **full snapshot** of the Timer config block
-  (buzzer mode, finished mode, the per-mode timing knobs, the behavior parameters, the
-  display-element toggles, icon images, melodies, bar color) with **no** `action` and
-  **no** `duration`. Fired only by a deliberate config edit. Last-config-writer-wins for
-  the whole block: after a config edit propagates, the group is configured identically.
-  Concretely, the config block is **two tables**: the `inSnapshot == true` rows of
-  `TIMER_SETTINGS_DESCS` (the declarative half) and `TIMER_MEMBER_CONFIG_DESCS` (the
-  member-backed half — `buzzer`/`finished`/icons, B1). Each table feeds both the snapshot
-  build and the `parseCommand` broadcast trigger, so the snapshot can't drift from the
-  trigger (ADR-0007, ADR-0009).
+- **Run-scoped config mirror** — config no longer propagates on a config *edit*; it
+  travels **only bundled with a `start`** (ADR-0018, superseding ADR-0006's config-edit
+  snapshot). A `start` broadcasts **one combined packet** = the leader's **effective**
+  config snapshot + `duration` + `action:"start"`, scoped to that run; `pause`/`reset`
+  stay run-state-only and a bare duration edit still propagates `duration` alone. A
+  follower applies a received command **one-shot** (receiver-forced via the `_remoteApply`
+  guard, reusing the ADR-0017 override core): it mirrors the leader for the run, persists
+  **nothing**, and reverts to its **own** saved config/duration on return to Idle —
+  regardless of the leader's `save` flag. So a config edit no longer rewrites peers' saved
+  settings (each clock keeps its own identity), yet a run still mirrors. Concretely, the
+  config block is **two tables**: the `inSnapshot == true` rows of `TIMER_SETTINGS_DESCS`
+  (the declarative half) and `TIMER_MEMBER_CONFIG_DESCS` (the member-backed half —
+  `buzzer`/`finished`/icons, B1), built into the combined start packet (ADR-0007, ADR-0009).
+  The bundled snapshot reports **effective** config (so a leader's own one-shot run mirrors
+  to followers) — deliberately unlike the `GET /api/timer` `config` mirror and the HA
+  attribute bags, which stay **saved** (ADR-0017 §3, ADR-0018 §4). Inline melodies never
+  travel (the snapshot reads the saved bare name).
 
-_Avoid_: putting `duration` in the config snapshot, or letting a start/reset re-push
-config — those reintroduce the "starting a timer rewrote my settings" surprise this
-split exists to prevent.
+_Avoid_: putting `duration` in the config snapshot; expecting a config *edit* to propagate
+(it no longer does — config rides only with a `start`, ADR-0018); or expecting a follower
+to persist a synced run (it is always one-shot on receive and reverts on Idle).
 
 ### Sync roles
 
@@ -328,3 +345,31 @@ Mechanically, `TIMER_SYNC_FOLLOW` / `TIMER_SYNC_TARGETS` are the `inSnapshot == 
 rows of `TIMER_SETTINGS_DESCS` — persisted and validated like every other table key, but
 deliberately excluded from the config snapshot so peers can't hijack each other's
 targeting (ADR-0006, ADR-0007).
+
+### Peer presence / peer registry
+
+The set of *other clocks currently on the LAN*, learned passively over the same
+propagation-surface UDP channel (port 4212). It exists so a clock can offer a list of
+real, reachable peer ids — the **stable `uniqueID`**, the targeting key — without the user
+hand-typing them. `FIND_AWTRIX` is unsuitable: it returns the user-mutable **hostname**,
+not the `uniqueID`. See [ADR-0019](docs/adr/0019-peer-presence-registry.md).
+
+- **Presence beacon** — a small `{_sync:{src,seq}, presence:true}` packet each clock
+  broadcasts periodically (~30s, `kPresenceIntervalMs`) **unconditionally** when on a real
+  network — *not* in AP mode (so a standalone clock with no real LAN does not beacon, but
+  one on a network is discoverable even if it commands nobody). It carries **no**
+  action/duration/config and is *not* a command.
+- **Harvest (ungated)** — on receive, `applySyncCommand` recognises the `presence` marker
+  and records the sender's `uniqueID` into the registry **bypassing the follow/target
+  gate** (presence is informational, not a command), applying **no** timer state and
+  changing nothing else. It short-circuits before the command path entirely. This is the
+  one inbound path on the surface that is deliberately ungated — contrast the run-state
+  command path, which always passes follow + targeting.
+- **Peer registry** — a bounded (`kPeerMax` ~16) RAM set of `{uniqueID, lastSeen}`. The
+  clock's **own id is excluded**; entries **age out** after the TTL (`kPeerTtlMs` ~100s,
+  ~3 missed beacons), pruned on each `tickPresence()`. Pure LAN-derived state: cleared on
+  boot, never persisted. This is the backend the **dynamic HA Targets select** consumes in
+  a later slice; presence itself builds no UI.
+
+_Avoid_: calling presence a fourth control/propagation command (it changes no state);
+keying peers by hostname (use `uniqueID`); gating the harvest behind follow/targets.

@@ -21,6 +21,18 @@ enum class TimerHaEntity : uint8_t
     Start,
     Pause,
     Reset,
+    SyncFollow,   // writable switch: the receive-consent toggle (sync_follow)
+    SyncTargets,  // writable select: static Off/All targeting (sync_targets)
+    COUNT
+};
+
+// The static option indices for the SyncTargets select (issue #110). The select
+// ships ONLY these two options ("Off"/"All"); a specific-ID CSV set out-of-band
+// is reflected as unknown (-1) — see timerSyncTargetsSelectIndex.
+enum class TimerSyncTargetsOption : int8_t
+{
+    Off = 0,   // sync_targets == ""  (receive only / no relay)
+    All = 1,   // sync_targets == "all"
     COUNT
 };
 
@@ -70,5 +82,13 @@ void formatTimerHaDataTopic(const char *dataPrefix, const char *deviceUniqueId,
 // the wire seam to this exact topic. Pinned by test W13.
 void formatTimerHaAttrTopic(const char *dataPrefix, const char *deviceUniqueId,
                             const char *entityId, char *out, size_t outLen);
+
+// Map a sync_targets value to the SyncTargets select's option index for state
+// reflection (issue #110): "" -> Off (0), "all" -> All (1), anything else (a
+// specific-ID CSV set out-of-band via API/dev.json) -> -1 (unknown). HASelect
+// treats -1 as "no option selected", so the select shows blank while the
+// read-only sync_targets attribute remains authoritative for the exact value.
+// Pure data (no String/Globals) so it is host-testable.
+int8_t timerSyncTargetsSelectIndex(const char *syncTargets);
 
 #endif
