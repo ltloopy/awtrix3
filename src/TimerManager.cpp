@@ -923,6 +923,52 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     return TimerCmdResult::Ok;
 }
 
+// HA control adapter (issue #109): each HA timer callback re-enters the control
+// surface through parseCommand, exactly as the propagation surface does, rather
+// than poking a deep setter. The minimal JSON each entity builds is the SAME shape
+// the {prefix}/timer MQTT topic accepts, so HA edits inherit atomic-reject
+// validation, run-state propagation, and the per-enum codec spellings for free —
+// nothing about duration parsing or enum encoding is duplicated in the HA layer.
+TimerCmdResult TimerManager_::timerHaApply(TimerHaEntity entity, const String &rawValue)
+{
+    StaticJsonDocument<128> doc;
+    switch (entity)
+    {
+    case TimerHaEntity::Buzzer:
+    {
+        // The select callback hands us the chosen option index; map it through the
+        // per-enum codec (ADR-0010) so the emitted wire string is the one
+        // parseCommand accepts — the two cannot drift.
+        long idx = rawValue.toInt();
+        if (idx < 0 || (size_t)idx >= TIMER_BUZZER_CODEC_COUNT) return TimerCmdResult::BadField;
+        doc["buzzer"] = TIMER_BUZZER_CODEC[idx].wire;
+        break;
+    }
+    case TimerHaEntity::Finished:
+    {
+        long idx = rawValue.toInt();
+        if (idx < 0 || (size_t)idx >= TIMER_FINISHED_CODEC_COUNT) return TimerCmdResult::BadField;
+        doc["finished"] = TIMER_FINISHED_CODEC[idx].wire;
+        break;
+    }
+    case TimerHaEntity::Duration:
+        // The raw HH:MM:SS text rides straight into parseCommand, which owns the
+        // parse/validate (parseHMS + range, reject-not-clamp). On a non-Ok result
+        // the caller echoes the canonical live value back (snap-back).
+        doc["duration"] = rawValue;
+        break;
+    case TimerHaEntity::Start:  doc["action"] = "start"; break;
+    case TimerHaEntity::Pause:  doc["action"] = "pause"; break;
+    case TimerHaEntity::Reset:  doc["action"] = "reset"; break;
+    default:
+        return TimerCmdResult::BadField;   // not a control entity
+    }
+
+    String json;
+    serializeJson(doc, json);
+    return parseCommand(json.c_str());
+}
+
 void TimerManager_::onShowTimerChange(bool prev, bool now)
 {
     if (prev && !now) reset();

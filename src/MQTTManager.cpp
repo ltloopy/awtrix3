@@ -424,21 +424,19 @@ void onButtonCommand(HAButton *sender)
     }
     else if (sender == timerStartBtn)
     {
-        bool fromIdle = (TimerManager.getState() == TimerState::Idle);
-        TimerManager.start();
-        if (fromIdle && !GAME_ACTIVE && !BLOCK_NAVIGATION)
-        {
-            String json = "{\"name\":\"Timer\"}";
-            DisplayManager.switchToApp(json.c_str());
-        }
+        // Route through parseCommand (issue #109): start/pause/reset re-enter the
+        // control surface, so HA buttons drive peer clocks (run-state propagation)
+        // the same way the MQTT topic does. parseCommand also owns the
+        // start-from-idle switch-to-Timer-app behaviour, so it isn't duplicated here.
+        TimerManager.timerHaApply(TimerHaEntity::Start, "");
     }
     else if (sender == timerPauseBtn)
     {
-        TimerManager.pause();
+        TimerManager.timerHaApply(TimerHaEntity::Pause, "");
     }
     else if (sender == timerResetBtn)
     {
-        TimerManager.reset();
+        TimerManager.timerHaApply(TimerHaEntity::Reset, "");
     }
 }
 
@@ -471,23 +469,18 @@ void onSelectCommand(int8_t index, HASelect *sender)
     }
     else if (sender == timerBuzzer)
     {
-        // Timer selects persist via TimerManager's own NVS namespace; intentionally
-        // skip the shared saveSettings() at the bottom of this function.
-        if (index >= 0 && index <= 2)
-        {
-            TimerManager.setBuzzerMode((BuzzerMode)index);
-        }
-        sender->setState(index);
+        // Route through parseCommand (issue #109): the HA select re-enters the
+        // control surface like every other edit, so it gets atomic-reject
+        // validation and the per-enum codec wire spelling — no deep setter here.
+        TimerManager.timerHaApply(TimerHaEntity::Buzzer, String(index));
+        // Echo the canonical live mode back (snap-back to last valid on a reject).
+        sender->setState((int8_t)TimerManager.getBuzzerMode());
         return;
     }
     else if (sender == timerFinishedSel)
     {
-        // See timerBuzzer branch: timer selects own their persistence.
-        if (index >= 0 && index <= 2)
-        {
-            TimerManager.setFinishedMode((FinishedMode)index);
-        }
-        sender->setState(index);
+        TimerManager.timerHaApply(TimerHaEntity::Finished, String(index));
+        sender->setState((int8_t)TimerManager.getFinishedMode());
         return;
     }
     saveSettings();
@@ -555,11 +548,10 @@ void onTimerDurationMessage(const char *message, uint16_t length, HAText *sender
     for (uint16_t i = 0; i < length; i++) in += message[i];
     in.trim();
 
-    // Reject invalid input — malformed OR out-of-range (parity with the command
-    // surfaces: reject, never clamp). Apply only a parseable, in-range value.
-    uint32_t secs;
-    if (TimerManager_::parseHMS(in, secs) && TimerManager_::isValidDuration(secs))
-        TimerManager.setDuration(secs);
+    // Route the raw HH:MM:SS text through parseCommand (issue #109): it owns the
+    // parse/validate (parseHMS + range, reject-not-clamp) — the HA layer no longer
+    // duplicates that logic. A rejected input applies nothing (atomic-reject).
+    TimerManager.timerHaApply(TimerHaEntity::Duration, in);
 
     // Echo the canonical value back so rejected input snaps the field to the
     // previous valid time rather than leaving the bad text displayed.

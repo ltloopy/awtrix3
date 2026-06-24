@@ -263,6 +263,25 @@ public:
 
     TimerCmdResult parseCommand(const char *json);
 
+    // -- Home Assistant control adapter (issue #109) --
+    // Route a single HA timer callback through parseCommand instead of a deep
+    // setter, so HA edits get the SAME atomic-reject validation, the same
+    // propagation, and the same codec strings as the {prefix}/timer MQTT surface.
+    // Each entity builds the minimal JSON command it represents and hands it to
+    // parseCommand, mirroring the sync receive path. Display-free (no ArduinoHA,
+    // no MQTT client) so the HA->parseCommand path is host-testable.
+    //
+    // rawValue per entity:
+    //   * Buzzer / Finished : the selected select-option INDEX as a decimal
+    //     string; mapped through the per-enum codec (ADR-0010) to the canonical
+    //     wire spelling, so emitted and accepted JSON cannot drift.
+    //   * Duration          : the raw HH:MM:SS text; parseCommand owns the
+    //     parse/validate (parseHMS + range), so that logic is NOT duplicated here.
+    //   * Start/Pause/Reset : ignored; the entity selects the action.
+    // Returns parseCommand's result so the caller can echo the canonical live
+    // value back on a non-Ok result (snap-back to the last valid value).
+    TimerCmdResult timerHaApply(TimerHaEntity entity, const String &rawValue);
+
     // -- Propagation surface --
     // Emit one UDP broadcast mirroring a locally-accepted action to peers. No-ops
     // when sync is off (empty target list) or while applying an inbound packet

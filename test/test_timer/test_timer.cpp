@@ -4010,6 +4010,120 @@ void test_W26_max_duration_change_republishes_state_and_duration(void) {
     TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_REMAINING_ATTR_TOPIC));
 }
 
+// ============================================================================
+// HA1..HA6 — the display-free timerHaApply(entity, rawValue) adapter routes each
+// HA timer callback through parseCommand (issue #109). The adapter builds the
+// minimal JSON command its entity represents and hands it to parseCommand, so HA
+// edits get the same atomic-reject validation, the same propagation, and the same
+// codec strings as the MQTT/HTTP control surface — no deep setters, no duplicated
+// parse logic in the HA layer.
+// ============================================================================
+
+// HA1 — the buzzer select routes through parseCommand: the selected option index
+// maps through the per-enum codec (ADR-0010) to the canonical wire string, so the
+// applied mode matches the equivalent {"buzzer":"countdown"} command exactly.
+void test_HA1_buzzer_select_routes_through_parsecommand(void) {
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::Buzzer,
+            String((int)BuzzerMode::Countdown))));
+    TEST_ASSERT_EQUAL(static_cast<int>(BuzzerMode::Countdown),
+                      static_cast<int>(TimerManager.getBuzzerMode()));
+
+    // Parity: same observable result as the equivalent parseCommand JSON.
+    TimerManager.parseCommand("{\"buzzer\":\"end\"}");
+    TEST_ASSERT_EQUAL(static_cast<int>(BuzzerMode::End),
+                      static_cast<int>(TimerManager.getBuzzerMode()));
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::Buzzer,
+            String((int)BuzzerMode::Countdown))));
+    TEST_ASSERT_EQUAL(static_cast<int>(BuzzerMode::Countdown),
+                      static_cast<int>(TimerManager.getBuzzerMode()));
+}
+
+// HA2 — the finished select routes through parseCommand via the codec wire string.
+void test_HA2_finished_select_routes_through_parsecommand(void) {
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::Finished,
+            String((int)FinishedMode::ReAlert))));
+    TEST_ASSERT_EQUAL(static_cast<int>(FinishedMode::ReAlert),
+                      static_cast<int>(TimerManager.getFinishedMode()));
+}
+
+// HA3 — the duration text routes its raw HH:MM:SS string through parseCommand,
+// which owns the parse/validate (parseHMS + range): a valid clock string applies.
+void test_HA3_duration_text_routes_through_parsecommand(void) {
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::Duration, "0:02:30")));
+    TEST_ASSERT_EQUAL_UINT32(150, TimerManager.getDuration());
+}
+
+// HA4 — an invalid duration is rejected wholesale (atomic-reject parity): the
+// adapter returns a non-Ok result and the live value is unchanged, so the HA field
+// snaps back to the last valid value. Covers malformed AND out-of-range.
+void test_HA4_invalid_duration_rejected_and_snaps_back(void) {
+    TimerManager.setDuration(300);   // last valid value
+
+    // Malformed clock string -> BadField, nothing applied.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::Duration, "not a time")));
+    TEST_ASSERT_EQUAL_UINT32(300, TimerManager.getDuration());
+
+    // Out-of-range (> 24h cap) -> BadField, nothing applied (reject, never clamp).
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::Duration, "30:00:00")));
+    TEST_ASSERT_EQUAL_UINT32(300, TimerManager.getDuration());
+
+    // The canonical live value to echo back is the unchanged 300 ("5:00").
+    TEST_ASSERT_EQUAL_STRING("5:00", TimerManager_::formatHMS(TimerManager.getDuration()).c_str());
+}
+
+// HA5 — the Start/Pause/Reset buttons route through parseCommand action commands,
+// producing the same run-state transitions as the equivalent JSON.
+void test_HA5_buttons_route_through_parsecommand(void) {
+    TimerManager.setDuration(300);
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::Start, "")));
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Running),
+                      static_cast<int>(TimerManager.getState()));
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::Pause, "")));
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Paused),
+                      static_cast<int>(TimerManager.getState()));
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::Reset, "")));
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle),
+                      static_cast<int>(TimerManager.getState()));
+}
+
+// HA6 — HA Start/Pause/Reset propagate run-state to peers exactly like the MQTT
+// surface: routing through parseCommand fires broadcastRunState. A Start emits the
+// combined run-scoped packet (action+duration), a Pause emits a run-state-only
+// packet. This is the propagation parity the issue calls for.
+void test_HA6_buttons_propagate_run_state_to_peers(void) {
+    SHOW_TIMER = true;
+    TIMER_SYNC_TARGETS = "all";   // leader: relays its own local actions
+    TimerManager.setDuration(180);
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::Start, "")));
+    TEST_ASSERT_EQUAL_INT(1, fixture::sync_packet_count());
+
+    DynamicJsonDocument doc(2048);
+    TEST_ASSERT_FALSE(deserializeJson(doc, fixture::last_sync_payload()));
+    TEST_ASSERT_EQUAL_STRING("start", doc["action"]);
+    TEST_ASSERT_EQUAL_UINT32(180, doc["duration"].as<uint32_t>());
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::Pause, "")));
+    TEST_ASSERT_EQUAL_INT(2, fixture::sync_packet_count());
+    DynamicJsonDocument doc2(512);
+    TEST_ASSERT_FALSE(deserializeJson(doc2, fixture::last_sync_payload()));
+    TEST_ASSERT_EQUAL_STRING("pause", doc2["action"]);
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
@@ -4185,5 +4299,11 @@ int main(int, char **) {
     RUN_TEST(test_W24_clearAllAttributeGroups_empties_each_carrier);
     RUN_TEST(test_W25_refresh_after_clear_repopulates_attributes);
     RUN_TEST(test_W26_max_duration_change_republishes_state_and_duration);
+    RUN_TEST(test_HA1_buzzer_select_routes_through_parsecommand);
+    RUN_TEST(test_HA2_finished_select_routes_through_parsecommand);
+    RUN_TEST(test_HA3_duration_text_routes_through_parsecommand);
+    RUN_TEST(test_HA4_invalid_duration_rejected_and_snaps_back);
+    RUN_TEST(test_HA5_buttons_route_through_parsecommand);
+    RUN_TEST(test_HA6_buttons_propagate_run_state_to_peers);
     return UNITY_END();
 }
