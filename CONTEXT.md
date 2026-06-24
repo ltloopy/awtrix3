@@ -189,12 +189,19 @@ anywhere but the TimerHa builders.
 
 ### Timer HA presence
 
-With `HA_DISCOVERY = true` and `SHOW_TIMER = true`, the Timer advertises **eight
+With `HA_DISCOVERY = true` and `SHOW_TIMER = true`, the Timer advertises **ten
 MQTT-discovery entities** — the HA face of its **control** and **observation
 surfaces**: the `{id}_timer_dur` text (discovery face of the `{prefix}/timer`
 control surface), the `{id}_timer_rem` / `{id}_timer_state` sensors (observation),
-the `{id}_timer_buz` / `{id}_timer_fin` selects, and the `start` / `pause` / `reset`
-buttons. Their ids, names, icons and option strings come from the
+the `{id}_timer_buz` / `{id}_timer_fin` selects, the `start` / `pause` / `reset`
+buttons, and the two **sync-control** entities — a `{id}_timer_sync_follow` `HASwitch`
+and a static `Off`/`All` `{id}_timer_sync_targets` `HASelect` (issue #110) that make
+the two sync settings writable from HA (routed through `parseCommand`, so they inherit
+atomic-reject validation and NVS persistence; both stay `inSnapshot=false` local
+identity and never propagate to peers — ADR-0006/0014). The Targets select reflects
+`Off`/`All`, or **unknown** when `sync_targets` holds a specific-ID CSV set out-of-band
+(the read-only state-sensor attribute stays authoritative for the exact value). Their
+ids, names, icons and option strings come from the
 `TIMER_HA_DESCRIPTORS` descriptor table — a member of the Timer descriptor-table
 family alongside `TIMER_SETTINGS_DESCS`, `TIMER_MEMBER_CONFIG_DESCS`,
 `TIMER_MENU_SLOTS` and `TIMER_ATTR_GROUP_DESCS` — and the full list lives in
@@ -256,7 +263,10 @@ consumers; another entity type can adopt attributes by opting in, with no shared
 change — as `HAText` did for the Duration entity (#67), the third device type to adopt.
 
 _Avoid_: calling an attribute key an HA *entity* (it is an attribute of its carrier
-entity) or *writable from HA* (read-only — the config key is the only write path);
+entity) or *writable from HA* (the attribute projection is read-only — the config key
+is the write path; note `sync_follow` / `sync_targets` ALSO have their own dedicated
+writable control entities since issue #110, but that is a separate switch/select, not
+the read-only attribute on the state sensor);
 implying the attributes capability is Timer-specific (it is a general per-type opt-in on
 `HASelect`/`HASensor`/`HAText`) or that it should be lifted into the base device type;
 assuming a key reads the same on every carrier (a multi-carrier key renders in each
@@ -335,3 +345,31 @@ Mechanically, `TIMER_SYNC_FOLLOW` / `TIMER_SYNC_TARGETS` are the `inSnapshot == 
 rows of `TIMER_SETTINGS_DESCS` — persisted and validated like every other table key, but
 deliberately excluded from the config snapshot so peers can't hijack each other's
 targeting (ADR-0006, ADR-0007).
+
+### Peer presence / peer registry
+
+The set of *other clocks currently on the LAN*, learned passively over the same
+propagation-surface UDP channel (port 4212). It exists so a clock can offer a list of
+real, reachable peer ids — the **stable `uniqueID`**, the targeting key — without the user
+hand-typing them. `FIND_AWTRIX` is unsuitable: it returns the user-mutable **hostname**,
+not the `uniqueID`. See [ADR-0019](docs/adr/0019-peer-presence-registry.md).
+
+- **Presence beacon** — a small `{_sync:{src,seq}, presence:true}` packet each clock
+  broadcasts periodically (~30s, `kPresenceIntervalMs`) **unconditionally** when on a real
+  network — *not* in AP mode (so a standalone clock with no real LAN does not beacon, but
+  one on a network is discoverable even if it commands nobody). It carries **no**
+  action/duration/config and is *not* a command.
+- **Harvest (ungated)** — on receive, `applySyncCommand` recognises the `presence` marker
+  and records the sender's `uniqueID` into the registry **bypassing the follow/target
+  gate** (presence is informational, not a command), applying **no** timer state and
+  changing nothing else. It short-circuits before the command path entirely. This is the
+  one inbound path on the surface that is deliberately ungated — contrast the run-state
+  command path, which always passes follow + targeting.
+- **Peer registry** — a bounded (`kPeerMax` ~16) RAM set of `{uniqueID, lastSeen}`. The
+  clock's **own id is excluded**; entries **age out** after the TTL (`kPeerTtlMs` ~100s,
+  ~3 missed beacons), pruned on each `tickPresence()`. Pure LAN-derived state: cleared on
+  boot, never persisted. This is the backend the **dynamic HA Targets select** consumes in
+  a later slice; presence itself builds no UI.
+
+_Avoid_: calling presence a fourth control/propagation command (it changes no state);
+keying peers by hostname (use `uniqueID`); gating the harvest behind follow/targets.

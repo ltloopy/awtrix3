@@ -36,6 +36,10 @@ HASensorNumber *timerRemaining = nullptr;
 HASensor *timerStateSensor = nullptr;
 HASelect *timerBuzzer = nullptr, *timerFinishedSel = nullptr;
 HAButton *timerStartBtn = nullptr, *timerPauseBtn = nullptr, *timerResetBtn = nullptr;
+// Sync-control entities (issue #110): the writable Follow switch and static
+// Off/All Targets select that make the two sync settings controllable from HA.
+HASwitch *timerSyncFollowSw = nullptr;
+HASelect *timerSyncTargetsSel = nullptr;
 bool connected;
 char matID[40], ind1ID[40], ind2ID[40], ind3ID[40], briID[40], btnAID[40], btnBID[40], btnCID[40], appID[40], tempID[40], humID[40], luxID[40], verID[40], ramID[40], upID[40], sigID[40], btnLID[40], btnMID[40], btnRID[40], transID[40], doUpdateID[40], batID[40], myID[40], sSpeed[40], effectID[40], ipAddrID[40];
 // Each Timer entity's resolved HA discovery unique id ("%s" filled with the MAC),
@@ -67,6 +71,7 @@ void reconcileTimerHAState()
 // createTimerHAEntities() (placed here, next to removeTimerHAEntities) wires them.
 void onButtonCommand(HAButton *sender);
 void onSelectCommand(int8_t index, HASelect *sender);
+void onSwitchCommand(bool state, HASwitch *sender);
 void onTimerDurationMessage(const char *message, uint16_t length, HAText *sender);
 
 // Creates the Timer HA entity objects (and registers them with HAMqtt via their
@@ -156,6 +161,31 @@ void MQTTManager_::createTimerHAEntities()
     timerResetBtn->setIcon(dReset.icon);
     timerResetBtn->setName(dReset.name);
     timerResetBtn->onCommand(onButtonCommand);
+
+    // Sync-control entities (issue #110). The two sync settings — until now
+    // read-only attributes on the state sensor — become writable here. Both
+    // callbacks route through TimerManager::timerHaApply -> parseCommand, so they
+    // inherit the atomic-reject validation and NVS persistence the rest of the
+    // control surface has. sync_* are local identity (inSnapshot=false) and never
+    // propagate to peers — see ADR-0006/0014.
+    const TimerHaDescriptor &dSyncF = timerHaDescriptor(TimerHaEntity::SyncFollow);
+    const TimerHaDescriptor &dSyncT = timerHaDescriptor(TimerHaEntity::SyncTargets);
+
+    timerSyncFollowSw = new HASwitch(timerHaId(TimerHaEntity::SyncFollow));
+    timerSyncFollowSw->setIcon(dSyncF.icon);
+    timerSyncFollowSw->setName(dSyncF.name);
+    timerSyncFollowSw->onCommand(onSwitchCommand);
+    timerSyncFollowSw->setState(TIMER_SYNC_FOLLOW, true);
+
+    timerSyncTargetsSel = new HASelect(timerHaId(TimerHaEntity::SyncTargets));
+    timerSyncTargetsSel->setOptions(dSyncT.options);
+    timerSyncTargetsSel->onCommand(onSelectCommand);
+    timerSyncTargetsSel->setIcon(dSyncT.icon);
+    timerSyncTargetsSel->setName(dSyncT.name);
+    // Reflect the current sync_targets: Off/All, or unknown (-1) for a specific-ID
+    // CSV set out-of-band — the read-only attribute stays authoritative for the
+    // exact value (issue #110).
+    timerSyncTargetsSel->setState(timerSyncTargetsSelectIndex(TIMER_SYNC_TARGETS.c_str()), true);
 }
 
 // Brings the Timer HA entities online at runtime when SHOW_TIMER flips false->true.
@@ -169,7 +199,8 @@ void MQTTManager_::enableTimerHADiscovery()
 
     HABaseDeviceType *timerTypes[] = {
         timerDuration, timerRemaining, timerStateSensor, timerBuzzer,
-        timerFinishedSel, timerStartBtn, timerPauseBtn, timerResetBtn};
+        timerFinishedSel, timerStartBtn, timerPauseBtn, timerResetBtn,
+        timerSyncFollowSw, timerSyncTargetsSel};
     for (HABaseDeviceType *dt : timerTypes)
         mqtt.publishConfigForDeviceType(dt);
 
@@ -442,6 +473,16 @@ void onButtonCommand(HAButton *sender)
 
 void onSwitchCommand(bool state, HASwitch *sender)
 {
+    if (sender == timerSyncFollowSw)
+    {
+        // Route through parseCommand (issue #110): the Follow switch re-enters the
+        // control surface, so it gets the strict-bool atomic-reject validation and
+        // NVS persistence. sync_follow is local identity and never propagates.
+        TimerManager.timerHaApply(TimerHaEntity::SyncFollow, String(state ? 1 : 0));
+        // Echo the value actually applied back (snap-back if a write were rejected).
+        sender->setState(TIMER_SYNC_FOLLOW);
+        return;
+    }
     AUTO_TRANSITION = state;
     DisplayManager.setAutoTransition(state);
     saveSettings();
@@ -481,6 +522,17 @@ void onSelectCommand(int8_t index, HASelect *sender)
     {
         TimerManager.timerHaApply(TimerHaEntity::Finished, String(index));
         sender->setState((int8_t)TimerManager.getFinishedMode());
+        return;
+    }
+    else if (sender == timerSyncTargetsSel)
+    {
+        // Route through parseCommand (issue #110): the static Off/All option index
+        // maps to sync_targets ""/"all", inheriting the bespoke validator and NVS
+        // persistence. Echo the canonical applied value back (Off/All, or unknown
+        // for a specific-ID CSV set out-of-band — the read-only attribute stays
+        // authoritative for the exact value). sync_targets never propagates.
+        TimerManager.timerHaApply(TimerHaEntity::SyncTargets, String(index));
+        sender->setState(timerSyncTargetsSelectIndex(TIMER_SYNC_TARGETS.c_str()));
         return;
     }
     saveSettings();
