@@ -123,6 +123,24 @@ _Avoid_: calling `GET /api/timer` a "control surface" or implying it participate
 
 **Icons are the one deliberate HA observation non-gap.** The four `icon_<state>` names are readable over HTTP (`config.icon_*`, ADR-0015) and MQTT (retained `{prefix}/timer/icons`), but have **no HA read path** by design: they already have two read paths, HA cannot usefully render an AWTRIX icon file, and they sit outside the settings/attribute-group tables. Documented, not an oversight.
 
+### One-shot command (`save:false`)
+
+A Timer command carrying the payload-level boolean **`save:false`** (PRD #99 / ADR-0017). Its config changes apply to the **current run only** and revert to the saved settings the moment the timer returns to Idle (via `reset()` or auto-clear, through the shared `returnToIdle()` seam), **writing nothing to flash**. `save` defaults to `true` (the legacy persist-everything behaviour); it is one **payload-level** flag covering *all* config keys in the payload, validated in the atomic-reject pass (a non-boolean `save` is `BadField`/400). A normal (`save:true`) config command arriving *during* an active one-shot run **rebaselines** — it commits the live config, including the prior one-shot values, as the new saved baseline and ends the override. The on-device **TIMER menu always persists** (it never emits `save:false`) — a documented parity note, not an ADR-0001 control-surface divergence (`save` is a wire-payload concept the menu has no payload for).
+
+_Avoid_: reading `save` as the MQTT *retain* flag or as the custom-apps `save` key (a different feature); calling it per-key (it is payload-level).
+
+### Saved config vs effective run config
+
+The distinction the one-shot model rests on. **Saved config** is the flash (NVS) truth that *every* observation/sync carrier reports; **effective run config** is what the active run actually uses. A `save:false` command writes only the **effective** layer: it captures a snapshot of the saved config (generically over the two descriptor tables — `TIMER_SETTINGS_DESCS`' `inSnapshot` rows + `TIMER_MEMBER_CONFIG_DESCS` — plus `durationSec` and the resolved melody RAM), applies live, and suppresses the persist/`broadcastConfig`/HA-attribute side effects. While an override is active the carriers stay **honest** — the `GET /api/timer` `config` mirror, the device-to-device sync snapshot, and the HA attribute bags all serialize from the **saved** snapshot — while the **top-level run-state** (`duration`, `buzzer`, `finished` at the top level of `GET /api/timer`) stays **effective**. The split is: *top level = effective (what is running now), `config` = saved (what is persisted)*. `sync_*` (local identity) and `duration` (run-state) are excluded from the snapshot by construction. See ADR-0017.
+
+_Avoid_: implying the `config` mirror or the sync snapshot reports the one-off values during an override (they report **saved**); implying top-level `duration` reverts to saved during a run (it shows the **live** one-shot value).
+
+### Inline melody
+
+An **inline RTTTL tune** supplied directly on `melody_end`/`melody_tick` (a literal melody string), as opposed to a **bare name** that resolves to an uploaded `/MELODIES/<name>.txt` file. The two are distinguished by content: a bare name is `[A-Za-z0-9_-]*` (no colon); an inline tune carries RTTTL structure (`name:control:notes` with a `d=`/`o=`/`b=` control section), validated by a pure classifier/validator (a malformed inline tune is `BadField`/400). An inline tune is **always one-shot regardless of `save`** — it has no persistable file form, so it is staged directly into the resolved melody RAM, the saved melody-name global is never touched, it **never appears** in any carrier (audible-only run-state; the `config` mirror shows the **saved bare name** throughout), and it reverts on return to Idle. A bare name persists and obeys `save` exactly as before. See ADR-0017 / issue #102.
+
+_Avoid_: expecting an inline tune in the `GET /api/timer` `config` mirror or HA bags (it is never there); treating a bare name as one-shot (only inline tunes are inherently one-shot).
+
 ### Timer wire seam
 
 The single chokepoint through which Timer MQTT output flows as `(topic, payload)`
