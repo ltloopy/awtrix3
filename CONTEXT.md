@@ -345,3 +345,31 @@ Mechanically, `TIMER_SYNC_FOLLOW` / `TIMER_SYNC_TARGETS` are the `inSnapshot == 
 rows of `TIMER_SETTINGS_DESCS` — persisted and validated like every other table key, but
 deliberately excluded from the config snapshot so peers can't hijack each other's
 targeting (ADR-0006, ADR-0007).
+
+### Peer presence / peer registry
+
+The set of *other clocks currently on the LAN*, learned passively over the same
+propagation-surface UDP channel (port 4212). It exists so a clock can offer a list of
+real, reachable peer ids — the **stable `uniqueID`**, the targeting key — without the user
+hand-typing them. `FIND_AWTRIX` is unsuitable: it returns the user-mutable **hostname**,
+not the `uniqueID`. See [ADR-0019](docs/adr/0019-peer-presence-registry.md).
+
+- **Presence beacon** — a small `{_sync:{src,seq}, presence:true}` packet each clock
+  broadcasts periodically (~30s, `kPresenceIntervalMs`) **unconditionally** when on a real
+  network — *not* in AP mode (so a standalone clock with no real LAN does not beacon, but
+  one on a network is discoverable even if it commands nobody). It carries **no**
+  action/duration/config and is *not* a command.
+- **Harvest (ungated)** — on receive, `applySyncCommand` recognises the `presence` marker
+  and records the sender's `uniqueID` into the registry **bypassing the follow/target
+  gate** (presence is informational, not a command), applying **no** timer state and
+  changing nothing else. It short-circuits before the command path entirely. This is the
+  one inbound path on the surface that is deliberately ungated — contrast the run-state
+  command path, which always passes follow + targeting.
+- **Peer registry** — a bounded (`kPeerMax` ~16) RAM set of `{uniqueID, lastSeen}`. The
+  clock's **own id is excluded**; entries **age out** after the TTL (`kPeerTtlMs` ~100s,
+  ~3 missed beacons), pruned on each `tickPresence()`. Pure LAN-derived state: cleared on
+  boot, never persisted. This is the backend the **dynamic HA Targets select** consumes in
+  a later slice; presence itself builds no UI.
+
+_Avoid_: calling presence a fourth control/propagation command (it changes no state);
+keying peers by hostname (use `uniqueID`); gating the harvest behind follow/targets.

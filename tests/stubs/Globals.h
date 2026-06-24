@@ -34,6 +34,7 @@ extern uint32_t TIMER_BAR_COLOR;
 extern bool        TIMER_SYNC_FOLLOW;
 extern String      TIMER_SYNC_TARGETS;
 extern const char *uniqueID;
+extern bool        AP_MODE;
 
 extern uint32_t TEXTCOLOR_888;
 
