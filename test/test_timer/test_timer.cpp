@@ -1514,7 +1514,9 @@ static int count_ha_options(const char *opts) {
 // U32 — exactly one descriptor per slot, in slot order, with a sane component
 // and a "%s"-bearing unique-id format.
 void test_U32_descriptor_table_well_formed(void) {
-    TEST_ASSERT_EQUAL_UINT(8, (unsigned)TIMER_HA_DESCRIPTOR_COUNT);
+    // 8 original entities + the two sync-control entities (issue #110): the Follow
+    // switch and the static Off/All Targets select.
+    TEST_ASSERT_EQUAL_UINT(10, (unsigned)TIMER_HA_DESCRIPTOR_COUNT);
     for (size_t i = 0; i < TIMER_HA_DESCRIPTOR_COUNT; ++i) {
         const TimerHaDescriptor &d = TIMER_HA_DESCRIPTORS[i];
         // Row i must describe slot i (setup/teardown index the array by slot).
@@ -1524,6 +1526,7 @@ void test_U32_descriptor_table_well_formed(void) {
             strcmp(d.component, "text")   == 0 ||
             strcmp(d.component, "sensor") == 0 ||
             strcmp(d.component, "select") == 0 ||
+            strcmp(d.component, "switch") == 0 ||
             strcmp(d.component, "button") == 0;
         TEST_ASSERT_TRUE_MESSAGE(validComponent, d.component);
 
@@ -4124,6 +4127,97 @@ void test_HA6_buttons_propagate_run_state_to_peers(void) {
     TEST_ASSERT_EQUAL_STRING("pause", doc2["action"]);
 }
 
+// ============================================================================
+// HA7..HA11 — the two writable sync-control entities (issue #110). The Follow
+// switch (sync_follow) and the static Off/All Targets select (sync_targets) both
+// route through the timerHaApply(entity, rawValue) adapter into parseCommand, so
+// they inherit the same atomic-reject validation and NVS persistence as the
+// {prefix}/timer surface. sync_* are local identity (inSnapshot=false) and must
+// NEVER propagate to peers.
+// ============================================================================
+
+// HA7 — the Follow switch routes a bool through parseCommand: on -> sync_follow
+// true, off -> false, each persisting to NVS (the table half saved by parseCommand).
+void test_HA7_sync_follow_switch_routes_through_parsecommand(void) {
+    TIMER_SYNC_FOLLOW = false;
+    saveSettings_calls = 0;
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncFollow, "1")));
+    TEST_ASSERT_TRUE(TIMER_SYNC_FOLLOW);
+    // Persists: sync_follow is a table-backed ("awtrix") key, so a real change
+    // flushes that namespace exactly once (saveSettings).
+    TEST_ASSERT_EQUAL_INT(1, saveSettings_calls);
+
+    saveSettings_calls = 0;
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncFollow, "0")));
+    TEST_ASSERT_FALSE(TIMER_SYNC_FOLLOW);
+    TEST_ASSERT_EQUAL_INT(1, saveSettings_calls);
+}
+
+// HA8 — the Targets select routes its option index through parseCommand: Off (0)
+// -> sync_targets "", All (1) -> "all", each persisting to NVS.
+void test_HA8_sync_targets_select_routes_through_parsecommand(void) {
+    TIMER_SYNC_TARGETS = "";
+    saveSettings_calls = 0;
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncTargets, "1")));
+    TEST_ASSERT_EQUAL_STRING("all", TIMER_SYNC_TARGETS.c_str());
+    // Persists: sync_targets is a table-backed key, flushed once on the change.
+    TEST_ASSERT_EQUAL_INT(1, saveSettings_calls);
+
+    saveSettings_calls = 0;
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncTargets, "0")));
+    TEST_ASSERT_EQUAL_STRING("", TIMER_SYNC_TARGETS.c_str());
+    TEST_ASSERT_EQUAL_INT(1, saveSettings_calls);
+}
+
+// HA9 — the select-reflection helper maps the current sync_targets value to its
+// option index: "" -> Off (0), "all" -> All (1), and a specific-ID CSV (set
+// out-of-band via API/dev.json) -> -1 (unknown), so the select shows blank while
+// the read-only attribute stays authoritative for the exact value.
+void test_HA9_sync_targets_select_index_reflects_value(void) {
+    TEST_ASSERT_EQUAL_INT(0,  timerSyncTargetsSelectIndex(""));
+    TEST_ASSERT_EQUAL_INT(1,  timerSyncTargetsSelectIndex("all"));
+    TEST_ASSERT_EQUAL_INT(-1, timerSyncTargetsSelectIndex("awtrix_ab12,awtrix_cd34"));
+    TEST_ASSERT_EQUAL_INT(-1, timerSyncTargetsSelectIndex("awtrix_peer"));
+}
+
+// HA10 — an invalid Targets write is rejected wholesale (atomic-reject parity):
+// an out-of-range option index returns a non-Ok result and changes nothing, so the
+// select snaps back to the value actually applied.
+void test_HA10_invalid_sync_targets_write_rejected(void) {
+    TIMER_SYNC_TARGETS = "all";   // last applied value
+
+    // Option index past the static Off/All list -> BadField, nothing applied.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncTargets, "2")));
+    TEST_ASSERT_EQUAL_STRING("all", TIMER_SYNC_TARGETS.c_str());
+    // A negative index is rejected too.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncTargets, "-1")));
+    TEST_ASSERT_EQUAL_STRING("all", TIMER_SYNC_TARGETS.c_str());
+    // The applied value still reflects All in the select.
+    TEST_ASSERT_EQUAL_INT(1, timerSyncTargetsSelectIndex(TIMER_SYNC_TARGETS.c_str()));
+}
+
+// HA11 — applying sync_follow / sync_targets through the HA adapter NEVER
+// propagates to peers (local identity, inSnapshot=false): no sync packet goes out.
+void test_HA11_sync_control_writes_do_not_propagate(void) {
+    SHOW_TIMER = true;
+    TIMER_SYNC_FOLLOW = true;
+    TIMER_SYNC_TARGETS = "all";   // this clock would relay its own local edits
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncFollow, "0")));
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncTargets, "0")));
+    TEST_ASSERT_EQUAL_INT(0, fixture::sync_packet_count());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
@@ -4305,5 +4399,10 @@ int main(int, char **) {
     RUN_TEST(test_HA4_invalid_duration_rejected_and_snaps_back);
     RUN_TEST(test_HA5_buttons_route_through_parsecommand);
     RUN_TEST(test_HA6_buttons_propagate_run_state_to_peers);
+    RUN_TEST(test_HA7_sync_follow_switch_routes_through_parsecommand);
+    RUN_TEST(test_HA8_sync_targets_select_routes_through_parsecommand);
+    RUN_TEST(test_HA9_sync_targets_select_index_reflects_value);
+    RUN_TEST(test_HA10_invalid_sync_targets_write_rejected);
+    RUN_TEST(test_HA11_sync_control_writes_do_not_propagate);
     return UNITY_END();
 }

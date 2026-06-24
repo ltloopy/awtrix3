@@ -960,6 +960,24 @@ TimerCmdResult TimerManager_::timerHaApply(TimerHaEntity entity, const String &r
     case TimerHaEntity::Start:  doc["action"] = "start"; break;
     case TimerHaEntity::Pause:  doc["action"] = "pause"; break;
     case TimerHaEntity::Reset:  doc["action"] = "reset"; break;
+    case TimerHaEntity::SyncFollow:
+        // The switch callback hands us the new bool ("1"/"0"); emit the strict
+        // bool parseCommand's sync_follow validator (TcCheck::Bool) accepts. Local
+        // identity (inSnapshot=false), so it persists but never propagates.
+        doc["sync_follow"] = (rawValue.toInt() != 0);
+        break;
+    case TimerHaEntity::SyncTargets:
+    {
+        // The select callback hands us the chosen STATIC option index (issue #110);
+        // map it through TimerSyncTargetsOption to the wire value the bespoke
+        // sync_targets validator accepts: Off -> "" (off), All -> "all". Reject any
+        // index outside the static list (atomic-reject parity).
+        long idx = rawValue.toInt();
+        if (idx == (long)TimerSyncTargetsOption::Off)      doc["sync_targets"] = "";
+        else if (idx == (long)TimerSyncTargetsOption::All) doc["sync_targets"] = "all";
+        else return TimerCmdResult::BadField;
+        break;
+    }
     default:
         return TimerCmdResult::BadField;   // not a control entity
     }

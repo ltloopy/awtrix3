@@ -58,14 +58,14 @@ no Home Assistant or MQTT subscription required. `dev.json` keys override NVS on
 
 | Item | API / MQTT key | dev.json | GET /api/timer | Home Assistant | On-device |
 |------|----------------|----------|----------------|----------------|-----------|
-| Sync follow (dflt false) | `sync_follow` ✅ | `timer_sync_follow` ✅ | 👁 `config.sync_follow` | 👁 attr on state sensor | — |
-| Sync targets (`all` / CSV, dflt empty) | `sync_targets` ✅ | `timer_sync_targets` ✅ | 👁 `config.sync_targets` | 👁 attr on state sensor | — |
+| Sync follow (dflt false) | `sync_follow` ✅ | `timer_sync_follow` ✅ | 👁 `config.sync_follow` | ✅ Follow `switch`; 👁 attr on state sensor | — |
+| Sync targets (`all` / CSV, dflt empty) | `sync_targets` ✅ | `timer_sync_targets` ✅ | 👁 `config.sync_targets` | ✅ Targets `select` (static `Off`/`All`; unknown for a specific-ID CSV); 👁 attr on state sensor | — |
 
 ### Master enable
 
 | Item | API / MQTT | dev.json | GET /api/timer | Home Assistant | On-device |
 |------|------------|----------|----------------|----------------|-----------|
-| Show timer (dflt true) | `enabled` 👁 (GET); POST→409 & topic ignored when off | `show_timer` ✅ | 👁 `enabled` (top-level; not in `config`) | — (8 entities pruned when off) | web settings `TIMER` toggle (NVS) |
+| Show timer (dflt true) | `enabled` 👁 (GET); POST→409 & topic ignored when off | `show_timer` ✅ | 👁 `enabled` (top-level; not in `config`) | — (10 entities pruned when off) | web settings `TIMER` toggle (NVS) |
 
 ---
 
@@ -321,7 +321,7 @@ Also editable on-device via the `BUZZER` slot of the `TIMER` top menu (see [`ons
 
 ## Home Assistant entities
 
-With `HA_DISCOVERY=true`, the firmware advertises eight entities:
+With `HA_DISCOVERY=true`, the firmware advertises ten entities:
 
 | Entity | Type | Purpose |
 | --- | --- | --- |
@@ -333,6 +333,8 @@ With `HA_DISCOVERY=true`, the firmware advertises eight entities:
 | `{id}_timer_start` | `button`      | Equivalent to `{"action":"start"}`. |
 | `{id}_timer_pause` | `button`      | Equivalent to `{"action":"pause"}`. |
 | `{id}_timer_reset` | `button`      | Equivalent to `{"action":"reset"}`. |
+| `{id}_timer_sync_follow`  | `switch` | The receive-consent toggle (`sync_follow`), writable. Toggling emits `{"sync_follow":<bool>}` through `parseCommand` (atomic-reject + NVS persist). Reflects the current `sync_follow`. Local identity — never propagated to peers. |
+| `{id}_timer_sync_targets` | `select` | The send-targeting setting (`sync_targets`), writable with **static** options `Off`/`All`. Selecting emits `{"sync_targets":""\|"all"}` through `parseCommand`. Reflects `Off`/`All`, or **unknown** (blank) when `sync_targets` holds a specific-ID CSV set out-of-band (the read-only `sync_targets` attribute on the state sensor stays authoritative for the exact value). Becomes a dynamic peer list in a later slice. Local identity — never propagated. |
 
 When the timer is started from `Idle` (and no game is active, no
 blocking-nav app is on screen), the display auto-switches to the Timer app.
@@ -386,9 +388,12 @@ left holding no orphaned attribute payload (issue #60). The
 values are **read-only from HA** — change them via their command keys, `dev.json`,
 or (where applicable) the on-device `TIMER` menu; the attribute is observation
 only. `realert_interval` is only meaningful while finished mode is `re-alert`. The
-sync rows (`sync_follow` / `sync_targets`) are **visible** here but stay **local
-identity** — never writable from HA and never propagated to peers (ADR-0006 is
-unchanged; see **Multi-device sync** below).
+sync rows (`sync_follow` / `sync_targets`) ride this read-only bag **and** have
+their own writable control entities (the Follow `switch` / Targets `select`, issue
+#110) — but they remain **local identity**: never propagated to peers (ADR-0006 is
+unchanged; see **Multi-device sync** below). The read-only `sync_targets` attribute
+stays authoritative for the exact value, since the static select only renders
+`Off`/`All` (a specific-ID CSV shows as unknown there).
 
 ### HTTP config readback (`GET /api/timer`)
 
@@ -565,9 +570,11 @@ every clock to `sync_targets=all` and `sync_follow=true`.
 - Reachable as `sync_follow` / `sync_targets` on `POST /api/timer` and `{prefix}/timer`
   MQTT, and as `timer_sync_follow` / `timer_sync_targets` in `dev.json`. No on-device
   menu. Both are surfaced as **read-only HA attributes** on the `{id}_timer_state`
-  sensor (PRD #57 / ADR-0014) — still no HA *entity*, and still **never propagated** to
-  peers: HA *visibility* does not make them writable-from-HA or part of the config
-  snapshot (ADR-0006 unchanged).
+  sensor (PRD #57 / ADR-0014) **and** as dedicated **writable HA control entities** —
+  the Follow `switch` and the static `Off`/`All` Targets `select` (issue #110, routed
+  through `parseCommand`). They are **still never propagated** to peers: being
+  HA-writable does not put them in the config snapshot (they remain `inSnapshot=false`
+  local identity; ADR-0006 unchanged).
 
 ---
 
