@@ -106,16 +106,17 @@ static bool timerNavOnDuration()
 
 // The one-shot TIMER-menu commit: a single PersistBatch window (enum edits
 // deferred during scroll in "timer" ns + table-row knob/toggle keys in "awtrix"
-// ns), then the peer broadcast and the HA attribute republish. Fires once on the
-// list -> main-menu transition (long-press out of the list, or selecting MAIN).
-// See ADR-0008/0015 and PRD #29/#45/#60.
+// ns), then the HA attribute republish. Fires once on the list -> main-menu
+// transition (long-press out of the list, or selecting MAIN). A config edit no
+// longer propagates to peers (run-scoped config mirror, ADR-0018 superseding
+// ADR-0006): config travels only bundled with a `start`. See ADR-0008/0015 and
+// PRD #29/#45/#60.
 static void commitTimerMenu()
 {
     {
         TimerManager_::PersistBatch batch(TimerManager);
         batch.markTableDirty();
     }
-    TimerManager.broadcastConfig();
     TimerManager.publishAllAttributeGroups();
 }
 

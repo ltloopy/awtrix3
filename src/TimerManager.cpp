@@ -779,7 +779,11 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     }
     // An inline melody (issue #102) is always one-shot, so its presence forces the
     // whole command one-shot regardless of `save` — it has no persistable file form.
-    bool oneShot = !saveFlag || haveInlineEnd || haveInlineTick;
+    // Receiver-forced one-shot (issue #108 / ADR-0018): a remote-applied command is
+    // ALWAYS one-shot regardless of the leader's `save` flag, so a follower mirrors the
+    // synced run but never persists it and reverts to its own saved config/duration on
+    // return to Idle. Reuses the ADR-0017 override core via the existing _remoteApply guard.
+    bool oneShot = !saveFlag || haveInlineEnd || haveInlineTick || _remoteApply;
 
     // -- Command is known-good: only now disturb device state. --
     if (configEditor.isActive())
@@ -892,20 +896,15 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
 
     // Propagation surface (one-hop): mirror this locally-accepted command to peers.
     // The broadcast* methods no-op when _remoteApply is set (inbound packet) or sync
-    // is off. Run-state (action/duration) and config travel on separate packets; a
-    // command touching both classes emits one of each. sync_follow/sync_targets are
-    // local identity (inSnapshot=false) and intentionally trigger neither.
+    // is off. Run-scoped config mirror (ADR-0018, superseding ADR-0006's config
+    // propagation): a config EDIT propagates nothing — config travels only bundled
+    // with a `start` (the combined packet broadcastRunState emits, carrying the
+    // leader's effective config snapshot). pause/reset propagate run-state only; a
+    // bare duration edit still propagates `duration`. sync_follow/sync_targets are
+    // local identity (inSnapshot=false) and never propagate.
     if (!_remoteApply)
     {
         bool runStateChanged = haveAction || haveDuration;
-        // configChanged = any config-block key edited. Snapshot membership IS the
-        // broadcast trigger (one flag, ADR-0006): the table half via inSnapshot, the
-        // member-backed half via the TIMER_MEMBER_CONFIG_DESCS table. Suppressed under
-        // a one-shot command — config must not propagate to sync followers, who have
-        // no notion of revert (ADR-0006). Run-state still propagates below (story 19).
-        bool configChanged = configInCommand && !oneShot;
-
-        if (configChanged) broadcastConfig();
         if (runStateChanged)
         {
             if (haveAction)
@@ -1085,13 +1084,41 @@ void TimerManager_::broadcastRunState(const char *action)
     if (_remoteApply) return;                       // one-hop: never re-emit an applied remote command
     if (TIMER_SYNC_TARGETS.length() == 0) return;   // sync off
 
+    // A start carries the leader's EFFECTIVE config snapshot bundled with the
+    // run-state — the run-scoped config mirror (ADR-0018): config no longer travels
+    // on a config edit, it rides one combined packet with the start so a follower
+    // mirrors the leader for that run. The combined packet needs the full
+    // kTimerCmdJsonSize buffer (config snapshot + envelope). pause/reset and a bare
+    // duration edit stay run-state-only and fit a small static buffer.
+    bool isStart = (action != nullptr) && (strcasecmp(action, "start") == 0);
+
+    // duration is run-state: it rides with a start (defines the countdown) and with a
+    // bare duration edit (action == nullptr). pause/reset need only the action.
+    bool withDuration = (action == nullptr) || isStart;
+
+    if (isStart)
+    {
+        DynamicJsonDocument doc(kTimerCmdJsonSize);
+        JsonObject sync = doc.createNestedObject("_sync");
+        addSyncEnvelope(sync);
+        doc["action"] = action;
+        if (withDuration) doc["duration"] = durationSec;
+        // EFFECTIVE config (no SavedConfigScope): a leader's own one-shot run mirrors
+        // to followers, so the snapshot reports what is actually running. sync_* are
+        // inSnapshot=false and excluded by construction; inline melodies never travel
+        // (the saved bare name globals back the snapshot, ADR-0017).
+        timerSettingsBuildSnapshot(doc);
+        timerMemberConfigBuildSnapshot(doc);
+
+        String out; serializeJson(doc, out);
+        ServerManager.sendTimerSync(out);
+        return;
+    }
+
     StaticJsonDocument<256> doc;
     JsonObject sync = doc.createNestedObject("_sync");
     addSyncEnvelope(sync);
     if (action) doc["action"] = action;
-    // duration is run-state: it rides with a start (defines the countdown) and with a
-    // bare duration edit (action == nullptr). pause/reset need only the action.
-    bool withDuration = (action == nullptr) || (strcasecmp(action, "start") == 0);
     if (withDuration) doc["duration"] = durationSec;
 
     String out; serializeJson(doc, out);

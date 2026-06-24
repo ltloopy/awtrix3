@@ -131,9 +131,9 @@ _Avoid_: reading `save` as the MQTT *retain* flag or as the custom-apps `save` k
 
 ### Saved config vs effective run config
 
-The distinction the one-shot model rests on. **Saved config** is the flash (NVS) truth that *every* observation/sync carrier reports; **effective run config** is what the active run actually uses. A `save:false` command writes only the **effective** layer: it captures a snapshot of the saved config (generically over the two descriptor tables — `TIMER_SETTINGS_DESCS`' `inSnapshot` rows + `TIMER_MEMBER_CONFIG_DESCS` — plus `durationSec` and the resolved melody RAM), applies live, and suppresses the persist/`broadcastConfig`/HA-attribute side effects. While an override is active the carriers stay **honest** — the `GET /api/timer` `config` mirror, the device-to-device sync snapshot, and the HA attribute bags all serialize from the **saved** snapshot — while the **top-level run-state** (`duration`, `buzzer`, `finished` at the top level of `GET /api/timer`) stays **effective**. The split is: *top level = effective (what is running now), `config` = saved (what is persisted)*. `sync_*` (local identity) and `duration` (run-state) are excluded from the snapshot by construction. See ADR-0017.
+The distinction the one-shot model rests on. **Saved config** is the flash (NVS) truth that *every* observation/sync carrier reports; **effective run config** is what the active run actually uses. A `save:false` command writes only the **effective** layer: it captures a snapshot of the saved config (generically over the two descriptor tables — `TIMER_SETTINGS_DESCS`' `inSnapshot` rows + `TIMER_MEMBER_CONFIG_DESCS` — plus `durationSec` and the resolved melody RAM), applies live, and suppresses the persist/`broadcastConfig`/HA-attribute side effects. While an override is active the **read** carriers stay **honest** — the `GET /api/timer` `config` mirror and the HA attribute bags serialize from the **saved** snapshot — while the **top-level run-state** (`duration`, `buzzer`, `finished` at the top level of `GET /api/timer`) stays **effective**. The split is: *top level = effective (what is running now), `config` = saved (what is persisted)*. The one deliberate exception is the **device-to-device sync carrier**: the config snapshot bundled with a `start` reports **effective** config (ADR-0018 §4), precisely so a leader's own one-shot run mirrors to followers — the follower then applies it one-shot and reverts on its own return to Idle. `sync_*` (local identity) and `duration` (run-state) are excluded from the snapshot by construction. See ADR-0017 and ADR-0018.
 
-_Avoid_: implying the `config` mirror or the sync snapshot reports the one-off values during an override (they report **saved**); implying top-level `duration` reverts to saved during a run (it shows the **live** one-shot value).
+_Avoid_: implying the `config` mirror or the HA attribute bags report the one-off values during an override (they report **saved**); implying the **sync** snapshot reports saved during an override (it reports **effective** — the run-scoped config mirror, ADR-0018); implying top-level `duration` reverts to saved during a run (it shows the **live** one-shot value).
 
 ### Inline melody
 
@@ -293,20 +293,27 @@ triggers and must not be conflated:
   `duration` is **run-state, not config**: it defines "the same countdown," so it
   travels with the run-state, never inside the config block. A bare start never clobbers
   a peer's config.
-- **Config propagation** — carries a **full snapshot** of the Timer config block
-  (buzzer mode, finished mode, the per-mode timing knobs, the behavior parameters, the
-  display-element toggles, icon images, melodies, bar color) with **no** `action` and
-  **no** `duration`. Fired only by a deliberate config edit. Last-config-writer-wins for
-  the whole block: after a config edit propagates, the group is configured identically.
-  Concretely, the config block is **two tables**: the `inSnapshot == true` rows of
-  `TIMER_SETTINGS_DESCS` (the declarative half) and `TIMER_MEMBER_CONFIG_DESCS` (the
-  member-backed half — `buzzer`/`finished`/icons, B1). Each table feeds both the snapshot
-  build and the `parseCommand` broadcast trigger, so the snapshot can't drift from the
-  trigger (ADR-0007, ADR-0009).
+- **Run-scoped config mirror** — config no longer propagates on a config *edit*; it
+  travels **only bundled with a `start`** (ADR-0018, superseding ADR-0006's config-edit
+  snapshot). A `start` broadcasts **one combined packet** = the leader's **effective**
+  config snapshot + `duration` + `action:"start"`, scoped to that run; `pause`/`reset`
+  stay run-state-only and a bare duration edit still propagates `duration` alone. A
+  follower applies a received command **one-shot** (receiver-forced via the `_remoteApply`
+  guard, reusing the ADR-0017 override core): it mirrors the leader for the run, persists
+  **nothing**, and reverts to its **own** saved config/duration on return to Idle —
+  regardless of the leader's `save` flag. So a config edit no longer rewrites peers' saved
+  settings (each clock keeps its own identity), yet a run still mirrors. Concretely, the
+  config block is **two tables**: the `inSnapshot == true` rows of `TIMER_SETTINGS_DESCS`
+  (the declarative half) and `TIMER_MEMBER_CONFIG_DESCS` (the member-backed half —
+  `buzzer`/`finished`/icons, B1), built into the combined start packet (ADR-0007, ADR-0009).
+  The bundled snapshot reports **effective** config (so a leader's own one-shot run mirrors
+  to followers) — deliberately unlike the `GET /api/timer` `config` mirror and the HA
+  attribute bags, which stay **saved** (ADR-0017 §3, ADR-0018 §4). Inline melodies never
+  travel (the snapshot reads the saved bare name).
 
-_Avoid_: putting `duration` in the config snapshot, or letting a start/reset re-push
-config — those reintroduce the "starting a timer rewrote my settings" surprise this
-split exists to prevent.
+_Avoid_: putting `duration` in the config snapshot; expecting a config *edit* to propagate
+(it no longer does — config rides only with a `start`, ADR-0018); or expecting a follower
+to persist a synced run (it is always one-shot on receive and reverts on Idle).
 
 ### Sync roles
 

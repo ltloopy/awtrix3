@@ -63,6 +63,13 @@ device drive any reachable clock.
 
 ### Run-state and config propagate separately; `duration` is run-state
 
+> **Superseded (config half) by [ADR-0018](0018-run-scoped-config-mirror.md).** The
+> config-edit-broadcasts-a-snapshot decision below is replaced: a config edit now
+> propagates **nothing**, and config travels **only bundled with a `start`** (the
+> leader's *effective* config), which a follower applies one-shot and reverts on
+> return to Idle. The run-state propagation, roles, transport and gating in this ADR
+> are unchanged.
+
 A naive "broadcast everything on every action" makes starting a timer rewrite a peer's
 config. Instead the two split on different triggers:
 

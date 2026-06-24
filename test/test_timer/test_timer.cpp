@@ -685,18 +685,18 @@ void test_OS7_save_false_action_duration_harmless(void) {
     TEST_ASSERT_EQUAL_UINT32(300, TimerManager.getDuration());         // one-off duration reverted on Idle
 }
 
-// OS8 (mechanism) — a one-shot config command does not broadcast config to sync
-// followers (they have no notion of revert, ADR-0006); a normal config command
-// still does.
-void test_OS8_save_false_suppresses_config_broadcast(void) {
+// OS8 (mechanism) — a config command never broadcasts on its own (run-scoped config
+// mirror, ADR-0018), whether one-shot or normal: config only travels bundled with a
+// start. A bare config edit emits no packet either way.
+void test_OS8_config_edit_never_broadcasts(void) {
     TIMER_SYNC_TARGETS = "all";                                        // enable propagation
     int before = fixture::sync_packet_count();
 
     TimerManager.parseCommand("{\"finished_hold\":99,\"save\":false}");
-    TEST_ASSERT_EQUAL_INT(before, fixture::sync_packet_count());        // suppressed under one-shot
+    TEST_ASSERT_EQUAL_INT(before, fixture::sync_packet_count());        // one-shot config: no packet
 
-    TimerManager.parseCommand("{\"finished_hold\":42}");               // normal command still broadcasts
-    TEST_ASSERT_EQUAL_INT(before + 1, fixture::sync_packet_count());
+    TimerManager.parseCommand("{\"finished_hold\":42}");               // normal config: also no packet
+    TEST_ASSERT_EQUAL_INT(before, fixture::sync_packet_count());
 }
 
 // ============================================================================
@@ -745,22 +745,25 @@ void test_HC2_ha_attribute_bag_saved_during_override(void) {
     TEST_ASSERT_EQUAL_UINT16(3, doc["countdown_seconds"].as<uint16_t>());   // saved, not the one-off 25
 }
 
-// HC3 (AC2 + AC4) — under an active override the config is NOT propagated to sync
-// followers (broadcastConfig suppressed), but run-state IS — and the run-state
-// packet carries the live one-shot duration so synced timers still start together.
-void test_HC3_runstate_propagates_config_does_not(void) {
+// HC3 (AC2 + AC4) — a one-shot (save:false) start emits ONE combined packet whose
+// config snapshot carries the leader's EFFECTIVE values (run-scoped config mirror,
+// ADR-0018), so a follower mirrors the leader's one-off run. The carrier reports
+// EFFECTIVE config (not saved) precisely so a leader's own one-shot run propagates;
+// the follower applies it one-shot and reverts on its own return to Idle.
+void test_HC3_oneshot_start_propagates_effective_config(void) {
     TIMER_SYNC_TARGETS = "all";                                 // enable propagation
 
     TimerManager.parseCommand(
         "{\"duration\":900,\"finished_hold\":99,\"action\":\"start\",\"save\":false}");
 
-    // Exactly one packet: the run-state (start + one-shot duration), no config snapshot.
+    // Exactly one packet: the combined start carrying the live one-shot duration AND
+    // the effective config snapshot (finished_hold = the one-off 99).
     TEST_ASSERT_EQUAL_INT(1, fixture::sync_packet_count());
     DynamicJsonDocument pkt(2048);
     TEST_ASSERT_FALSE(deserializeJson(pkt, fixture::last_sync_payload()));
     TEST_ASSERT_EQUAL_STRING("start", pkt["action"]);
     TEST_ASSERT_EQUAL_UINT32(900, pkt["duration"].as<uint32_t>());   // one-shot duration reaches followers
-    TEST_ASSERT_FALSE(pkt.containsKey("finished_hold"));             // config did not propagate
+    TEST_ASSERT_EQUAL_UINT16(99, pkt["finished_hold"].as<uint16_t>()); // EFFECTIVE config rides the start
 }
 
 // ============================================================================
@@ -1964,47 +1967,40 @@ void test_S1_sync_settings_validation_atomic_reject(void) {
     TEST_ASSERT_EQUAL_INT(0, fixture::sync_packet_count());  // sync_* never propagates
 }
 
-// S2 — a local start emits exactly one run-state packet carrying action+duration
-// and NO config keys (the duration-is-run-state invariant; a start never clobbers
-// a peer's config).
-void test_S2_local_start_emits_runstate_only(void) {
+// S2 — a local start emits exactly ONE combined packet carrying action+duration
+// AND the leader's effective config snapshot (run-scoped config mirror, ADR-0018):
+// the config rides WITH the start so a follower mirrors the run.
+void test_S2_local_start_emits_combined_packet(void) {
     SHOW_TIMER = true;
     TIMER_SYNC_TARGETS = "all";
 
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
         static_cast<int>(TimerManager.parseCommand("{\"duration\":300,\"action\":\"start\"}")));
-    TEST_ASSERT_EQUAL_INT(1, fixture::sync_packet_count());
+    TEST_ASSERT_EQUAL_INT(1, fixture::sync_packet_count());   // one combined packet, not two
 
-    StaticJsonDocument<1024> doc;
+    DynamicJsonDocument doc(2048);
     TEST_ASSERT_FALSE(deserializeJson(doc, fixture::last_sync_payload()));
     TEST_ASSERT_EQUAL_STRING("awtrix_self", doc["_sync"]["src"]);
     TEST_ASSERT_EQUAL_STRING("all", doc["_sync"]["tgt"]);
     TEST_ASSERT_EQUAL_STRING("start", doc["action"]);
     TEST_ASSERT_EQUAL_UINT32(300, doc["duration"].as<uint32_t>());
-    TEST_ASSERT_FALSE(doc.containsKey("buzzer"));     // no config rides with run-state
-    TEST_ASSERT_FALSE(doc.containsKey("bar_color"));
+    // The effective config snapshot now rides WITH the start (the combined packet).
+    TEST_ASSERT_TRUE(doc.containsKey("buzzer"));
+    TEST_ASSERT_TRUE(doc.containsKey("bar_color"));
+    // sync_* (local identity) is never in the snapshot.
+    TEST_ASSERT_FALSE(doc.containsKey("sync_follow"));
+    TEST_ASSERT_FALSE(doc.containsKey("sync_targets"));
 }
 
-// S3 — a local config edit emits one full-snapshot config packet with NO action,
-// NO duration, and NO sync_* (local identity is never propagated).
-void test_S3_local_config_emits_snapshot_only(void) {
+// S3 — a local config edit emits NO sync packet (run-scoped config mirror, ADR-0018):
+// config no longer converges on a config edit; it only travels bundled with a start.
+void test_S3_local_config_edit_emits_nothing(void) {
     SHOW_TIMER = true;
     TIMER_SYNC_TARGETS = "awtrix_peer";
 
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
         static_cast<int>(TimerManager.parseCommand("{\"buzzer\":\"countdown\",\"bar_color\":\"#FF0000\"}")));
-    TEST_ASSERT_EQUAL_INT(1, fixture::sync_packet_count());
-
-    StaticJsonDocument<2048> doc;
-    TEST_ASSERT_FALSE(deserializeJson(doc, fixture::last_sync_payload()));
-    TEST_ASSERT_EQUAL_STRING("awtrix_self", doc["_sync"]["src"]);
-    TEST_ASSERT_EQUAL_STRING("awtrix_peer", doc["_sync"]["tgt"][0]);   // array form
-    TEST_ASSERT_EQUAL_STRING("countdown", doc["buzzer"]);
-    TEST_ASSERT_EQUAL_UINT32(0xFF0000, doc["bar_color"].as<uint32_t>());
-    TEST_ASSERT_FALSE(doc.containsKey("action"));
-    TEST_ASSERT_FALSE(doc.containsKey("duration"));
-    TEST_ASSERT_FALSE(doc.containsKey("sync_follow"));
-    TEST_ASSERT_FALSE(doc.containsKey("sync_targets"));
+    TEST_ASSERT_EQUAL_INT(0, fixture::sync_packet_count());   // a config edit propagates nothing
 }
 
 // S4 — applySyncCommand gating: own-src echo ignored; follow consent required;
@@ -2073,13 +2069,13 @@ void test_S6_sync_off_never_broadcasts(void) {
     TEST_ASSERT_EQUAL_INT(0, fixture::sync_packet_count());
 }
 
-// S7 — a peer-propagated config snapshot carrying realert_interval reaches this
-// clock through applySyncCommand -> parseCommand (the remote-apply path) and
-// fires the SAME finished-mode attribute republish a local edit does, so a
-// synced peer's HA tracks the cadence with no extra code (issue #52 / PRD #17).
-// The republish is intentionally NOT _remoteApply-gated; the one-hop guard only
-// stops re-broadcast, which this also asserts (sync_packet_count stays 0).
-void test_S7_remote_realert_interval_republishes_finished_attribute(void) {
+// S7 — a peer-applied config command is now ALWAYS one-shot on the receiver
+// (receiver-forced one-shot, issue #108 / ADR-0018): the value applies to the
+// effective layer (RAM live) so the run mirrors the leader, but the HA attribute
+// republish is SUPPRESSED — the follower's attribute bag keeps reporting its OWN
+// SAVED config (carriers stay honest under an override, ADR-0017 §3), and reverts
+// on return to Idle. The value is never persisted; one-hop still holds (no relay).
+void test_S7_remote_config_is_oneshot_attribute_bag_stays_saved(void) {
     SHOW_TIMER = true;
     TIMER_SYNC_FOLLOW  = true;
     TIMER_SYNC_TARGETS = "all";   // this clock would relay its own local edits
@@ -2088,14 +2084,117 @@ void test_S7_remote_realert_interval_republishes_finished_attribute(void) {
     TimerManager.applySyncCommand(
         "{\"_sync\":{\"src\":\"awtrix_o\",\"seq\":7,\"tgt\":\"all\"},\"realert_interval\":99}");
 
-    TEST_ASSERT_EQUAL_UINT16(99, TIMER_REALERT_INTERVAL);   // remote snapshot applied
-    const PublishCall *attr = fixture::last_publish(fixture::TIMER_FINISHED_ATTR_TOPIC);
-    TEST_ASSERT_NOT_NULL(attr);
-    // The finished carrier's bag now folds realert_interval together with
-    // finished_hold (PRD #57); reset_all() leaves finished_hold at its default 10.
-    TEST_ASSERT_EQUAL_STRING("{\"realert_interval\":99,\"finished_hold\":10}", attr->payload.c_str());
-    TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_FINISHED_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_UINT16(99, TIMER_REALERT_INTERVAL);   // applied to the EFFECTIVE layer
+    // Carriers stay honest under the receiver-forced override: no attribute republish.
+    TEST_ASSERT_NULL(fixture::last_publish(fixture::TIMER_FINISHED_ATTR_TOPIC));
+    TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_FINISHED_ATTR_TOPIC));
     TEST_ASSERT_EQUAL_INT(0, fixture::sync_packet_count());  // one-hop: applied, never relayed
+}
+
+// ============================================================================
+// Run-scoped config mirror + one-shot sync receive (issue #108 / ADR-0018).
+// A config edit never propagates; a start bundles the leader's effective config;
+// a follower applies a received command ONE-SHOT and reverts on return to Idle.
+// ============================================================================
+
+// SR1 — pause and reset propagate run-state ONLY (no config snapshot rides them);
+// only a start carries the combined config mirror.
+void test_SR1_pause_reset_propagate_runstate_only(void) {
+    SHOW_TIMER = true;
+    TIMER_SYNC_TARGETS = "all";
+    TimerManager.parseCommand("{\"duration\":300,\"action\":\"start\"}");   // start: combined
+    ServerManager.__test_reset();
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.parseCommand("{\"action\":\"pause\"}")));
+    TEST_ASSERT_EQUAL_INT(1, fixture::sync_packet_count());
+    DynamicJsonDocument p(2048);
+    TEST_ASSERT_FALSE(deserializeJson(p, fixture::last_sync_payload()));
+    TEST_ASSERT_EQUAL_STRING("pause", p["action"]);
+    TEST_ASSERT_FALSE(p.containsKey("buzzer"));      // no config rides pause
+    TEST_ASSERT_FALSE(p.containsKey("bar_color"));
+
+    ServerManager.__test_reset();
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.parseCommand("{\"action\":\"reset\"}")));
+    TEST_ASSERT_EQUAL_INT(1, fixture::sync_packet_count());
+    DynamicJsonDocument r(2048);
+    TEST_ASSERT_FALSE(deserializeJson(r, fixture::last_sync_payload()));
+    TEST_ASSERT_EQUAL_STRING("reset", r["action"]);
+    TEST_ASSERT_FALSE(r.containsKey("buzzer"));      // no config rides reset
+}
+
+// SR2 — a bare duration edit propagates run-state (duration only), no config.
+void test_SR2_bare_duration_edit_propagates_duration_only(void) {
+    SHOW_TIMER = true;
+    TIMER_SYNC_TARGETS = "all";
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.parseCommand("{\"duration\":600}")));
+    TEST_ASSERT_EQUAL_INT(1, fixture::sync_packet_count());
+    DynamicJsonDocument d(2048);
+    TEST_ASSERT_FALSE(deserializeJson(d, fixture::last_sync_payload()));
+    TEST_ASSERT_FALSE(d.containsKey("action"));
+    TEST_ASSERT_EQUAL_UINT32(600, d["duration"].as<uint32_t>());
+    TEST_ASSERT_FALSE(d.containsKey("buzzer"));       // no config rides a duration edit
+}
+
+// SR3 — receiver-forced one-shot: a follower applies a received start (with config)
+// during the run, but NEVER persists it — even though the packet carries no `save`
+// flag — and reverts to its OWN saved config/duration on return to Idle, writing
+// nothing to flash. Saved finished_hold default 10, saved duration 300.
+void test_SR3_follower_applies_oneshot_and_reverts(void) {
+    SHOW_TIMER = true;
+    TIMER_SYNC_FOLLOW = true;
+    fixture::advance(1000);
+
+    saveSettings_calls = 0;
+    int begin_at_start = Preferences::begin_calls;
+
+    // Leader sends a combined start carrying foreign effective config + duration.
+    TimerManager.applySyncCommand(
+        "{\"_sync\":{\"src\":\"awtrix_o\",\"seq\":1,\"tgt\":\"all\"},"
+        "\"action\":\"start\",\"duration\":900,\"finished_hold\":99}");
+
+    // The run mirrors the leader during the run.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Running),
+                      static_cast<int>(TimerManager.getState()));
+    TEST_ASSERT_EQUAL_UINT32(900, TimerManager.getDuration());
+    TEST_ASSERT_EQUAL_UINT16(99, TIMER_FINISHED_HOLD);   // effective during the run
+
+    // Nothing was written to flash (no persist while following one-shot).
+    TEST_ASSERT_EQUAL_INT(0, saveSettings_calls);                       // no "awtrix" flush
+    TEST_ASSERT_EQUAL_INT(0, Preferences::begin_calls - begin_at_start);// no "timer" flush
+
+    // On return to Idle the follower reverts to its OWN saved config/duration.
+    TimerManager.reset();
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle),
+                      static_cast<int>(TimerManager.getState()));
+    TEST_ASSERT_EQUAL_UINT32(300, TimerManager.getDuration());   // own saved duration
+    TEST_ASSERT_EQUAL_UINT16(10, TIMER_FINISHED_HOLD);           // own saved config restored
+}
+
+// SR4 — a follower forces one-shot even when the leader's packet says save:true:
+// the receive path overrides it, so a synced run is never persisted regardless of
+// the leader's flag, and reverts to the follower's own saved config.
+void test_SR4_follower_forces_oneshot_regardless_of_save(void) {
+    SHOW_TIMER = true;
+    TIMER_SYNC_FOLLOW = true;
+    fixture::advance(1000);
+
+    saveSettings_calls = 0;
+    int begin_at_start = Preferences::begin_calls;
+
+    TimerManager.applySyncCommand(
+        "{\"_sync\":{\"src\":\"awtrix_o\",\"seq\":2,\"tgt\":\"all\"},"
+        "\"action\":\"start\",\"duration\":120,\"finished_hold\":77,\"save\":true}");
+
+    TEST_ASSERT_EQUAL_UINT16(77, TIMER_FINISHED_HOLD);   // effective during the run
+    TEST_ASSERT_EQUAL_INT(0, saveSettings_calls);                       // save:true ignored on receive
+    TEST_ASSERT_EQUAL_INT(0, Preferences::begin_calls - begin_at_start);
+
+    TimerManager.reset();
+    TEST_ASSERT_EQUAL_UINT16(10, TIMER_FINISHED_HOLD);   // reverted to own saved
 }
 
 // ============================================================================
@@ -2624,26 +2723,27 @@ void test_M9_menu_commit_one_persistbatch_flushes_both_namespaces(void) {
 }
 
 // M11 — the TIMER-menu long-press commit refreshes every HA attribute group
-// (issue #60): after the PersistBatch commit and the peer broadcast, the commit
-// republishes every carrier's attribute object, so an on-device edit of a menu
-// knob (finished_hold/realert_interval/countdown_seconds/icon/bar) refreshes its
-// HA attribute immediately instead of waiting for the next reconnect — closing
-// the staleness gap. Mirrors MenuManager's TimerConfigMenu commit seam (device-
-// only; reproduced here in production order), pinning the new attribute refresh.
+// (issue #60): after the PersistBatch commit, the commit republishes every
+// carrier's attribute object, so an on-device edit of a menu knob (finished_hold/
+// realert_interval/countdown_seconds/icon/bar) refreshes its HA attribute
+// immediately instead of waiting for the next reconnect — closing the staleness
+// gap. The menu commit no longer broadcasts config to peers (run-scoped config
+// mirror, ADR-0018 superseding ADR-0006): config travels only bundled with a
+// `start`. Mirrors MenuManager's commitTimerMenu seam (device-only; reproduced
+// here in production order), pinning the attribute refresh and the no-broadcast.
 void test_M11_menu_commit_republishes_all_attribute_groups(void) {
-    TIMER_SYNC_TARGETS = "all";   // sync on, so the commit's peer broadcast actually emits
+    TIMER_SYNC_TARGETS = "all";   // sync on, yet a menu config commit still emits nothing
 
     timerMenuAdjust(4, +1);   // finished_hold (slot 4) 10 -> 15: a menu knob, live in RAM, NVS deferred
 
-    {   // the long-press commit window, then broadcast, then the attribute refresh
+    {   // the long-press commit window, then the attribute refresh (no peer broadcast)
         TimerManager_::PersistBatch batch(TimerManager);
         batch.markTableDirty();
     }
-    TimerManager.broadcastConfig();
     TimerManager.publishAllAttributeGroups();
 
-    // The peer broadcast went out ...
-    TEST_ASSERT_EQUAL_INT(1, fixture::sync_packet_count());
+    // A config edit no longer propagates to peers (ADR-0018).
+    TEST_ASSERT_EQUAL_INT(0, fixture::sync_packet_count());
     // ... and every carrier's attribute object was refreshed exactly once,
     // including the Duration text entity (PRD #66 / issue #68).
     TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_FINISHED_ATTR_TOPIC));
@@ -3943,10 +4043,10 @@ int main(int, char **) {
     RUN_TEST(test_OS5_normal_command_mid_override_rebaselines);
     RUN_TEST(test_OS6_non_boolean_save_atomic_reject);
     RUN_TEST(test_OS7_save_false_action_duration_harmless);
-    RUN_TEST(test_OS8_save_false_suppresses_config_broadcast);
+    RUN_TEST(test_OS8_config_edit_never_broadcasts);
     RUN_TEST(test_HC1_get_config_mirror_saved_during_override);
     RUN_TEST(test_HC2_ha_attribute_bag_saved_during_override);
-    RUN_TEST(test_HC3_runstate_propagates_config_does_not);
+    RUN_TEST(test_HC3_oneshot_start_propagates_effective_config);
     RUN_TEST(test_IM1_rtttl_classifier_and_validator);
     RUN_TEST(test_IM2_inline_melody_end_plays_reverts_no_persist);
     RUN_TEST(test_IM3_inline_melody_tick_plays_no_persist);
@@ -3996,12 +4096,16 @@ int main(int, char **) {
     RUN_TEST(test_U60_getStateJson_has_nested_config_object);
     RUN_TEST(test_U61_getStateJson_config_boundary_placement);
     RUN_TEST(test_S1_sync_settings_validation_atomic_reject);
-    RUN_TEST(test_S2_local_start_emits_runstate_only);
-    RUN_TEST(test_S3_local_config_emits_snapshot_only);
+    RUN_TEST(test_S2_local_start_emits_combined_packet);
+    RUN_TEST(test_S3_local_config_edit_emits_nothing);
     RUN_TEST(test_S4_applySyncCommand_gating);
     RUN_TEST(test_S5_remote_apply_does_not_rebroadcast);
     RUN_TEST(test_S6_sync_off_never_broadcasts);
-    RUN_TEST(test_S7_remote_realert_interval_republishes_finished_attribute);
+    RUN_TEST(test_S7_remote_config_is_oneshot_attribute_bag_stays_saved);
+    RUN_TEST(test_SR1_pause_reset_propagate_runstate_only);
+    RUN_TEST(test_SR2_bare_duration_edit_propagates_duration_only);
+    RUN_TEST(test_SR3_follower_applies_oneshot_and_reverts);
+    RUN_TEST(test_SR4_follower_forces_oneshot_regardless_of_save);
     RUN_TEST(test_T1_table_uintrange_boundaries);
     RUN_TEST(test_T2_table_strict_types);
     RUN_TEST(test_T3_table_bespoke_validators);
