@@ -2201,6 +2201,135 @@ void test_SR4_follower_forces_oneshot_regardless_of_save(void) {
 }
 
 // ============================================================================
+// Peer presence subsystem (#111 / ADR-0019). A presence beacon + a bounded peer
+// registry keyed by stable uniqueID, harvested UNGATED (presence is informational,
+// never a command) so a clock learns which peers are on the LAN.
+// ============================================================================
+
+// PP1 — a received presence packet adds/refreshes the sender in the registry and
+// changes NO timer state. Harvest is ungated: neither follow nor targeting apply.
+void test_PP1_presence_harvest_ungated_no_timer_state(void) {
+    SHOW_TIMER = true;
+    fixture::advance(1000);
+
+    // Follow OFF and the packet carries no tgt at all: a real command would be
+    // dropped by the gates, but presence is harvested regardless.
+    TIMER_SYNC_FOLLOW = false;
+    TEST_ASSERT_EQUAL_INT(0, TimerManager.peerCount());
+
+    TimerManager.applySyncCommand(
+        "{\"_sync\":{\"src\":\"awtrix_o\",\"seq\":1},\"presence\":true}");
+
+    TEST_ASSERT_EQUAL_INT(1, TimerManager.peerCount());
+    TEST_ASSERT_TRUE(TimerManager.hasPeer("awtrix_o"));
+    // No timer state changed.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle), static_cast<int>(TimerManager.getState()));
+
+    // A later beacon from the same peer refreshes lastSeen without duplicating.
+    fixture::advance(5000);
+    TimerManager.applySyncCommand(
+        "{\"_sync\":{\"src\":\"awtrix_o\",\"seq\":2},\"presence\":true}");
+    TEST_ASSERT_EQUAL_INT(1, TimerManager.peerCount());
+}
+
+// PP2 — presence is never treated as a command: even a packet that ALSO carries
+// action/duration is harvested as presence only, applying NO timer state, with no
+// follow/target gate. (presence:true short-circuits before parseCommand.)
+void test_PP2_presence_never_treated_as_command(void) {
+    SHOW_TIMER = true;
+    TIMER_SYNC_FOLLOW = true;          // gates would otherwise let a command through
+    fixture::advance(1000);
+
+    TimerManager.applySyncCommand(
+        "{\"_sync\":{\"src\":\"awtrix_o\",\"seq\":1,\"tgt\":\"all\"},"
+        "\"presence\":true,\"action\":\"start\",\"duration\":300}");
+
+    TEST_ASSERT_TRUE(TimerManager.hasPeer("awtrix_o"));
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle), static_cast<int>(TimerManager.getState()));
+}
+
+// PP3 — the registry excludes the clock's own id and is bounded (~16). Own-src
+// presence is dropped (own echo); flooding distinct peers never exceeds the bound.
+void test_PP3_registry_excludes_self_and_is_bounded(void) {
+    SHOW_TIMER = true;
+    fixture::advance(1000);
+
+    // Own id is never registered (own echo, like a real command).
+    TimerManager.applySyncCommand(
+        "{\"_sync\":{\"src\":\"awtrix_self\",\"seq\":1},\"presence\":true}");
+    TEST_ASSERT_EQUAL_INT(0, TimerManager.peerCount());
+    TEST_ASSERT_FALSE(TimerManager.hasPeer("awtrix_self"));
+
+    // Flood 20 distinct peers; the registry caps at the bound (16).
+    for (int i = 0; i < 20; ++i) {
+        char buf[96];
+        snprintf(buf, sizeof(buf),
+                 "{\"_sync\":{\"src\":\"awtrix_p%02d\",\"seq\":%d},\"presence\":true}", i, i + 10);
+        TimerManager.applySyncCommand(buf);
+    }
+    TEST_ASSERT_LESS_OR_EQUAL_INT(16, TimerManager.peerCount());
+    TEST_ASSERT_EQUAL_INT(16, TimerManager.peerCount());
+}
+
+// PP4 — peers age out after the TTL (~3 missed beacons, ~100s). tickPresence(now)
+// prunes entries not seen within the TTL.
+void test_PP4_peers_age_out_past_ttl(void) {
+    SHOW_TIMER = true;
+    fixture::advance(1000);
+
+    TimerManager.applySyncCommand(
+        "{\"_sync\":{\"src\":\"awtrix_o\",\"seq\":1},\"presence\":true}");
+    TEST_ASSERT_EQUAL_INT(1, TimerManager.peerCount());
+
+    // Still within TTL: a prune keeps the peer.
+    fixture::advance(50000);
+    TimerManager.tickPresence(fixture::virtual_now());
+    TEST_ASSERT_EQUAL_INT(1, TimerManager.peerCount());
+    TEST_ASSERT_TRUE(TimerManager.hasPeer("awtrix_o"));
+
+    // Past TTL (>100s since last seen): the peer ages out.
+    fixture::advance(60000);   // ~110s total since harvest
+    TimerManager.tickPresence(fixture::virtual_now());
+    TEST_ASSERT_EQUAL_INT(0, TimerManager.peerCount());
+    TEST_ASSERT_FALSE(TimerManager.hasPeer("awtrix_o"));
+}
+
+// PP5 — the beacon is emitted periodically on a real network but NEVER in AP mode.
+void test_PP5_beacon_periodic_not_in_ap_mode(void) {
+    SHOW_TIMER = true;
+    TIMER_SYNC_TARGETS = "";     // beacon is unconditional, independent of sync targets
+    fixture::advance(1000);
+
+    // AP mode: no beacon, ever.
+    AP_MODE = true;
+    TimerManager.tickPresence(fixture::virtual_now());
+    fixture::advance(60000);
+    TimerManager.tickPresence(fixture::virtual_now());
+    TEST_ASSERT_EQUAL_INT(0, fixture::sync_packet_count());
+
+    // Real network: first tick emits a beacon, then it throttles to the period.
+    AP_MODE = false;
+    ServerManager.__test_reset();
+    TimerManager.tickPresence(fixture::virtual_now());
+    TEST_ASSERT_EQUAL_INT(1, fixture::sync_packet_count());
+
+    DynamicJsonDocument doc(256);
+    TEST_ASSERT_FALSE(deserializeJson(doc, fixture::last_sync_payload()));
+    TEST_ASSERT_TRUE(doc["presence"].as<bool>());
+    TEST_ASSERT_EQUAL_STRING("awtrix_self", doc["_sync"]["src"]);
+
+    // Within the period: no new beacon.
+    fixture::advance(5000);
+    TimerManager.tickPresence(fixture::virtual_now());
+    TEST_ASSERT_EQUAL_INT(1, fixture::sync_packet_count());
+
+    // After the period (~30s) elapses: another beacon.
+    fixture::advance(30000);
+    TimerManager.tickPresence(fixture::virtual_now());
+    TEST_ASSERT_EQUAL_INT(2, fixture::sync_packet_count());
+}
+
+// ============================================================================
 // U51 — Editing duration while Paused resets the timer to Idle with the new
 // duration (remaining follows the new full duration; state publish == "idle").
 // ============================================================================
@@ -4314,6 +4443,11 @@ int main(int, char **) {
     RUN_TEST(test_SR2_bare_duration_edit_propagates_duration_only);
     RUN_TEST(test_SR3_follower_applies_oneshot_and_reverts);
     RUN_TEST(test_SR4_follower_forces_oneshot_regardless_of_save);
+    RUN_TEST(test_PP1_presence_harvest_ungated_no_timer_state);
+    RUN_TEST(test_PP2_presence_never_treated_as_command);
+    RUN_TEST(test_PP3_registry_excludes_self_and_is_bounded);
+    RUN_TEST(test_PP4_peers_age_out_past_ttl);
+    RUN_TEST(test_PP5_beacon_periodic_not_in_ap_mode);
     RUN_TEST(test_T1_table_uintrange_boundaries);
     RUN_TEST(test_T2_table_strict_types);
     RUN_TEST(test_T3_table_bespoke_validators);

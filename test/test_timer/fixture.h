@@ -67,6 +67,7 @@ inline void reset_all() {
     TIMER_SYNC_FOLLOW       = false;
     TIMER_SYNC_TARGETS      = "";
     uniqueID                = "awtrix_self";
+    AP_MODE                 = false;
 }
 
 // Parse the last broadcast packet's _sync envelope + a probe key. Returns false
