@@ -304,6 +304,63 @@ const TimerSettingDesc *timerSettingByCmdKey(const char *cmdKey)
     return nullptr;
 }
 
+// Inline RTTTL classifier/validator (issue #102). Pure, no globals touched.
+namespace
+{
+    // RTTTL tunes for a single timer alarm/tick are short; cap so a pathological
+    // payload can't bloat the one-shot run state.
+    constexpr size_t kInlineRtttlMaxLen = 256;
+
+    // True iff the comma-separated control section carries at least one RTTTL default
+    // token -- a token whose key is exactly d/o/b (duration/octave/beat). Checks the
+    // token PREFIX (not a substring), so "foo=4" is not mistaken for an "o=" default.
+    bool controlHasDefaultToken(const String &control)
+    {
+        int start = 0;
+        const int n = control.length();
+        while (start <= n)
+        {
+            int comma = control.indexOf(',', start);
+            if (comma < 0) comma = n;
+            String tok = control.substring(start, comma);
+            tok.trim();
+            tok.toLowerCase();
+            if (tok.startsWith("d=") || tok.startsWith("o=") || tok.startsWith("b=")) return true;
+            if (comma == n) break;
+            start = comma + 1;
+        }
+        return false;
+    }
+}
+
+bool timerMelodyIsInline(const String &s)
+{
+    // A bare melody file-name token is [A-Za-z0-9_-]* and never contains a colon;
+    // an inline RTTTL tune always carries ':' separators. Content is the only signal.
+    return s.indexOf(':') >= 0;
+}
+
+bool timerMelodyValidateInline(const String &s)
+{
+    if (s.length() == 0 || s.length() > kInlineRtttlMaxLen) return false;
+
+    // RTTTL is name:control:notes -- exactly two colons (name may be empty).
+    int c1 = s.indexOf(':');
+    if (c1 < 0) return false;
+    int c2 = s.indexOf(':', c1 + 1);
+    if (c2 < 0) return false;
+    if (s.indexOf(':', c2 + 1) >= 0) return false;   // a third colon is malformed
+
+    String control = s.substring(c1 + 1, c2);
+    String notes   = s.substring(c2 + 1);
+    if (control.length() == 0 || notes.length() == 0) return false;
+
+    // The control section must carry at least one RTTTL default token (d=/o=/b=).
+    if (!controlHasDefaultToken(control)) return false;
+
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // HA attribute-group projection (PRD #57 / issues #58, #59). The buzzer + finished
 // HASelects were lit up first (#58); #59 extended the JSON-attributes opt-in to
