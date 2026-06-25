@@ -18,8 +18,9 @@ the user-mutable **hostname**, not the `uniqueID`, so a target list built from i
 breaks silently when a clock is renamed.
 
 We need a clock to know, at any moment, the set of peer `uniqueID`s reachable on
-the LAN — the backend a dynamic HA Targets select will consume in a later slice
-(#112). This ADR defines that presence subsystem; it builds no UI.
+the LAN, and to surface them so a user can pick a target without hand-typing ids.
+This ADR defines that presence subsystem (the beacon + registry, #111) and the
+dynamic Home Assistant **Targets select** that consumes it (#112).
 
 ## Decision
 
@@ -76,10 +77,43 @@ takes the current `millis()` as a parameter and the host tests advance virtual
 time, so the period throttle, the age-out, the bound, the own-id exclusion and the
 AP-mode suppression are all deterministic without wall-clock or a live socket.
 
+### 5. The HA Targets select is built dynamically from the registry (#112)
+
+The Home Assistant **Timer sync targets** select (a writable entity since #110)
+consumes the registry: its options are built at runtime as `Off`, `All`, then every
+currently-discovered peer `uniqueID` **sorted ascending** — not the static `Off;All`
+table field. The select **opts out** of the descriptor's static `options`; the option
+string is assembled from `TimerManager::peerIds()` through the pure
+`timerSyncTargetsBuildOptions` helper.
+
+- **Single-target by design.** An HA select expresses exactly one option, so picking a
+  peer sets `sync_targets` to that one id (`Off` → `""`, `All` → `"all"`). A multi-id
+  CSV target list (settable out-of-band via the API/`dev.json`) cannot be represented
+  and displays as **unknown** (no option selected); the read-only `sync_targets`
+  attribute stays authoritative for the exact value.
+- **Discovery re-published on membership change, debounced.** `HASelect::setOptions` is
+  set-once, so the select gains a `resetOptions()` that releases the list; when the
+  sorted id set changes, `refreshTimerSyncTargetsOptions` rebuilds the options and
+  re-publishes the entity's discovery config so Home Assistant sees the new list. It is
+  debounced (and only fires on an actual change) so beacon churn yields one republish,
+  not a storm.
+- **Mapping is always against the CURRENT list.** Command (index → value) and
+  state-reflection (value → index) both resolve through the live sorted id list
+  (`timerSyncTargetsValueForIndex` / `timerSyncTargetsIndexForValue`); the selected
+  state is re-applied after each republish. The command still routes through
+  `timerHaApply` → `parseCommand`, inheriting the bespoke `sync_targets` validator and
+  atomic-reject persistence (#109/#110). `sync_targets` remains local identity
+  (`inSnapshot=false`) and never propagates.
+
+This **reverses ADR-0006's "no HA entity for sync settings"**: #110 made the two sync
+settings writable HA entities, and #112 completes the targeting half by sourcing the
+options from live peer presence. The reversal is safe because sync settings stay local
+identity — exposing them in HA changed no propagation semantics.
+
 ## Out of scope
 
-- **No dynamic HA Targets select** and no targeting UI — this ADR is the backend
-  only; the select that consumes the registry is a later slice (#112).
+- **No multi-target HA control** — the select is single-target by the platform's
+  nature; CSV target lists remain an API/`dev.json` capability (shown as unknown).
 - **No presence persistence, no late-joiner pull, no acks** — best-effort, exactly
   like the run-state channel (ADR-0006).
 - **No change to run-state/config propagation, roles, gating or the one-hop guard.**
@@ -88,12 +122,20 @@ AP-mode suppression are all deterministic without wall-clock or a live socket.
 
 - `CONTEXT.md` gains the **Peer presence / peer registry** entry.
 - `TimerManager` gains the peer registry (`_peers`/`_peerCount`), `recordPeer` /
-  `prunePeers` / `hasPeer` / `peerCount`, the `broadcastPresence` beacon and the
-  `tickPresence(nowMs)` loop hook; `applySyncCommand` grows the ungated presence
-  short-circuit. `main.cpp`'s loop calls `tickPresence(millis())`.
-- Host tests `test_PP1`..`test_PP5` cover ungated harvest + no state change,
-  presence-never-a-command, own-id exclusion + the bound, age-out past TTL, and the
-  periodic-but-not-in-AP-mode beacon.
+  `prunePeers` / `hasPeer` / `peerCount` / `peerIds` (sorted accessor), the
+  `broadcastPresence` beacon and the `tickPresence(nowMs)` loop hook; `applySyncCommand`
+  grows the ungated presence short-circuit. `main.cpp`'s loop calls `tickPresence(millis())`.
+- `TimerHa` gains the pure option-build + id↔index helpers
+  (`timerSyncTargetsBuildOptions`, `timerSyncTargetsIndexForValue`,
+  `timerSyncTargetsValueForIndex`); `HASelect` gains `resetOptions()`; `MQTTManager`
+  builds the select's options from the registry, re-publishes its discovery on a
+  debounced membership change (`refreshTimerSyncTargetsOptions`, called from the loop),
+  and maps command/state through the current id list. `timerHaApply`'s SyncTargets case
+  is now value-based.
+- Host tests `test_PP1`..`test_PP5` cover the presence subsystem; `test_DT1`..`test_DT6`
+  (native) cover the dynamic option build + id↔index mapping incl. the unknown case +
+  the sorted `peerIds` accessor, and `test_DT7` (native_ha) covers `resetOptions` rebuild
+  + discovery republish.
 
 See also: [ADR-0006](0006-timer-multi-device-sync.md) (the propagation surface this
 extends), [ADR-0018](0018-run-scoped-config-mirror.md) (the run-scoped config

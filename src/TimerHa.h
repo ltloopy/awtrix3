@@ -91,4 +91,25 @@ void formatTimerHaAttrTopic(const char *dataPrefix, const char *deviceUniqueId,
 // Pure data (no String/Globals) so it is host-testable.
 int8_t timerSyncTargetsSelectIndex(const char *syncTargets);
 
+// Dynamic SyncTargets select (#112). The select consumes the peer registry, so its
+// option list and id<->index mapping are built at runtime from the CURRENT set of
+// discovered peer ids (already sorted) rather than the static "Off;All" table field.
+// All three helpers are pure (char* / out-buffer, no String/Globals) so they are
+// host-testable alongside the rest of this contract.
+
+// Build the option list "Off;All" followed by ";<id>" for each of the n peer ids,
+// in the given order, into out[outLen] (truncated like snprintf). n==0 -> "Off;All".
+void timerSyncTargetsBuildOptions(const char *const *ids, size_t n, char *out, size_t outLen);
+
+// Forward map (sync_targets value -> select option index) over the CURRENT id list:
+// "" -> 0 (Off), "all" -> 1 (All), a single id present at sorted position k -> 2+k,
+// an id no longer present OR a multi-id CSV -> -1 (unknown / no option selected).
+// With n==0 this reduces to the static Off/All/-1 behaviour of timerSyncTargetsSelectIndex.
+int8_t timerSyncTargetsIndexForValue(const char *syncTargets, const char *const *ids, size_t n);
+
+// Reverse map (select option index -> sync_targets value) over the CURRENT id list:
+// 0 -> "", 1 -> "all", k>=2 -> ids[k-2], written into out[outLen]. Returns false
+// (and leaves out untouched) when index is out of range — the command path's BadField.
+bool timerSyncTargetsValueForIndex(int8_t index, const char *const *ids, size_t n, char *out, size_t outLen);
+
 #endif

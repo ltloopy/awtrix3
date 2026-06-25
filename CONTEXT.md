@@ -368,8 +368,15 @@ not the `uniqueID`. See [ADR-0019](docs/adr/0019-peer-presence-registry.md).
 - **Peer registry** — a bounded (`kPeerMax` ~16) RAM set of `{uniqueID, lastSeen}`. The
   clock's **own id is excluded**; entries **age out** after the TTL (`kPeerTtlMs` ~100s,
   ~3 missed beacons), pruned on each `tickPresence()`. Pure LAN-derived state: cleared on
-  boot, never persisted. This is the backend the **dynamic HA Targets select** consumes in
-  a later slice; presence itself builds no UI.
+  boot, never persisted. `peerIds()` returns the current ids **sorted** for consumers.
+- **Dynamic HA Targets select** — the Home Assistant **Timer sync targets** select
+  (writable since #110) consumes the registry: its options are built at runtime as
+  `Off`, `All`, then each discovered peer id (sorted), and the entity's discovery is
+  re-published (debounced, on change) as membership shifts. It is **single-target** by
+  the platform's nature — picking a peer sets `sync_targets` to that one id; a multi-id
+  CSV list (set out-of-band) cannot be shown and reflects as **unknown**, while the
+  read-only `sync_targets` attribute stays authoritative for the exact value.
 
 _Avoid_: calling presence a fourth control/propagation command (it changes no state);
-keying peers by hostname (use `uniqueID`); gating the harvest behind follow/targets.
+keying peers by hostname (use `uniqueID`); gating the harvest behind follow/targets;
+expecting the HA select to express a multi-id CSV target list (single-target only).

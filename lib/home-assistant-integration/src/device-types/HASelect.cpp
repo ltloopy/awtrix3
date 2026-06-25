@@ -72,6 +72,27 @@ void HASelect::setOptions(const char* options)
     }
 }
 
+void HASelect::resetOptions()
+{
+    if (_options) {
+        // Mirror the destructor's option-array teardown: each option string is heap
+        // allocated only when there is more than one option (see setOptions).
+        const uint8_t optionsNb = _options->getItemsNb();
+        const HASerializerArray::ItemType* options = _options->getItems();
+
+        if (optionsNb > 1) {
+            for (uint8_t i = 0; i < optionsNb; i++) {
+                delete options[i];
+            }
+        }
+
+        delete _options;
+        _options = nullptr;
+    }
+
+    _currentState = -1; // no option selected until the new list is applied
+}
+
 bool HASelect::setState(const int8_t state, const bool force)
 {
     if (!force && _currentState == state) {
