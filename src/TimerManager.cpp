@@ -974,17 +974,14 @@ TimerCmdResult TimerManager_::timerHaApply(TimerHaEntity entity, const String &r
         doc["sync_follow"] = (rawValue.toInt() != 0);
         break;
     case TimerHaEntity::SyncTargets:
-    {
-        // The select callback hands us the chosen STATIC option index (issue #110);
-        // map it through TimerSyncTargetsOption to the wire value the bespoke
-        // sync_targets validator accepts: Off -> "" (off), All -> "all". Reject any
-        // index outside the static list (atomic-reject parity).
-        long idx = rawValue.toInt();
-        if (idx == (long)TimerSyncTargetsOption::Off)      doc["sync_targets"] = "";
-        else if (idx == (long)TimerSyncTargetsOption::All) doc["sync_targets"] = "all";
-        else return TimerCmdResult::BadField;
+        // The dynamic select (issue #112) hands us the RESOLVED sync_targets value,
+        // not an index: "" (Off), "all" (All), or a discovered peer id. MQTTManager
+        // maps the chosen option index through the CURRENT id list before calling, so
+        // the option set tracks the registry. The bespoke sync_targets validator
+        // (parseSyncTargets) rejects a malformed id (atomic-reject parity). Local
+        // identity (inSnapshot=false): persists but never propagates.
+        doc["sync_targets"] = rawValue;
         break;
-    }
     default:
         return TimerCmdResult::BadField;   // not a control entity
     }
@@ -1335,6 +1332,27 @@ bool TimerManager_::hasPeer(const String &id) const
     for (uint8_t i = 0; i < _peerCount; ++i)
         if (_peers[i].uniqueID == id) return true;
     return false;
+}
+
+size_t TimerManager_::peerIds(String *out, size_t cap) const
+{
+    // Sort the FULL set first, then copy the lowest `cap`, so a small buffer still
+    // gets a stable prefix of the sorted list (not just the first-discovered ids).
+    // The registry is tiny (kPeerMax ~16) so an O(n^2) selection sort on a local
+    // copy is cheaper than dragging in <algorithm> and stays allocation-light.
+    String sorted[kPeerMax];
+    for (uint8_t i = 0; i < _peerCount; ++i) sorted[i] = _peers[i].uniqueID;
+    for (uint8_t i = 0; i + 1 < _peerCount; ++i)
+    {
+        uint8_t lo = i;
+        for (uint8_t j = i + 1; j < _peerCount; ++j)
+            if (sorted[j] < sorted[lo]) lo = j;
+        if (lo != i) { String t = sorted[i]; sorted[i] = sorted[lo]; sorted[lo] = t; }
+    }
+
+    size_t n = 0;
+    for (uint8_t i = 0; i < _peerCount && n < cap; ++i) out[n++] = sorted[i];
+    return n;
 }
 
 void TimerManager_::broadcastPresence()

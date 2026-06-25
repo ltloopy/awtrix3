@@ -45,6 +45,10 @@ public:
 
 void reconcileTimerHAState();
 
+// Debounced re-publish of the dynamic Targets select's discovery when peer-registry
+// membership changes (issue #112). Driven from the device loop with the current millis().
+void refreshTimerSyncTargetsOptions(unsigned long nowMs);
+
 extern MQTTManager_ &MQTTManager;
 
 #endif

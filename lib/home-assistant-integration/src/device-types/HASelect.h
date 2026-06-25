@@ -31,9 +31,18 @@ public:
      * For example: `setOptions("Option A;Option B;Option C");
      *
      * @param options The list of options that are separated by semicolons.
-     * @note The options list can be set only once.
+     * @note The options list can be set only once. Call resetOptions() first to
+     *       replace an already-set list (e.g. a dynamic, discovery-driven select).
      */
     void setOptions(const char* options);
+
+    /**
+     * Releases the current option list so setOptions() can be called again, and
+     * resets the current state to "no option selected" (-1). Useful for a select
+     * whose options change at runtime: call resetOptions(), setOptions(newList),
+     * then re-publish the discovery config so Home Assistant sees the new options.
+     */
+    void resetOptions();
 
     /**
      * Changes state of the select and publishes MQTT message.

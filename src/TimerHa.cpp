@@ -104,6 +104,44 @@ int8_t timerSyncTargetsSelectIndex(const char *syncTargets)
     return -1;   // specific-ID CSV -> unknown (HASelect: no option selected)
 }
 
+// --- Dynamic SyncTargets select (#112) ---------------------------------------
+// The select's options and id<->index mapping are derived at runtime from the
+// CURRENT peer-id list. See the contract in TimerHa.h.
+
+void timerSyncTargetsBuildOptions(const char *const *ids, size_t n, char *out, size_t outLen)
+{
+    // Base options are always present; peers append in the caller-provided (sorted)
+    // order. String here is local scratch — the device build has it via Arduino.h.
+    String s = "Off;All";
+    for (size_t i = 0; i < n; ++i)
+    {
+        s += ';';
+        s += ids[i];
+    }
+    snprintf(out, outLen, "%s", s.c_str());
+}
+
+int8_t timerSyncTargetsIndexForValue(const char *syncTargets, const char *const *ids, size_t n)
+{
+    if (syncTargets == nullptr || syncTargets[0] == '\0') return (int8_t)TimerSyncTargetsOption::Off;
+    if (strcmp(syncTargets, "all") == 0) return (int8_t)TimerSyncTargetsOption::All;
+    // A multi-id CSV cannot be expressed as a single select option -> unknown.
+    if (strchr(syncTargets, ',') != nullptr) return -1;
+    // A single specific id reflects only while it is still a discovered peer; the
+    // index follows its position in the sorted list (after the two base options).
+    for (size_t i = 0; i < n; ++i)
+        if (strcmp(syncTargets, ids[i]) == 0) return (int8_t)(2 + i);
+    return -1;   // an id no longer present -> unknown (HASelect: no option selected)
+}
+
+bool timerSyncTargetsValueForIndex(int8_t index, const char *const *ids, size_t n, char *out, size_t outLen)
+{
+    if (index == (int8_t)TimerSyncTargetsOption::Off) { snprintf(out, outLen, "%s", ""); return true; }
+    if (index == (int8_t)TimerSyncTargetsOption::All) { snprintf(out, outLen, "%s", "all"); return true; }
+    if (index >= 2 && (size_t)(index - 2) < n) { snprintf(out, outLen, "%s", ids[index - 2]); return true; }
+    return false;
+}
+
 void formatTimerHaEntityId(const TimerHaDescriptor &d, const char *macSuffix, char *out, size_t outLen)
 {
     snprintf(out, outLen, d.idFormat, macSuffix);

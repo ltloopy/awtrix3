@@ -74,6 +74,34 @@ void onSelectCommand(int8_t index, HASelect *sender);
 void onSwitchCommand(bool state, HASwitch *sender);
 void onTimerDurationMessage(const char *message, uint16_t length, HAText *sender);
 
+// --- Dynamic Targets select (#112) -------------------------------------------
+// The Targets select consumes the peer registry: its options are "Off;All" plus
+// each currently-discovered peer id (sorted), rebuilt at runtime. These helpers
+// snapshot the current peer ids and join them through the pure TimerHa builder.
+// kSyncTargetPeerCap matches TimerManager's kPeerMax; the worst-case option string
+// is "Off;All" + kPeerMax ids (<=32 chars each, the sync_targets token cap) + seps.
+static const size_t kSyncTargetPeerCap = 16;
+static const size_t kSyncTargetOptsCap = 8 + kSyncTargetPeerCap * 33 + 1; // "Off;All" + ";<id>"...
+
+// Snapshot the current sorted peer ids and build the select's option string into
+// optsOut. Returns the peer count; idsOut holds the ids (whose c_str() backs ptrsOut)
+// so the caller can also map a value<->index against the SAME list.
+static size_t buildCurrentSyncTargetsOptions(String *idsOut, const char **ptrsOut, size_t cap,
+                                             char *optsOut, size_t optsLen)
+{
+    size_t n = TimerManager.peerIds(idsOut, cap);
+    for (size_t i = 0; i < n; ++i) ptrsOut[i] = idsOut[i].c_str();
+    timerSyncTargetsBuildOptions(ptrsOut, n, optsOut, optsLen);
+    return n;
+}
+
+// The options string last published to the select, and the debounce bookkeeping for
+// re-publishing discovery only after registry membership has settled (issue #112).
+static String        syncTargetsOptionsSig;
+static bool          syncTargetsDirty = false;
+static unsigned long syncTargetsDirtySinceMs = 0;
+static const unsigned long kSyncTargetsRepublishDebounceMs = 3000;
+
 // Creates the Timer HA entity objects (and registers them with HAMqtt via their
 // constructors). Idempotent: the objects persist for the device lifetime, so a second
 // call is a no-op. This must run with the Timer entity id buffers already resolved
@@ -178,14 +206,60 @@ void MQTTManager_::createTimerHAEntities()
     timerSyncFollowSw->setState(TIMER_SYNC_FOLLOW, true);
 
     timerSyncTargetsSel = new HASelect(timerHaId(TimerHaEntity::SyncTargets));
-    timerSyncTargetsSel->setOptions(dSyncT.options);
+    // Dynamic options (issue #112): "Off;All" plus each currently-discovered peer id,
+    // not the static dSyncT.options table field — the select tracks the peer registry.
+    String        stIds[kSyncTargetPeerCap];
+    const char   *stPtrs[kSyncTargetPeerCap];
+    char          stOpts[kSyncTargetOptsCap];
+    size_t        stN = buildCurrentSyncTargetsOptions(stIds, stPtrs, kSyncTargetPeerCap,
+                                                       stOpts, sizeof(stOpts));
+    timerSyncTargetsSel->setOptions(stOpts);
+    syncTargetsOptionsSig = stOpts;   // seed the republish baseline (no spurious first republish)
+    syncTargetsDirty = false;
     timerSyncTargetsSel->onCommand(onSelectCommand);
     timerSyncTargetsSel->setIcon(dSyncT.icon);
     timerSyncTargetsSel->setName(dSyncT.name);
-    // Reflect the current sync_targets: Off/All, or unknown (-1) for a specific-ID
-    // CSV set out-of-band — the read-only attribute stays authoritative for the
-    // exact value (issue #110).
-    timerSyncTargetsSel->setState(timerSyncTargetsSelectIndex(TIMER_SYNC_TARGETS.c_str()), true);
+    // Reflect the current sync_targets against the CURRENT id list: Off/All, the
+    // matching peer's option, or unknown (-1) for a multi-ID CSV / an id no longer
+    // present — the read-only attribute stays authoritative for the exact value.
+    timerSyncTargetsSel->setState(
+        timerSyncTargetsIndexForValue(TIMER_SYNC_TARGETS.c_str(), stPtrs, stN), true);
+}
+
+// Re-publish the Targets select's discovery when peer-registry membership changes,
+// debounced so a burst of beacon churn yields one republish (issue #112). No-op when
+// the timer HA entities are absent or MQTT is down (discovery re-publishes at the next
+// connect). On a settled change it rebuilds the options, re-publishes the discovery
+// config so Home Assistant sees the new list, and re-applies the selected state.
+void refreshTimerSyncTargetsOptions(unsigned long nowMs)
+{
+    if (timerSyncTargetsSel == nullptr) return;
+    if (!mqtt.isConnected()) return;
+
+    String      ids[kSyncTargetPeerCap];
+    const char *ptrs[kSyncTargetPeerCap];
+    char        opts[kSyncTargetOptsCap];
+    size_t      n = buildCurrentSyncTargetsOptions(ids, ptrs, kSyncTargetPeerCap,
+                                                   opts, sizeof(opts));
+
+    if (syncTargetsOptionsSig == opts) { syncTargetsDirty = false; return; }  // unchanged
+
+    if (!syncTargetsDirty)   // first sighting of the change: start the debounce window
+    {
+        syncTargetsDirty = true;
+        syncTargetsDirtySinceMs = nowMs;
+        return;
+    }
+    if ((nowMs - syncTargetsDirtySinceMs) < kSyncTargetsRepublishDebounceMs) return;
+
+    timerSyncTargetsSel->resetOptions();
+    timerSyncTargetsSel->setOptions(opts);
+    mqtt.publishConfigForDeviceType(timerSyncTargetsSel);
+    timerSyncTargetsSel->setState(
+        timerSyncTargetsIndexForValue(TIMER_SYNC_TARGETS.c_str(), ptrs, n), true);
+
+    syncTargetsOptionsSig = opts;
+    syncTargetsDirty = false;
 }
 
 // Brings the Timer HA entities online at runtime when SHOW_TIMER flips false->true.
@@ -526,13 +600,22 @@ void onSelectCommand(int8_t index, HASelect *sender)
     }
     else if (sender == timerSyncTargetsSel)
     {
-        // Route through parseCommand (issue #110): the static Off/All option index
-        // maps to sync_targets ""/"all", inheriting the bespoke validator and NVS
-        // persistence. Echo the canonical applied value back (Off/All, or unknown
-        // for a specific-ID CSV set out-of-band — the read-only attribute stays
-        // authoritative for the exact value). sync_targets never propagates.
-        TimerManager.timerHaApply(TimerHaEntity::SyncTargets, String(index));
-        sender->setState(timerSyncTargetsSelectIndex(TIMER_SYNC_TARGETS.c_str()));
+        // Dynamic select (issue #112): resolve the chosen option index through the
+        // CURRENT peer-id list to its sync_targets value (Off -> "", All -> "all", a
+        // peer option -> that id), then route through parseCommand (#110) for the
+        // bespoke validator + NVS persistence. Echo the canonical applied value back
+        // against the same list (Off/All/peer, or unknown for a multi-ID CSV / an id
+        // no longer present — the read-only attribute stays authoritative). sync_targets
+        // never propagates.
+        String      ids[kSyncTargetPeerCap];
+        const char *ptrs[kSyncTargetPeerCap];
+        char        opts[kSyncTargetOptsCap];
+        size_t      n = buildCurrentSyncTargetsOptions(ids, ptrs, kSyncTargetPeerCap,
+                                                       opts, sizeof(opts));
+        char val[40];
+        if (timerSyncTargetsValueForIndex(index, ptrs, n, val, sizeof(val)))
+            TimerManager.timerHaApply(TimerHaEntity::SyncTargets, val);
+        sender->setState(timerSyncTargetsIndexForValue(TIMER_SYNC_TARGETS.c_str(), ptrs, n));
         return;
     }
     saveSettings();
