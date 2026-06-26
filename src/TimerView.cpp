@@ -84,6 +84,15 @@ TimerView TimerViewModel::compute(const TimerSnapshot &s)
         // at col 31 either way (barX0 + barMaxLen == kScreenW).
         const int16_t barX0     = s.iconEnabled ? kBarX0     : 0;          // 9  or 0
         const int16_t barMaxLen = s.iconEnabled ? kBarMaxLen : kScreenW;   // 23 or 32
+
+        // The background track is the full bar trough and persists for the whole
+        // Running/Paused window, independent of the foreground's len-rounds-to-0
+        // gate below (ADR-0020). The painter AND-s in TIMER_BAR_ENABLED / a non-black
+        // bar_bg_color, exactly as it does for the foreground.
+        v.showBarTrack   = true;
+        v.barTrackLen    = (uint8_t)barMaxLen;
+        v.barTrackStartX = barX0;
+
         uint32_t len = ((uint32_t)barMaxLen * remaining) / barDuration;
         if (len > (uint32_t)barMaxLen)
             len = (uint32_t)barMaxLen;

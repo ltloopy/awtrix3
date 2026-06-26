@@ -55,6 +55,7 @@ String   TIMER_MELODY_END       = "timer_end";
 bool     TIMER_BAR_ENABLED      = true;
 bool     TIMER_ICON_ENABLED     = true;
 uint32_t TIMER_BAR_COLOR        = 0;
+uint32_t TIMER_BAR_BG_COLOR     = 0;
 bool        TIMER_SYNC_FOLLOW   = false;
 String      TIMER_SYNC_TARGETS  = "";
 const char *uniqueID            = "awtrix_self";

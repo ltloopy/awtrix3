@@ -54,7 +54,8 @@ The JSON object has the following properties:
 | `timer_melody_end` | string | Bare melody name for the end melody. Empty resets to default `"timer_end"`. Per ADR-0004. | `"timer_end"` |
 | `timer_bar_enabled` | boolean | Show/hide the Running/Paused progress bar. Per ADR-0004. | `true` |
 | `timer_icon_enabled` | boolean | Show/hide the timer icon; when hidden the time text and bar reflow to the full panel. Per ADR-0005. | `true` |
-| `timer_bar_color` | integer | Hex color (0..0xFFFFFF) for the progress bar. `0` follows `TEXTCOLOR_888`. Per ADR-0004. | `0` |
+| `timer_bar_color` | integer | Hex color (0..0xFFFFFF) for the progress bar (foreground). `0` follows `TEXTCOLOR_888`. Per ADR-0004. | `0` |
+| `timer_bar_bg_color` | integer | Hex color (0..0xFFFFFF) for the progress-bar **background track** drawn behind the bar. `0` = black = no track (literal, not a sentinel). Per ADR-0020. | `0` |
 | `timer_sync_follow` | boolean | When `true`, this clock obeys inbound timer-sync packets it is targeted by (multi-device sync follow consent gate). Local identity — never propagated. Per ADR-0006. | `false` |
 | `timer_sync_targets` | string | Whom this clock commands on a local timer action: `""` (sync off), `all`, or a comma list of peer device IDs (e.g. `awtrix_ab12,awtrix_cd34`). Local identity — never propagated. Per ADR-0006. | `""` |
 

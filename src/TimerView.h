@@ -57,6 +57,16 @@ struct TimerView
     uint8_t barLen;          // 0 .. (kBarMaxLen, or kScreenW when the icon is hidden)
     int16_t barStartX;       // app-local start column
 
+    // Background track behind the bar (ADR-0020): the FULL bar extent, painted in
+    // bar_bg_color before the foreground segment. Unlike showBar it PERSISTS for the
+    // whole Running/Paused window -- including the final stretch where barLen rounds
+    // to 0 and showBar is false -- so the trough stays visible like the app's
+    // drawProgressBar background. Same reflow as the bar: icon on -> (9, 23), icon
+    // off -> (0, 32).
+    bool    showBarTrack;
+    uint8_t barTrackLen;     // kBarMaxLen, or kScreenW when the icon is hidden
+    int16_t barTrackStartX;  // app-local start column (bar origin at full length)
+
     // Config-mode field underline (Config screen only).
     bool    showUnderline;
     uint8_t underlineField;  // 0 = HH, 1 = MM, 2 = SS (painter maps to X)

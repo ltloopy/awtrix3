@@ -536,6 +536,14 @@ void TimerApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x,
         matrix->drawFastHLine(underlineX + x, (kTimerScreenH - 1) + y, 8, TEXTCOLOR_888);
     }
 
+    // Background track behind the bar (ADR-0020): the full trough, painted first so
+    // the foreground draws over it. Persists while the bar is active (even when the
+    // foreground has drained to nothing). A black bar_bg_color (the default) is off
+    // pixels, so it is skipped -- the bar then looks exactly as it did pre-ADR-0020.
+    if (view.showBarTrack && TIMER_BAR_ENABLED && TIMER_BAR_BG_COLOR)
+        matrix->drawFastHLine(view.barTrackStartX + x, (kTimerScreenH - 1) + y,
+                              view.barTrackLen, TIMER_BAR_BG_COLOR);
+
     // Progress bar (right-anchored, drains from the left).
     if (view.showBar && TIMER_BAR_ENABLED)
         matrix->drawFastHLine(view.barStartX + x, (kTimerScreenH - 1) + y, view.barLen,
