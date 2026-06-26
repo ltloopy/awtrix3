@@ -50,6 +50,17 @@ Two different `icon`/`bar`-named families on the Timer surface; do not conflate 
 
 _Avoid_: reading `icon_enabled` as "enable the idle icon" or as a member of the `icon_<state>` family — it is the master on/off for the whole icon region.
 
+### Bar foreground vs. background color
+
+The Timer progress bar has **two** color knobs, mirroring the custom-app `progressC` / `progressBC` pair:
+
+- **`bar_color`** (`TIMER_BAR_COLOR`) — the **foreground**, the draining "remaining" segment. `0` is a **sentinel**: *follow the text color* (`TEXTCOLOR_888`). See ADR-0004.
+- **`bar_bg_color`** (`TIMER_BAR_BG_COLOR`) — the **background track** drawn behind the bar (the trough). `0` is a **literal** black = LEDs off = *no track* — the default, so the bar looks exactly as it did before the background existed. See ADR-0020.
+
+The meaning of `0` is therefore deliberately **asymmetric** between the two, and surfaces on read carriers as `"default"` (foreground) vs `"none"` (background). The track **persists for the whole Running/Paused window** — it stays visible after the foreground has drained below one cell — and both are hidden together when `bar_enabled = false`.
+
+_Avoid_: reading `bar_bg_color = 0` as "follow text color" (that is the *foreground's* sentinel; the background's `0` is plain black / off); expecting the background to vanish when the foreground drains (the trough persists, unlike the foreground bar).
+
 ### On-device timer-config surface
 
 The **TIMER global menu** is the **single** on-device place to configure the Timer —
@@ -119,7 +130,7 @@ Two distinct kinds of Timer interface; do not conflate them.
 
 _Avoid_: calling `GET /api/timer` a "control surface" or implying it participates in atomic-reject. It observes; it never writes — even though it now reports the full config, it remains pure read (always `200`, no `409`).
 
-**Carrier-native representation** (a general property of *reads*, on any carrier — not only HA attribute groups). A read surface renders each value in the representation that carrier already uses for its own state, so a multi-carrier key can read differently on each carrier while the underlying value cannot drift (every carrier reads the same persisted storage). On HA attribute groups: `bar_color` as `"default"`/`"#RRGGBB"` and `max_duration` as raw seconds on the state sensor vs. the `H:MM:SS` clock string on the Duration entity. On HTTP `GET /api/timer`: the same `bar_color` rendering, and `max_duration` reported **both** raw and as `max_duration_str` — following the endpoint's own raw+`_str` duration precedent rather than the HA form. The raw-vs-rendered choice thus has a documented home on every carrier; the HTTP `config` mirror deliberately diverges from the raw propagation snapshot, yet cannot disagree in value because both read the same storage.
+**Carrier-native representation** (a general property of *reads*, on any carrier — not only HA attribute groups). A read surface renders each value in the representation that carrier already uses for its own state, so a multi-carrier key can read differently on each carrier while the underlying value cannot drift (every carrier reads the same persisted storage). On HA attribute groups: `bar_color` as `"default"`/`"#RRGGBB"`, `bar_bg_color` as `"none"`/`"#RRGGBB"`, and `max_duration` as raw seconds on the state sensor vs. the `H:MM:SS` clock string on the Duration entity. On HTTP `GET /api/timer`: the same `bar_color` rendering, and `max_duration` reported **both** raw and as `max_duration_str` — following the endpoint's own raw+`_str` duration precedent rather than the HA form. The raw-vs-rendered choice thus has a documented home on every carrier; the HTTP `config` mirror deliberately diverges from the raw propagation snapshot, yet cannot disagree in value because both read the same storage.
 
 **Icons are the one deliberate HA observation non-gap.** The four `icon_<state>` names are readable over HTTP (`config.icon_*`, ADR-0015) and MQTT (retained `{prefix}/timer/icons`), but have **no HA read path** by design: they already have two read paths, HA cannot usefully render an AWTRIX icon file, and they sit outside the settings/attribute-group tables. Documented, not an oversight.
 
@@ -225,7 +236,7 @@ happens at zero"), the `{id}_timer_buz` buzzer select carries `{countdown_second
 melody_tick, melody_end}`, the `{id}_timer_rem` remaining sensor carries
 `{remaining_publish_interval}` (its own cadence), and the `{id}_timer_state` state
 sensor carries the full config bag `{max_duration, remaining_publish_interval,
-icon_enabled, bar_enabled, bar_color, sync_follow, sync_targets}`.
+icon_enabled, bar_enabled, bar_color, bar_bg_color, sync_follow, sync_targets}`.
 `remaining_publish_interval` and `max_duration` each ride **two** carriers (one settings
 row, two table rows). A per-row formatter renders a key in its **carrier-native
 representation** (see the general principle below): a multi-carrier key may therefore

@@ -84,6 +84,24 @@ namespace
         doc[d.cmdKey] = buf;
     }
 
+    // bar_bg_color HA-attribute formatter (ADR-0020): the background track's color.
+    // Mirrors formatBarColor's structure but with the background's literal-off
+    // semantics -- 0 means BLACK = no track (LEDs off), NOT the foreground's
+    // "follow text color" sentinel -- so 0 renders as "none" (deliberately distinct
+    // from bar_color's "default"); any other value renders uppercase "#RRGGBB".
+    void formatBarBgColor(const TimerSettingDesc &d, JsonDocument &doc)
+    {
+        uint32_t v = *static_cast<uint32_t *>(d.storage);
+        if (v == 0)
+        {
+            doc[d.cmdKey] = "none";
+            return;
+        }
+        char buf[8];
+        snprintf(buf, sizeof(buf), "#%06X", (unsigned)(v & 0xFFFFFFu));
+        doc[d.cmdKey] = buf;
+    }
+
     // max_duration carrier-native HA-attribute formatter (PRD #66 / issue #68):
     // renders the stored cap (raw seconds, a U32) as the trimmed H:MM:SS clock
     // string the Duration text entity's OWN state speaks, by reusing the exact
@@ -121,6 +139,7 @@ const TimerSettingDesc TIMER_SETTINGS_DESCS[] = {
     {"icon_enabled",               "timer_icon_enabled",               "TICONEN", TcType::Bool, TcCheck::Bool,     0,   0,      1,     nullptr,       nullptr,         true,  &TIMER_ICON_ENABLED},
     {"bar_enabled",                "timer_bar_enabled",                "TBAREN",  TcType::Bool, TcCheck::Bool,     0,   0,      1,     nullptr,       nullptr,         true,  &TIMER_BAR_ENABLED},
     {"bar_color",                  "timer_bar_color",                  "TBARC",   TcType::U32,  TcCheck::Bespoke,  0,   0,      0,     nullptr,       parseBarColor,   true,  &TIMER_BAR_COLOR},
+    {"bar_bg_color",               "timer_bar_bg_color",               "TBARBC",  TcType::U32,  TcCheck::Bespoke,  0,   0,      0,     nullptr,       parseBarColor,   true,  &TIMER_BAR_BG_COLOR},
     {"melody_tick",                "timer_melody_tick",                "TMTICK",  TcType::Str,  TcCheck::Name,     0,   0,      0,     "timer_tick",  nullptr,         true,  &TIMER_MELODY_TICK},
     {"melody_end",                 "timer_melody_end",                 "TMEND",   TcType::Str,  TcCheck::Name,     0,   0,      0,     "timer_end",   nullptr,         true,  &TIMER_MELODY_END},
     {"sync_follow",                "timer_sync_follow",                "TSYNF",   TcType::Bool, TcCheck::Bool,     0,   0,      0,     nullptr,       nullptr,         false, &TIMER_SYNC_FOLLOW},
@@ -389,6 +408,7 @@ const TimerAttrGroupDesc TIMER_ATTR_GROUP_DESCS[] = {
     {TimerHaEntity::State,     "icon_enabled",               nullptr},
     {TimerHaEntity::State,     "bar_enabled",                nullptr},
     {TimerHaEntity::State,     "bar_color",                  formatBarColor},
+    {TimerHaEntity::State,     "bar_bg_color",               formatBarBgColor},
     {TimerHaEntity::State,     "sync_follow",                nullptr},
     {TimerHaEntity::State,     "sync_targets",               nullptr},
 };
@@ -542,6 +562,10 @@ void timerBuildFullConfig(JsonDocument &doc)
         if (strcmp(d.cmdKey, "bar_color") == 0)
         {
             formatBarColor(d, doc);          // "default" / uppercase "#RRGGBB", not the raw int
+        }
+        else if (strcmp(d.cmdKey, "bar_bg_color") == 0)
+        {
+            formatBarBgColor(d, doc);        // "none" / uppercase "#RRGGBB", not the raw int
         }
         else if (strcmp(d.cmdKey, "max_duration") == 0)
         {

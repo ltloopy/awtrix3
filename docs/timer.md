@@ -51,6 +51,7 @@ no Home Assistant or MQTT subscription required. `dev.json` keys override NVS on
 | Icon enabled (dflt true) | `icon_enabled` ✅ | `timer_icon_enabled` ✅ | 👁 `config.icon_enabled` | 👁 attr on state sensor | `TIMER` menu (`ICON`) ✅ |
 | Bar enabled (dflt true) | `bar_enabled` ✅ | `timer_bar_enabled` ✅ | 👁 `config.bar_enabled` | 👁 attr on state sensor | `TIMER` menu (`PROGRESS BAR`) ✅ |
 | Bar color (hex / `#RRGGBB`, dflt 0 = text color) | `bar_color` ✅ | `timer_bar_color` ✅ | 👁 `config.bar_color` (as `"default"`/`"#RRGGBB"`) | 👁 attr on state sensor (as `"default"`/`"#RRGGBB"`) | — |
+| Bar background color (hex / `#RRGGBB`, dflt 0 = black/no track) | `bar_bg_color` ✅ | `timer_bar_bg_color` ✅ | 👁 `config.bar_bg_color` (as `"none"`/`"#RRGGBB"`) | 👁 attr on state sensor (as `"none"`/`"#RRGGBB"`) | — |
 | Tick melody (dflt `timer_tick`) | `melody_tick` ✅ | `timer_melody_tick` ✅ | 👁 `config.melody_tick` | 👁 attr on buzzer select | — |
 | End melody (dflt `timer_end`) | `melody_end` ✅ | `timer_melody_end` ✅ | 👁 `config.melody_end` | 👁 attr on buzzer select | — |
 
@@ -106,7 +107,8 @@ timer in one publish.
 | `melody_end`  | string | Same. A bare empty string resets to default `"timer_end"`. | RTTTL melody played on timer expiry (subject to `buzzer` mode). Bare name persists & obeys `save`; inline tune always one-shot. See ADR-0004 / ADR-0017. |
 | `bar_enabled` | bool | `true` / `false` | When `false`, the progress bar is hidden in Running/Paused. Persists to NVS `"awtrix"`. See ADR-0004. |
 | `icon_enabled` | bool | `true` / `false` | When `false`, the timer icon (including the built-in hourglass fallback) is hidden and the time text + progress bar reflow to span the full 32px panel. Persists to NVS `"awtrix"`. See ADR-0005. |
-| `bar_color`   | int or hex string | Numeric (0..0xFFFFFF) or `"#RRGGBB"` / `"RRGGBB"` | Progress-bar color. `0` follows `TEXTCOLOR_888` (the global default). Persists to NVS `"awtrix"`. See ADR-0004. |
+| `bar_color`   | int or hex string | Numeric (0..0xFFFFFF) or `"#RRGGBB"` / `"RRGGBB"` | Progress-bar (foreground) color. `0` follows `TEXTCOLOR_888` (the global default). Persists to NVS `"awtrix"`. See ADR-0004. |
+| `bar_bg_color` | int or hex string | Numeric (0..0xFFFFFF) or `"#RRGGBB"` / `"RRGGBB"` | Progress-bar **background track** color, drawn behind the bar (mirrors the custom-app `progressBC`). `0` = black = **no track** (LEDs off — the default, so the bar looks unchanged from before this feature). The track persists for the whole Running/Paused window, even after the foreground has drained. Note the asymmetry: for `bar_color` `0` is a *sentinel* (follow text color); for `bar_bg_color` `0` is a *literal* black. Persists to NVS `"awtrix"`. See ADR-0020. |
 | `save`     | bool | `true` (default) / `false` | `save:false` makes the **whole command one-shot**: its config applies to the current run only and reverts to the saved settings when the timer next returns to Idle, writing nothing to flash. A non-boolean is rejected (atomic-reject). See [One-shot commands & inline melodies](#one-shot-commands--inline-melodies) / ADR-0017. |
 | `action`   | string | `"start"`, `"pause"`, `"reset"` (case-insensitive) | Drives the state machine. |
 
@@ -327,7 +329,7 @@ With `HA_DISCOVERY=true`, the firmware advertises ten entities:
 | --- | --- | --- |
 | `{id}_timer_dur`   | `text`        | Timer duration as a clock string `HH:MM:SS` (writable; accepts `MM:SS` and bare seconds too). Invalid input (malformed or out-of-range) reverts to the previous valid time. Carries a read-only JSON attribute object `{max_duration}` in the same `H:MM:SS` clock form (e.g. `"24:00:00"`), so the largest duration the timer will accept is visible at the point of entry. The cap is **read-only**; only the duration *state* is writable. |
 | `{id}_timer_rem`   | `sensor`      | Seconds remaining (read-only, updates every `TIMER_PUBLISH_INTERVAL` s while running). Carries a read-only JSON attribute object `{remaining_publish_interval}` — this sensor's own update cadence. |
-| `{id}_timer_state` | `sensor`      | One of `idle` / `running` / `paused` / `finished`. Carries the full-config read-only JSON attribute bag `{max_duration, remaining_publish_interval, icon_enabled, bar_enabled, bar_color, sync_follow, sync_targets}` so the whole configuration is readable from one entity. |
+| `{id}_timer_state` | `sensor`      | One of `idle` / `running` / `paused` / `finished`. Carries the full-config read-only JSON attribute bag `{max_duration, remaining_publish_interval, icon_enabled, bar_enabled, bar_color, bar_bg_color, sync_follow, sync_targets}` so the whole configuration is readable from one entity. |
 | `{id}_timer_buz`   | `select`      | Buzzer mode. Carries a read-only JSON attribute object `{countdown_seconds, melody_tick, melody_end}` so the beep window and both melodies are visible in HA without leaving the entity. |
 | `{id}_timer_fin`   | `select`      | Finished mode. Carries a read-only JSON attribute object `{realert_interval, finished_hold}` so the re-alert cadence and auto-clear hold are visible in HA without leaving the entity. |
 | `{id}_timer_start` | `button`      | Equivalent to `{"action":"start"}`. |
@@ -361,7 +363,7 @@ persisted-settings knob is projected onto the entity it is semantically about:
 | `{id}_timer_fin` (finished select) | `{"realert_interval":N, "finished_hold":N}` |
 | `{id}_timer_buz` (buzzer select)   | `{"countdown_seconds":N, "melody_tick":"…", "melody_end":"…"}` |
 | `{id}_timer_rem` (remaining sensor) | `{"remaining_publish_interval":N}` |
-| `{id}_timer_state` (state sensor)  | `{"max_duration":N, "remaining_publish_interval":N, "icon_enabled":bool, "bar_enabled":bool, "bar_color":"default"\|"#RRGGBB", "sync_follow":bool, "sync_targets":"…"}` |
+| `{id}_timer_state` (state sensor)  | `{"max_duration":N, "remaining_publish_interval":N, "icon_enabled":bool, "bar_enabled":bool, "bar_color":"default"\|"#RRGGBB", "bar_bg_color":"none"\|"#RRGGBB", "sync_follow":bool, "sync_targets":"…"}` |
 
 `remaining_publish_interval` and `max_duration` each deliberately ride **two** carriers.
 `remaining_publish_interval` rides the remaining sensor (its own cadence) and the state
@@ -373,7 +375,9 @@ renders the **same value** in the `H:MM:SS` **clock form** its own state speaks
 The two never contradict: both read the same persisted `max_duration`, so they always
 describe the same underlying value. `bar_color` is likewise rendered as the human string
 `"default"` (when 0 = follow the text color) or `"#RRGGBB"`, not its raw integer — an
-attribute renders in its carrier's native representation.
+attribute renders in its carrier's native representation. `bar_bg_color` follows the same
+shape but its 0 renders as `"none"` (no track) rather than `"default"`, mirroring the
+deliberate sentinel asymmetry between the foreground and background colors (ADR-0020).
 
 Each carrier's retained object goes out at discovery-enable and on every MQTT
 (re)connect, right after the wire refresh, on the on-device `TIMER`-menu
@@ -404,9 +408,10 @@ HA install or MQTT subscription ([ADR-0015](adr/0015-http-observation-mirrors-fu
 full key list in [api.md](api.md#state-observation)). The mirror is projected from
 the very tables that drive the control surface (`TIMER_SETTINGS_DESCS`,
 `TIMER_MEMBER_CONFIG_DESCS`), so the read surface cannot drift from what is
-writable. Values are raw except the two carrier-native renderings that follow this
+writable. Values are raw except the carrier-native renderings that follow this
 endpoint's raw+`_str` duration precedent: `bar_color` as `"default"`/`"#RRGGBB"`,
-and `max_duration` reported both raw and as `max_duration_str` (clock form).
+`bar_bg_color` as `"none"`/`"#RRGGBB"`, and `max_duration` reported both raw and as
+`max_duration_str` (clock form).
 `duration` stays top-level only (run-state, not config); `buzzer`/`finished` appear
 both top-level (legacy back-compat) and inside `config` (a self-contained mirror).
 

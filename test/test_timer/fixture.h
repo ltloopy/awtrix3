@@ -64,6 +64,7 @@ inline void reset_all() {
     TIMER_BAR_ENABLED       = true;
     TIMER_ICON_ENABLED      = true;
     TIMER_BAR_COLOR         = 0;
+    TIMER_BAR_BG_COLOR      = 0;
     TIMER_SYNC_FOLLOW       = false;
     TIMER_SYNC_TARGETS      = "";
     uniqueID                = "awtrix_self";

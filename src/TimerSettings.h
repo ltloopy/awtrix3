@@ -56,7 +56,7 @@ extern const size_t           TIMER_SETTINGS_DESC_COUNT;
 // cannot size a fixed array). A static_assert in TimerSettings.cpp pins it equal to
 // the table extent, so it cannot drift. Used by the one-shot override controller
 // (PRD #99 / issue #100) to stack a config snapshot buffer over the table.
-constexpr size_t TIMER_SETTINGS_DESC_CAP = 12;
+constexpr size_t TIMER_SETTINGS_DESC_CAP = 13;
 
 // Validate + coerce one field into `out`. Never writes a global (pure parse). Strict
 // JSON types match the legacy parseCommand: numbers reject bool/string/null; bools

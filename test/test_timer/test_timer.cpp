@@ -1288,6 +1288,7 @@ void test_U41_parseCommand_melody_and_bar(void) {
     TIMER_MELODY_END  = "timer_end";
     TIMER_BAR_ENABLED = true;
     TIMER_BAR_COLOR   = 0;
+    TIMER_BAR_BG_COLOR = 0;
 
     // Valid custom names apply.
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
@@ -1377,6 +1378,32 @@ void test_U41_parseCommand_melody_and_bar(void) {
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
                       static_cast<int>(TimerManager.parseCommand("{\"bar_color\":16777216}")));
     TEST_ASSERT_EQUAL_UINT32(0xFFAA00, TIMER_BAR_COLOR);
+
+    // bar_bg_color (ADR-0020) reuses parseBarColor: numeric, hex with/without '#',
+    // malformed/out-of-range rejected, and it is INDEPENDENT of bar_color.
+    TIMER_BAR_COLOR = 0xFFAA00;   // sentinel: must stay untouched by bg edits
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"bar_bg_color\":255}")));
+    TEST_ASSERT_EQUAL_UINT32(0x0000FF, TIMER_BAR_BG_COLOR);
+    TEST_ASSERT_EQUAL_UINT32(0xFFAA00, TIMER_BAR_COLOR);    // foreground unchanged
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"bar_bg_color\":\"#202020\"}")));
+    TEST_ASSERT_EQUAL_UINT32(0x202020, TIMER_BAR_BG_COLOR);
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"bar_bg_color\":\"00AA55\"}")));
+    TEST_ASSERT_EQUAL_UINT32(0x00AA55, TIMER_BAR_BG_COLOR);
+    // 0 is a valid literal (black = no track), not rejected.
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand("{\"bar_bg_color\":0}")));
+    TEST_ASSERT_EQUAL_UINT32(0, TIMER_BAR_BG_COLOR);
+    // Malformed string and out-of-range number rejected (atomic reject; value kept).
+    TIMER_BAR_BG_COLOR = 0x123456;
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"bar_bg_color\":\"notahex\"}")));
+    TEST_ASSERT_EQUAL_UINT32(0x123456, TIMER_BAR_BG_COLOR);
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
+                      static_cast<int>(TimerManager.parseCommand("{\"bar_bg_color\":16777216}")));
+    TEST_ASSERT_EQUAL_UINT32(0x123456, TIMER_BAR_BG_COLOR);
 }
 
 // ============================================================================
@@ -1678,6 +1705,10 @@ void test_D4_view_bar_geometry_right_anchored(void) {
     TEST_ASSERT_EQUAL_UINT8(11, half.barLen);
     TEST_ASSERT_EQUAL_INT16(21, half.barStartX);                 // 9 + (23 - 11)
     TEST_ASSERT_EQUAL_INT16(32, half.barStartX + half.barLen);   // right edge anchored
+    // Background track (ADR-0020): full trough, icon on -> (9, 23), regardless of drain.
+    TEST_ASSERT_TRUE(half.showBarTrack);
+    TEST_ASSERT_EQUAL_INT16(9, half.barTrackStartX);
+    TEST_ASSERT_EQUAL_UINT8(23, half.barTrackLen);
 
     // Full remaining: full-length bar starting at the bar origin.
     const TimerSnapshot s_full{TimerState::Running, 100, 100, 100, false, 0, 0, 0, 0, true, 0};
@@ -1686,10 +1717,26 @@ void test_D4_view_bar_geometry_right_anchored(void) {
     TEST_ASSERT_EQUAL_INT16(9, full.barStartX);
     TEST_ASSERT_EQUAL_INT16(32, full.barStartX + full.barLen);
 
-    // Tiny remaining (1s of 100): 23 * 1/100 == 0 cells -> no bar drawn.
+    // Tiny remaining (1s of 100): 23 * 1/100 == 0 cells -> no foreground bar...
     const TimerSnapshot s_tiny{TimerState::Running, 100, 1, 100, false, 0, 0, 0, 0, true, 0};
     TimerView tiny = TimerViewModel::compute(s_tiny);
     TEST_ASSERT_FALSE(tiny.showBar);
+    // ...but the background trough PERSISTS through the final stretch (ADR-0020).
+    TEST_ASSERT_TRUE(tiny.showBarTrack);
+    TEST_ASSERT_EQUAL_INT16(9, tiny.barTrackStartX);
+    TEST_ASSERT_EQUAL_UINT8(23, tiny.barTrackLen);
+
+    // Icon hidden: both the bar and its trough reflow to the full 32px panel (0, 32).
+    const TimerSnapshot s_noicon{TimerState::Running, 100, 50, 100, false, 0, 0, 0, 0, false, 0};
+    TimerView noicon = TimerViewModel::compute(s_noicon);
+    TEST_ASSERT_TRUE(noicon.showBarTrack);
+    TEST_ASSERT_EQUAL_INT16(0, noicon.barTrackStartX);
+    TEST_ASSERT_EQUAL_UINT8(32, noicon.barTrackLen);
+
+    // Idle: no bar region active, so no trough either.
+    const TimerSnapshot s_idle{TimerState::Idle, 100, 0, 0, false, 0, 0, 0, 0, true, 0};
+    TimerView idle = TimerViewModel::compute(s_idle);
+    TEST_ASSERT_FALSE(idle.showBarTrack);
 }
 
 // D5 — Config screen: HH:MM:SS centered over the full panel, field underline
@@ -2520,6 +2567,14 @@ void test_T3_table_bespoke_validators(void) {
     j["v"] = "GGGGGG";  TEST_ASSERT_FALSE(timerSettingParse(*bc, j["v"], out));  // non-hex
     j["v"] = "12345";   TEST_ASSERT_FALSE(timerSettingParse(*bc, j["v"], out));  // wrong length
 
+    // bar_bg_color (ADR-0020) shares the same bespoke parser (parseBarColor).
+    const TimerSettingDesc *bbc = timerSettingByCmdKey("bar_bg_color");
+    TEST_ASSERT_NOT_NULL(bbc);
+    j["v"] = 0x202020;  TEST_ASSERT_TRUE (timerSettingParse(*bbc, j["v"], out)); TEST_ASSERT_EQUAL_UINT32(0x202020, out.num);
+    j["v"] = 0;         TEST_ASSERT_TRUE (timerSettingParse(*bbc, j["v"], out)); TEST_ASSERT_EQUAL_UINT32(0, out.num);  // 0 = black (no track)
+    j["v"] = "#0044AA"; TEST_ASSERT_TRUE (timerSettingParse(*bbc, j["v"], out)); TEST_ASSERT_EQUAL_UINT32(0x0044AA, out.num);
+    j["v"] = "nothex";  TEST_ASSERT_FALSE(timerSettingParse(*bbc, j["v"], out));
+
     const TimerSettingDesc *st = timerSettingByCmdKey("sync_targets");
     j["v"] = "";                       TEST_ASSERT_TRUE (timerSettingParse(*st, j["v"], out));
     j["v"] = "all";                    TEST_ASSERT_TRUE (timerSettingParse(*st, j["v"], out)); TEST_ASSERT_EQUAL_STRING("all", out.str.c_str());
@@ -2539,6 +2594,7 @@ void test_T4_table_nvs_roundtrip(void) {
     TIMER_MAX_DURATION  = 4242;
     TIMER_BAR_ENABLED   = false;
     TIMER_BAR_COLOR     = 0x112233;
+    TIMER_BAR_BG_COLOR  = 0x445566;
     TIMER_MELODY_TICK   = "mytick";
     TIMER_SYNC_FOLLOW   = true;
     TIMER_SYNC_TARGETS  = "all";
@@ -2548,6 +2604,7 @@ void test_T4_table_nvs_roundtrip(void) {
     TIMER_MAX_DURATION  = 1;
     TIMER_BAR_ENABLED   = true;
     TIMER_BAR_COLOR     = 0;
+    TIMER_BAR_BG_COLOR  = 0;
     TIMER_MELODY_TICK   = "x";
     TIMER_SYNC_FOLLOW   = false;
     TIMER_SYNC_TARGETS  = "";
@@ -2557,6 +2614,7 @@ void test_T4_table_nvs_roundtrip(void) {
     TEST_ASSERT_EQUAL_UINT32(4242,     TIMER_MAX_DURATION);
     TEST_ASSERT_FALSE(TIMER_BAR_ENABLED);
     TEST_ASSERT_EQUAL_UINT32(0x112233, TIMER_BAR_COLOR);
+    TEST_ASSERT_EQUAL_UINT32(0x445566, TIMER_BAR_BG_COLOR);
     TEST_ASSERT_EQUAL_STRING("mytick", TIMER_MELODY_TICK.c_str());
     TEST_ASSERT_TRUE(TIMER_SYNC_FOLLOW);
     TEST_ASSERT_EQUAL_STRING("all",    TIMER_SYNC_TARGETS.c_str());
@@ -2589,6 +2647,7 @@ void test_T6_snapshot_excludes_local_identity(void) {
 
     TEST_ASSERT_TRUE(doc.containsKey("finished_hold"));
     TEST_ASSERT_TRUE(doc.containsKey("bar_color"));
+    TEST_ASSERT_TRUE(doc.containsKey("bar_bg_color"));
     TEST_ASSERT_TRUE(doc.containsKey("melody_tick"));
     TEST_ASSERT_TRUE(doc.containsKey("max_duration"));
 
@@ -3346,17 +3405,19 @@ void test_T14_attribute_group_table_well_formed(void) {
 }
 
 // T15 — the state-sensor carrier's attribute bag (timerBuildAttributeGroup):
-// exactly the seven config-view keys in table order, carrying live values, with
-// bar_color rendered as the human "#RRGGBB" string via the per-row formatter
-// (deliberately different from its raw-int config-snapshot form). sync_follow /
-// sync_targets ride here as read-only attributes despite inSnapshot=false.
-// (app_config_timeout was removed in PRD #83 / #88.)
+// exactly the eight config-view keys in table order, carrying live values, with
+// bar_color / bar_bg_color rendered as the human "#RRGGBB" string via their per-row
+// formatters (deliberately different from the raw-int config-snapshot form).
+// sync_follow / sync_targets ride here as read-only attributes despite
+// inSnapshot=false. (app_config_timeout was removed in PRD #83 / #88; bar_bg_color
+// added in ADR-0020.)
 void test_T15_attribute_group_state_bag(void) {
     TIMER_MAX_DURATION     = 7200;
     TIMER_PUBLISH_INTERVAL = 5;
     TIMER_ICON_ENABLED     = false;
     TIMER_BAR_ENABLED      = true;
     TIMER_BAR_COLOR        = 0xFF8800;
+    TIMER_BAR_BG_COLOR     = 0x202020;
     TIMER_SYNC_FOLLOW      = true;
     TIMER_SYNC_TARGETS     = "all";
 
@@ -3369,9 +3430,10 @@ void test_T15_attribute_group_state_bag(void) {
     TEST_ASSERT_FALSE(doc["icon_enabled"].as<bool>());
     TEST_ASSERT_TRUE(doc["bar_enabled"].as<bool>());
     TEST_ASSERT_EQUAL_STRING("#FF8800", doc["bar_color"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("#202020", doc["bar_bg_color"].as<const char *>());
     TEST_ASSERT_TRUE(doc["sync_follow"].as<bool>());
     TEST_ASSERT_EQUAL_STRING("all", doc["sync_targets"].as<const char *>());
-    TEST_ASSERT_EQUAL_INT(7, (int)doc.as<JsonObjectConst>().size());
+    TEST_ASSERT_EQUAL_INT(8, (int)doc.as<JsonObjectConst>().size());
 }
 
 // T16 — the remaining-sensor carrier's attribute bag: exactly
@@ -3403,6 +3465,24 @@ void test_T17_bar_color_formatter_renders_default_or_hex(void) {
     StaticJsonDocument<512> green;
     timerBuildAttributeGroup(TimerHaEntity::State, green);
     TEST_ASSERT_EQUAL_STRING("#00FF00", green["bar_color"].as<const char *>());
+}
+
+// T17b — the bar_bg_color formatter (ADR-0020) renders "none" when 0 (black = no
+// track, a LITERAL off, NOT the foreground's text-color sentinel) else uppercase
+// "#RRGGBB". The "none" vs bar_color's "default" label is the deliberate asymmetry.
+void test_T17b_bar_bg_color_formatter_renders_none_or_hex(void) {
+    const TimerSettingDesc *d = timerSettingByCmdKey("bar_bg_color");
+    TEST_ASSERT_NOT_NULL(d);
+
+    TIMER_BAR_BG_COLOR = 0;
+    StaticJsonDocument<512> off;
+    timerBuildAttributeGroup(TimerHaEntity::State, off);
+    TEST_ASSERT_EQUAL_STRING("none", off["bar_bg_color"].as<const char *>());
+
+    TIMER_BAR_BG_COLOR = 0x202020;
+    StaticJsonDocument<512> set;
+    timerBuildAttributeGroup(TimerHaEntity::State, set);
+    TEST_ASSERT_EQUAL_STRING("#202020", set["bar_bg_color"].as<const char *>());
 }
 
 // T18 — the Duration text entity's attribute bag (PRD #66 / issue #68): exactly
@@ -3479,6 +3559,20 @@ void test_T20_full_config_carrier_native_renderings(void) {
         DynamicJsonDocument cfg(2048);
         timerBuildFullConfig(cfg);
         TEST_ASSERT_EQUAL_STRING("#00FF00", cfg["bar_color"].as<const char *>());
+    }
+    // bar_bg_color (ADR-0020): "none" when 0, uppercase "#RRGGBB" when set.
+    TIMER_BAR_BG_COLOR = 0;
+    {
+        DynamicJsonDocument cfg(2048);
+        timerBuildFullConfig(cfg);
+        TEST_ASSERT_TRUE(cfg["bar_bg_color"].is<const char *>());
+        TEST_ASSERT_EQUAL_STRING("none", cfg["bar_bg_color"].as<const char *>());
+    }
+    TIMER_BAR_BG_COLOR = 0x202020;
+    {
+        DynamicJsonDocument cfg(2048);
+        timerBuildFullConfig(cfg);
+        TEST_ASSERT_EQUAL_STRING("#202020", cfg["bar_bg_color"].as<const char *>());
     }
     // max_duration: raw seconds kept, plus the trimmed clock-string sibling.
     TIMER_MAX_DURATION = 86400;
@@ -4045,10 +4139,10 @@ void test_W18_countdown_change_republishes_buzzer_group_only(void) {
 
 // ============================================================================
 // W19 — the state sensor's attribute bag on the wire (PRD #57 / issue #59):
-// publishAttributeGroup(State) puts the seven-key config view — live values,
-// bar_color as the "#RRGGBB" human string — on the state sensor's json_attr_t
-// topic, and only there. Proves the HASensor carrier rides the same wire seam.
-// (app_config_timeout was removed in PRD #83 / #88.)
+// publishAttributeGroup(State) puts the eight-key config view — live values,
+// bar_color / bar_bg_color as the "#RRGGBB" human string — on the state sensor's
+// json_attr_t topic, and only there. Proves the HASensor carrier rides the same
+// wire seam. (app_config_timeout removed in PRD #83 / #88; bar_bg_color in ADR-0020.)
 // ============================================================================
 void test_W19_publish_state_group_emits_full_config_view(void) {
     TIMER_MAX_DURATION     = 7200;
@@ -4056,6 +4150,7 @@ void test_W19_publish_state_group_emits_full_config_view(void) {
     TIMER_ICON_ENABLED     = false;
     TIMER_BAR_ENABLED      = true;
     TIMER_BAR_COLOR        = 0xFF8800;
+    TIMER_BAR_BG_COLOR     = 0x202020;
     TIMER_SYNC_FOLLOW      = true;
     TIMER_SYNC_TARGETS     = "all";
 
@@ -4066,7 +4161,8 @@ void test_W19_publish_state_group_emits_full_config_view(void) {
     TEST_ASSERT_EQUAL_STRING(
         "{\"max_duration\":7200,\"remaining_publish_interval\":5,"
         "\"icon_enabled\":false,\"bar_enabled\":true,"
-        "\"bar_color\":\"#FF8800\",\"sync_follow\":true,\"sync_targets\":\"all\"}",
+        "\"bar_color\":\"#FF8800\",\"bar_bg_color\":\"#202020\","
+        "\"sync_follow\":true,\"sync_targets\":\"all\"}",
         attr->payload.c_str());
     TEST_ASSERT_EQUAL_INT(1, fixture::count_publish(fixture::TIMER_STATE_ATTR_TOPIC));
     TEST_ASSERT_EQUAL_INT(0, fixture::count_publish(fixture::TIMER_STATE_TOPIC));
@@ -4592,6 +4688,7 @@ int main(int, char **) {
     RUN_TEST(test_T18_attribute_group_duration_bag);
     RUN_TEST(test_T16_attribute_group_remaining_bag);
     RUN_TEST(test_T17_bar_color_formatter_renders_default_or_hex);
+    RUN_TEST(test_T17b_bar_bg_color_formatter_renders_none_or_hex);
     RUN_TEST(test_T19_full_config_mirrors_every_persisted_key);
     RUN_TEST(test_T20_full_config_carrier_native_renderings);
     RUN_TEST(test_T21_get_config_value_spotchecks_via_parsecommand);

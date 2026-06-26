@@ -392,7 +392,8 @@ All JSON properties are optional. When multiple are sent together, property sett
 | `melody_end`  | string | Same. A bare empty string resets to default `"timer_end"`. | RTTTL end melody. Bare name persists & obeys `save`; inline tune always one-shot (ADR-0004 / ADR-0017). |
 | `bar_enabled` | bool | `true` / `false` | Show/hide the Running/Paused progress bar (ADR-0004). Persists. |
 | `icon_enabled` | bool | `true` / `false` | Show/hide the timer icon; when hidden the time text and bar reflow to span the full panel (ADR-0005). Persists. |
-| `bar_color`   | int or hex string | `0..0xFFFFFF` or `"#RRGGBB"` / `"RRGGBB"` | Progress-bar color; `0` follows `TEXTCOLOR_888` (ADR-0004). Persists. |
+| `bar_color`   | int or hex string | `0..0xFFFFFF` or `"#RRGGBB"` / `"RRGGBB"` | Progress-bar (foreground) color; `0` follows `TEXTCOLOR_888` (ADR-0004). Persists. |
+| `bar_bg_color` | int or hex string | `0..0xFFFFFF` or `"#RRGGBB"` / `"RRGGBB"` | Progress-bar **background track** color (drawn behind the bar); `0` = black = no track (the default — bar looks unchanged). Unlike `bar_color`'s `0`, this is a literal black, not a sentinel (ADR-0020). Persists. |
 | `sync_follow`  | bool | `true` / `false` | Obey inbound multi-device timer-sync this clock is targeted by (follow consent gate, ADR-0006). Local identity — not propagated. Persists. |
 | `sync_targets` | string | `""` / `all` / comma list of peer `uniqueID`s | Whom this clock commands on a local timer action (ADR-0006). Local identity — not propagated. Persists. |
 | `save` | bool | `true` (default) / `false` | `save:false` makes the **whole command one-shot**: its config applies to the current run only and reverts to the saved settings when the timer next returns to Idle (a `reset` or auto-clear), writing nothing to flash. A non-boolean is rejected (atomic-reject). See the one-shot note below and ADR-0017. |
@@ -468,6 +469,7 @@ Clear an override so the slot falls back to the Idle icon:
     "icon_enabled": true,
     "bar_enabled": true,
     "bar_color": "default",
+    "bar_bg_color": "none",
     "melody_tick": "timer_tick",
     "melody_end": "timer_end",
     "sync_follow": false,
@@ -506,6 +508,7 @@ While a **one-shot** run (`save:false`, see above / ADR-0017) is active, `config
 Values are **raw** by default (interval seconds as integers, melodies and `sync_targets` as strings, toggles as booleans), with two deliberate carrier-native renderings that follow this endpoint's own raw+`_str` duration precedent:
 
 - **`bar_color`** is rendered as `"#RRGGBB"` (uppercase) or `"default"` when it follows the text color, rather than a raw 24-bit integer.
+- **`bar_bg_color`** is rendered as `"#RRGGBB"` (uppercase) or `"none"` when it is black (no track), rather than a raw integer — the `"none"` vs `"default"` wording reflects the deliberate sentinel asymmetry between the two colors (ADR-0020).
 - **`max_duration`** is reported **both** raw (`86400`) **and** as `max_duration_str` (`"24:00:00"`, trimmed clock form).
 
 | `config` key | Type | Notes |
@@ -519,6 +522,7 @@ Values are **raw** by default (interval seconds as integers, melodies and `sync_
 | `icon_enabled` | bool | Whether per-state icons are shown. |
 | `bar_enabled` | bool | Whether the progress bar is shown. |
 | `bar_color` | string | `"#RRGGBB"` or `"default"` (carrier-native; not the raw integer). |
+| `bar_bg_color` | string | `"#RRGGBB"` or `"none"` (carrier-native; not the raw integer). Background track behind the bar. |
 | `melody_tick` | string | RTTTL melody name for countdown ticks. |
 | `melody_end` | string | RTTTL melody name played at finish. |
 | `sync_follow` | bool | Whether this clock follows synced peers (observable only; never HA-writable or propagated). |
