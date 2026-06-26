@@ -113,10 +113,48 @@ void test_HA3_publishJsonAttributes_is_retained_on_attr_topic(void) {
     TEST_ASSERT_TRUE(m->retained);
 }
 
+// ============================================================================
+// DT7 — resetOptions() lets a select REBUILD its option list and re-publish a
+// fresh discovery config (issue #112). HASelect::setOptions is set-once; the
+// dynamic Targets select needs to grow/shrink as peers come and go, so it clears
+// the old list then re-sets and re-publishes. Proves the new options reach the
+// broker in the re-published config payload.
+// ============================================================================
+void test_DT7_resetOptions_rebuilds_and_republishes(void) {
+    PubSubClientMock *mock = new PubSubClientMock();
+    HADevice *device = new HADevice("testId");
+    HAMqtt *mqtt = new HAMqtt(mock, *device);
+    mqtt->setDataPrefix("testData");
+    mqtt->begin("testHost");
+
+    HASelect *sel = new HASelect("uniqueSel");
+    sel->setOptions("Off;All");
+    sel->setName("Targets");
+    sel->setIcon("mdi:target-account");
+
+    mqtt->loop();  // connect + publish initial discovery config (flushed index 0)
+    TEST_ASSERT_EQUAL_UINT8(1, mock->getFlushedMessagesNb());
+    TEST_ASSERT_EQUAL_UINT8(2, sel->getOptions()->getItemsNb());
+    TEST_ASSERT_NOT_NULL(strstr(mock->getFlushedMessages()[0]->buffer, "\"options\":[\"Off\",\"All\"]"));
+
+    // A peer is discovered: rebuild the option list and re-publish discovery.
+    sel->resetOptions();
+    sel->setOptions("Off;All;awtrix_aa");
+    TEST_ASSERT_EQUAL_UINT8(3, sel->getOptions()->getItemsNb());
+
+    mqtt->publishConfigForDeviceType(sel);
+
+    // The re-published config (the new flushed message) advertises the grown list.
+    TEST_ASSERT_EQUAL_UINT8(2, mock->getFlushedMessagesNb());
+    const MqttMessage *m = mock->getFlushedMessages()[1];
+    TEST_ASSERT_NOT_NULL(strstr(m->buffer, "\"options\":[\"Off\",\"All\",\"awtrix_aa\"]"));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_HA1_disabled_select_config_is_unchanged);
     RUN_TEST(test_HA2_enabled_select_advertises_json_attr_topic);
     RUN_TEST(test_HA3_publishJsonAttributes_is_retained_on_attr_topic);
+    RUN_TEST(test_DT7_resetOptions_rebuilds_and_republishes);
     return UNITY_END();
 }

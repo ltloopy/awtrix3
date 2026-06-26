@@ -128,5 +128,6 @@ void loop()
   if (ServerManager.isConnected)
   {
     MQTTManager.tick();
+    refreshTimerSyncTargetsOptions(millis());   // dynamic HA Targets select republish (#112)
   }
 }

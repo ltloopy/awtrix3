@@ -2330,6 +2330,94 @@ void test_PP5_beacon_periodic_not_in_ap_mode(void) {
 }
 
 // ============================================================================
+// Dynamic HA Targets select (#112). The select's options are built at runtime
+// from the peer registry — "Off;All" plus each currently-discovered peer id
+// (sorted) — and command/state map through the CURRENT id<->index list. These
+// DT tests cover the pure option-build + mapping contract (TimerHa) and the
+// sorted peer-id accessor (TimerManager) the select consumes.
+// ============================================================================
+
+// DT1 — with no peers discovered, the option list is just the two base entries.
+void test_DT1_build_options_empty_registry(void) {
+    char buf[256];
+    timerSyncTargetsBuildOptions(nullptr, 0, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_STRING("Off;All", buf);
+}
+
+// DT2 — each discovered peer id appends to the base options, in the given order.
+void test_DT2_build_options_with_sorted_ids(void) {
+    const char *ids[] = {"awtrix_aa", "awtrix_bb"};
+    char buf[256];
+    timerSyncTargetsBuildOptions(ids, 2, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_STRING("Off;All;awtrix_aa;awtrix_bb", buf);
+}
+
+// DT3 — forward map: the two base values reflect to their fixed indices.
+void test_DT3_forward_map_off_all(void) {
+    const char *ids[] = {"awtrix_aa"};
+    TEST_ASSERT_EQUAL_INT(0, timerSyncTargetsIndexForValue("", ids, 1));
+    TEST_ASSERT_EQUAL_INT(1, timerSyncTargetsIndexForValue("all", ids, 1));
+    // No peers and a base value: still resolves (n==0 path).
+    TEST_ASSERT_EQUAL_INT(0, timerSyncTargetsIndexForValue("", nullptr, 0));
+    TEST_ASSERT_EQUAL_INT(1, timerSyncTargetsIndexForValue("all", nullptr, 0));
+}
+
+// DT4 — forward map: a present single id maps to its position; an absent id or a
+// multi-id CSV are both unknown (-1, no option selected).
+void test_DT4_forward_map_present_absent_csv(void) {
+    const char *ids[] = {"awtrix_aa", "awtrix_bb", "awtrix_cc"};
+    TEST_ASSERT_EQUAL_INT(2, timerSyncTargetsIndexForValue("awtrix_aa", ids, 3));
+    TEST_ASSERT_EQUAL_INT(3, timerSyncTargetsIndexForValue("awtrix_bb", ids, 3));
+    TEST_ASSERT_EQUAL_INT(4, timerSyncTargetsIndexForValue("awtrix_cc", ids, 3));
+    // An id no longer in the registry -> unknown.
+    TEST_ASSERT_EQUAL_INT(-1, timerSyncTargetsIndexForValue("awtrix_zz", ids, 3));
+    // A multi-id CSV cannot be a single select option -> unknown.
+    TEST_ASSERT_EQUAL_INT(-1, timerSyncTargetsIndexForValue("awtrix_aa,awtrix_bb", ids, 3));
+}
+
+// DT5 — reverse map: index resolves to its sync_targets value; out-of-range fails.
+void test_DT5_reverse_map_index_to_value(void) {
+    const char *ids[] = {"awtrix_aa", "awtrix_bb"};
+    char buf[64];
+    TEST_ASSERT_TRUE(timerSyncTargetsValueForIndex(0, ids, 2, buf, sizeof(buf)));
+    TEST_ASSERT_EQUAL_STRING("", buf);
+    TEST_ASSERT_TRUE(timerSyncTargetsValueForIndex(1, ids, 2, buf, sizeof(buf)));
+    TEST_ASSERT_EQUAL_STRING("all", buf);
+    TEST_ASSERT_TRUE(timerSyncTargetsValueForIndex(2, ids, 2, buf, sizeof(buf)));
+    TEST_ASSERT_EQUAL_STRING("awtrix_aa", buf);
+    TEST_ASSERT_TRUE(timerSyncTargetsValueForIndex(3, ids, 2, buf, sizeof(buf)));
+    TEST_ASSERT_EQUAL_STRING("awtrix_bb", buf);
+    // Past the last peer index -> out of range, false (BadField), buf untouched.
+    TEST_ASSERT_FALSE(timerSyncTargetsValueForIndex(4, ids, 2, buf, sizeof(buf)));
+    TEST_ASSERT_EQUAL_STRING("awtrix_bb", buf);
+}
+
+// DT6 — the registry accessor the select consumes returns the current peer ids
+// sorted ascending (so the option list is stable regardless of discovery order).
+void test_DT6_peer_ids_sorted(void) {
+    SHOW_TIMER = true;
+    fixture::advance(1000);
+
+    // Harvest three peers out of order via presence beacons (ungated).
+    TimerManager.applySyncCommand("{\"_sync\":{\"src\":\"awtrix_cc\",\"seq\":1},\"presence\":true}");
+    TimerManager.applySyncCommand("{\"_sync\":{\"src\":\"awtrix_aa\",\"seq\":1},\"presence\":true}");
+    TimerManager.applySyncCommand("{\"_sync\":{\"src\":\"awtrix_bb\",\"seq\":1},\"presence\":true}");
+
+    String ids[8];
+    size_t n = TimerManager.peerIds(ids, 8);
+    TEST_ASSERT_EQUAL_INT(3, n);
+    TEST_ASSERT_EQUAL_STRING("awtrix_aa", ids[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("awtrix_bb", ids[1].c_str());
+    TEST_ASSERT_EQUAL_STRING("awtrix_cc", ids[2].c_str());
+
+    // The accessor never writes past the provided capacity.
+    String two[2];
+    TEST_ASSERT_EQUAL_INT(2, TimerManager.peerIds(two, 2));
+    TEST_ASSERT_EQUAL_STRING("awtrix_aa", two[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("awtrix_bb", two[1].c_str());
+}
+
+// ============================================================================
 // U51 — Editing duration while Paused resets the timer to Idle with the new
 // duration (remaining follows the new full duration; state publish == "idle").
 // ============================================================================
@@ -4285,22 +4373,30 @@ void test_HA7_sync_follow_switch_routes_through_parsecommand(void) {
     TEST_ASSERT_EQUAL_INT(1, saveSettings_calls);
 }
 
-// HA8 — the Targets select routes its option index through parseCommand: Off (0)
-// -> sync_targets "", All (1) -> "all", each persisting to NVS.
+// HA8 — the Targets select routes its RESOLVED value through parseCommand (#112):
+// MQTTManager maps the option index to a value (Off -> "", All -> "all", a peer
+// option -> its id) and hands timerHaApply that value, which persists to NVS.
 void test_HA8_sync_targets_select_routes_through_parsecommand(void) {
     TIMER_SYNC_TARGETS = "";
     saveSettings_calls = 0;
 
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
-        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncTargets, "1")));
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncTargets, "all")));
     TEST_ASSERT_EQUAL_STRING("all", TIMER_SYNC_TARGETS.c_str());
     // Persists: sync_targets is a table-backed key, flushed once on the change.
     TEST_ASSERT_EQUAL_INT(1, saveSettings_calls);
 
     saveSettings_calls = 0;
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
-        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncTargets, "0")));
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncTargets, "")));
     TEST_ASSERT_EQUAL_STRING("", TIMER_SYNC_TARGETS.c_str());
+    TEST_ASSERT_EQUAL_INT(1, saveSettings_calls);
+
+    // A discovered peer id is a first-class value now: it applies and persists.
+    saveSettings_calls = 0;
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncTargets, "awtrix_peer")));
+    TEST_ASSERT_EQUAL_STRING("awtrix_peer", TIMER_SYNC_TARGETS.c_str());
     TEST_ASSERT_EQUAL_INT(1, saveSettings_calls);
 }
 
@@ -4316,18 +4412,20 @@ void test_HA9_sync_targets_select_index_reflects_value(void) {
 }
 
 // HA10 — an invalid Targets write is rejected wholesale (atomic-reject parity):
-// an out-of-range option index returns a non-Ok result and changes nothing, so the
-// select snaps back to the value actually applied.
+// a malformed sync_targets value returns a non-Ok result and changes nothing, so the
+// select snaps back to the value actually applied. The bespoke parseSyncTargets
+// validator (token charset/length) is the gate now that the value is passed directly.
 void test_HA10_invalid_sync_targets_write_rejected(void) {
     TIMER_SYNC_TARGETS = "all";   // last applied value
 
-    // Option index past the static Off/All list -> BadField, nothing applied.
+    // A value with an illegal character is rejected -> BadField, nothing applied.
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
-        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncTargets, "2")));
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncTargets, "bad id!")));
     TEST_ASSERT_EQUAL_STRING("all", TIMER_SYNC_TARGETS.c_str());
-    // A negative index is rejected too.
+    // An over-long token (> 32 chars) is rejected too.
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
-        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncTargets, "-1")));
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncTargets,
+            "awtrix_0123456789012345678901234567890")));
     TEST_ASSERT_EQUAL_STRING("all", TIMER_SYNC_TARGETS.c_str());
     // The applied value still reflects All in the select.
     TEST_ASSERT_EQUAL_INT(1, timerSyncTargetsSelectIndex(TIMER_SYNC_TARGETS.c_str()));
@@ -4343,7 +4441,7 @@ void test_HA11_sync_control_writes_do_not_propagate(void) {
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
         static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncFollow, "0")));
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
-        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncTargets, "0")));
+        static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::SyncTargets, "")));
     TEST_ASSERT_EQUAL_INT(0, fixture::sync_packet_count());
 }
 
@@ -4448,6 +4546,12 @@ int main(int, char **) {
     RUN_TEST(test_PP3_registry_excludes_self_and_is_bounded);
     RUN_TEST(test_PP4_peers_age_out_past_ttl);
     RUN_TEST(test_PP5_beacon_periodic_not_in_ap_mode);
+    RUN_TEST(test_DT1_build_options_empty_registry);
+    RUN_TEST(test_DT2_build_options_with_sorted_ids);
+    RUN_TEST(test_DT3_forward_map_off_all);
+    RUN_TEST(test_DT4_forward_map_present_absent_csv);
+    RUN_TEST(test_DT5_reverse_map_index_to_value);
+    RUN_TEST(test_DT6_peer_ids_sorted);
     RUN_TEST(test_T1_table_uintrange_boundaries);
     RUN_TEST(test_T2_table_strict_types);
     RUN_TEST(test_T3_table_bespoke_validators);

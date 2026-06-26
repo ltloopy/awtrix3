@@ -321,6 +321,10 @@ public:
     // Peer registry observers (consumed by the dynamic HA Targets select in #112).
     int  peerCount() const { return _peerCount; }
     bool hasPeer(const String &id) const;
+    // Copy up to `cap` current peer uniqueIDs into out[], SORTED ascending, and return
+    // the count written (<= min(peerCount, cap)). The sort makes the select's option
+    // list stable regardless of the order peers were discovered in. Never writes past cap.
+    size_t peerIds(String *out, size_t cap) const;
 
     void onShowTimerChange(bool prev, bool now);
 
