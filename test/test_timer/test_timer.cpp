@@ -2191,19 +2191,18 @@ void test_SR1_pause_reset_propagate_runstate_only(void) {
     TEST_ASSERT_FALSE(r.containsKey("buzzer"));      // no config rides reset
 }
 
-// SR2 — a bare duration edit propagates run-state (duration only), no config.
-void test_SR2_bare_duration_edit_propagates_duration_only(void) {
+// SR2 — a bare duration edit propagates NOTHING (#126): a leader's duration edit no
+// longer moves a follower's displayed time. `duration` rides ONLY bundled with a
+// `start` (the combined packet), so a bare edit — idle or mid-run, MQTT or on-device
+// menu — emits no sync packet. A follower adopts the leader's duration on the next
+// `start` and reverts to its own on return to Idle.
+void test_SR2_bare_duration_edit_propagates_nothing(void) {
     SHOW_TIMER = true;
     TIMER_SYNC_TARGETS = "all";
 
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
         static_cast<int>(TimerManager.parseCommand("{\"duration\":600}")));
-    TEST_ASSERT_EQUAL_INT(1, fixture::sync_packet_count());
-    DynamicJsonDocument d(2048);
-    TEST_ASSERT_FALSE(deserializeJson(d, fixture::last_sync_payload()));
-    TEST_ASSERT_FALSE(d.containsKey("action"));
-    TEST_ASSERT_EQUAL_UINT32(600, d["duration"].as<uint32_t>());
-    TEST_ASSERT_FALSE(d.containsKey("buzzer"));       // no config rides a duration edit
+    TEST_ASSERT_EQUAL_INT(0, fixture::sync_packet_count());   // a bare duration edit propagates nothing
 }
 
 // SR3 — receiver-forced one-shot: a follower applies a received start (with config)
@@ -4684,7 +4683,7 @@ int main(int, char **) {
     RUN_TEST(test_S6_sync_off_never_broadcasts);
     RUN_TEST(test_S7_remote_config_is_oneshot_attribute_bag_stays_saved);
     RUN_TEST(test_SR1_pause_reset_propagate_runstate_only);
-    RUN_TEST(test_SR2_bare_duration_edit_propagates_duration_only);
+    RUN_TEST(test_SR2_bare_duration_edit_propagates_nothing);
     RUN_TEST(test_SR3_follower_applies_oneshot_and_reverts);
     RUN_TEST(test_SR4_follower_forces_oneshot_regardless_of_save);
     RUN_TEST(test_PP1_presence_harvest_ungated_no_timer_state);

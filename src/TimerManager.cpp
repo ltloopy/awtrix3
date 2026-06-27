@@ -464,7 +464,7 @@ void TimerManager_::exitConfigMode()
     if (!configEditor.isActive()) return;
     setDuration(configEditor.exit());   // commit the edited duration through the unchanged path
     DisplayManager.drainDeferredNotifications();
-    broadcastRunState(nullptr);         // duration is run-state; propagate the new length
+    // A bare duration edit propagates nothing (#126): duration rides only with a start.
 }
 
 void TimerManager_::configCycleField()
@@ -906,25 +906,16 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     // is off. Run-scoped config mirror (ADR-0018, superseding ADR-0006's config
     // propagation): a config EDIT propagates nothing — config travels only bundled
     // with a `start` (the combined packet broadcastRunState emits, carrying the
-    // leader's effective config snapshot). pause/reset propagate run-state only; a
-    // bare duration edit still propagates `duration`. sync_follow/sync_targets are
-    // local identity (inSnapshot=false) and never propagate.
-    if (!_remoteApply)
+    // leader's effective config snapshot). pause/reset propagate run-state only. A
+    // bare duration edit propagates NOTHING (#126): `duration` rides only with a
+    // `start`, so a leader's edit no longer moves a follower's displayed time — a
+    // follower adopts the leader's duration on the next start and reverts on Idle.
+    // sync_follow/sync_targets are local identity (inSnapshot=false) and never propagate.
+    if (!_remoteApply && haveAction)
     {
-        bool runStateChanged = haveAction || haveDuration;
-        if (runStateChanged)
-        {
-            if (haveAction)
-            {
-                String a = doc["action"].as<String>();
-                a.toLowerCase();
-                broadcastRunState(a.c_str());
-            }
-            else
-            {
-                broadcastRunState(nullptr);   // duration-only edit
-            }
-        }
+        String a = doc["action"].as<String>();
+        a.toLowerCase();
+        broadcastRunState(a.c_str());
     }
 
     return TimerCmdResult::Ok;
@@ -1152,17 +1143,15 @@ void TimerManager_::broadcastRunState(const char *action)
     if (_remoteApply) return;                       // one-hop: never re-emit an applied remote command
     if (TIMER_SYNC_TARGETS.length() == 0) return;   // sync off
 
-    // A start carries the leader's EFFECTIVE config snapshot bundled with the
-    // run-state — the run-scoped config mirror (ADR-0018): config no longer travels
-    // on a config edit, it rides one combined packet with the start so a follower
-    // mirrors the leader for that run. The combined packet needs the full
-    // kTimerCmdJsonSize buffer (config snapshot + envelope). pause/reset and a bare
-    // duration edit stay run-state-only and fit a small static buffer.
-    bool isStart = (action != nullptr) && (strcasecmp(action, "start") == 0);
-
-    // duration is run-state: it rides with a start (defines the countdown) and with a
-    // bare duration edit (action == nullptr). pause/reset need only the action.
-    bool withDuration = (action == nullptr) || isStart;
+    // Only an action ever reaches here — start / pause / reset (#126). A `start` is the
+    // SOLE duration-bearing packet: it carries the leader's effective `duration` plus the
+    // leader's EFFECTIVE config snapshot, bundled into one combined packet — the
+    // run-scoped config mirror (ADR-0018). Config no longer travels on a config edit, and
+    // a bare duration edit propagates nothing; both ride one combined packet with the
+    // start so a follower mirrors the leader for that run. The combined packet needs the
+    // full kTimerCmdJsonSize buffer (config snapshot + envelope); pause/reset stay
+    // run-state-only and fit a small static buffer.
+    bool isStart = (strcasecmp(action, "start") == 0);
 
     if (isStart)
     {
@@ -1170,7 +1159,7 @@ void TimerManager_::broadcastRunState(const char *action)
         JsonObject sync = doc.createNestedObject("_sync");
         addSyncEnvelope(sync);
         doc["action"] = action;
-        if (withDuration) doc["duration"] = durationSec;
+        doc["duration"] = durationSec;   // duration rides only with a start (defines the countdown)
         // EFFECTIVE config (no SavedConfigScope): a leader's own one-shot run mirrors
         // to followers, so the snapshot reports what is actually running. sync_* are
         // inSnapshot=false and excluded by construction; inline melodies never travel
@@ -1183,11 +1172,11 @@ void TimerManager_::broadcastRunState(const char *action)
         return;
     }
 
+    // pause / reset: run-state only, no duration, no config.
     StaticJsonDocument<256> doc;
     JsonObject sync = doc.createNestedObject("_sync");
     addSyncEnvelope(sync);
-    if (action) doc["action"] = action;
-    if (withDuration) doc["duration"] = durationSec;
+    doc["action"] = action;
 
     String out; serializeJson(doc, out);
     ServerManager.sendTimerSync(out);

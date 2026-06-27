@@ -70,26 +70,30 @@ device drive any reachable clock.
 
 ### Run-state and config propagate separately; `duration` is run-state
 
-> **Superseded (config half) by [ADR-0018](0018-run-scoped-config-mirror.md).** The
-> config-edit-broadcasts-a-snapshot decision below is replaced: a config edit now
-> propagates **nothing**, and config travels **only bundled with a `start`** (the
-> leader's *effective* config), which a follower applies one-shot and reverts on
-> return to Idle. The run-state propagation, roles, transport and gating in this ADR
-> are unchanged.
+> **Superseded by [ADR-0018](0018-run-scoped-config-mirror.md).** Two decisions below
+> are replaced. *Config half:* a config edit now propagates **nothing**, and config
+> travels **only bundled with a `start`** (the leader's *effective* config), which a
+> follower applies one-shot and reverts on return to Idle. *Duration half (#126):* a
+> **bare duration edit also propagates nothing** — `duration` rides **only** with a
+> `start`, so a leader's length edit no longer moves a follower's displayed time; a
+> follower adopts the leader's duration on the next start and reverts on Idle. The
+> roles, transport, gating, and `start`/`pause`/`reset` propagation are unchanged.
 
 A naive "broadcast everything on every action" makes starting a timer rewrite a peer's
 config. Instead the two split on different triggers:
 
-- **Run-state** — `start` / `pause` / `reset` and duration edits broadcast `{action?,
-  duration?}`, **never** config.
+- **Run-state** — `start` / `pause` / `reset` broadcast `{action}`, **never** config. A
+  bare duration edit propagates **nothing**; `duration` rides only inside a `start`.
 - **Config** — a deliberate config edit broadcasts a **full config snapshot** (no
   `action`, no `duration`); last-config-writer-wins, so the group converges to identical
   config only when someone *intends* a config change.
 
 `duration` is treated as **run-state, not config** — it defines "the same countdown" and
-travels with the run-state. The frequent action (set a new length) therefore stays cheap
-and never clobbers a peer's bar color / buzzer / etc. Putting `duration` in the snapshot
-was rejected for relocating the clobber surprise from `start` to "change the length."
+rides with the `start` that opens a run. The frequent action (set a new length) therefore
+never clobbers a peer's bar color / buzzer / etc., and a bare length edit stays purely
+local. Putting `duration` in the config snapshot was rejected for relocating the clobber
+surprise; broadcasting a bare duration edit (#126) was rejected for moving a follower's
+displayed time on an edit it never started.
 
 `pause` **does** propagate (the user's explicit choice, overriding the narrower
 start/reset-only option), so the group pauses and resumes together.

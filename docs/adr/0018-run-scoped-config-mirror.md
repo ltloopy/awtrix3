@@ -28,7 +28,7 @@ This ADR redefines device-to-device config sync around those two facts.
 
 ## Decision
 
-### 1. A config edit propagates nothing
+### 1. A config edit — and a bare duration edit — propagate nothing
 
 Removing the config-edit `broadcastConfig()` trigger from `parseCommand` (and the
 on-device `commitTimerMenu` broadcast in `MenuManager`). A deliberate config edit
@@ -37,18 +37,30 @@ packet**. There is no config convergence on edit; each clock keeps its own saved
 identity. `broadcastConfig()` survives as a method (the saved-snapshot builder),
 but nothing in the command/menu path fires it.
 
+A **bare duration edit** is the same story (#126): a duration-only change — idle or
+mid-run, via MQTT or the on-device DURATION menu — now propagates **nothing**. The
+duration-only `broadcastRunState(nullptr)` trigger is removed from all three call
+sites (the `parseCommand` propagation surface, the duration-editor exit, and the
+TIMER-menu DURATION-leaf commit), so a leader's length edit no longer moves a
+follower's displayed time.
+
 - **vs ADR-0006's "config edit broadcasts a snapshot"** — rejected: it was the
   source of the "starting/editing rewrote my settings" surprise, and it forced
   peers to converge on config they may not want.
+- **vs ADR-0006's "a duration edit broadcasts `{duration}`"** — rejected: it
+  relocated the same surprise to "change the length," moving every follower's
+  countdown on an edit they never started.
 
 ### 2. A `start` carries the leader's effective config (one combined packet)
 
 A `start` broadcasts **one combined packet** = the leader's **effective** config
-snapshot + `duration` + `action:"start"`. Config now travels *only* bundled with a
-start, scoped to that run. `broadcastRunState("start")` builds the snapshot into
-the full `kTimerCmdJsonSize` buffer (config snapshot + envelope); `pause`/`reset`
-stay run-state-only on the small static buffer, and a bare duration edit still
-propagates `duration` alone.
+snapshot + `duration` + `action:"start"`. Both config **and** `duration` now travel
+*only* bundled with a start, scoped to that run — the `start` is the sole
+duration-bearing packet. `broadcastRunState("start")` builds the snapshot into the
+full `kTimerCmdJsonSize` buffer (config snapshot + `duration` + envelope);
+`pause`/`reset` stay run-state-only (action alone) on the small static buffer, and a
+bare duration edit emits nothing at all. A follower adopts the leader's duration on
+the next `start` and reverts to its own on return to Idle.
 
 The bundled snapshot reports **effective** config, **not** saved — deliberately
 diverging from the saved snapshot ADR-0017 §3 presents to the other carriers. The
