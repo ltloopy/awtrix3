@@ -574,7 +574,11 @@ every clock to `sync_targets=all` and `sync_follow=true`.
 - **One-hop:** an applied inbound command is never re-broadcast. `all` reaches everyone
   directly; partial target lists do **not** chain.
 - **Delivery** is best-effort: each packet is sent 3× and receivers de-duplicate by
-  `(src, seq)`, so a single dropped frame rarely desyncs a clock.
+  `(src, seq)`, so a single dropped frame rarely desyncs a clock. The bounded
+  recently-seen `(src, seq)` set is a host-testable module, `SyncSeenCache`, extracted
+  from `TimerManager` as a deliberate sibling of the peer registry — same bounded,
+  TTL-aged RAM-set shape, opposite expiry semantic (first-seen ages out, no keep-alive
+  refresh). See [ADR-0022](adr/0022-sync-seen-cache-extraction.md).
 - A clock with `SHOW_TIMER = false` ignores inbound sync (its `parseCommand` is disabled).
 - Reachable as `sync_follow` / `sync_targets` on `POST /api/timer` and `{prefix}/timer`
   MQTT, and as `timer_sync_follow` / `timer_sync_targets` in `dev.json`. No on-device

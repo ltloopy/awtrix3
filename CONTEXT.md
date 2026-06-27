@@ -347,7 +347,8 @@ dedup semantic — opposite `PeerRegistry`'s keep-alive refresh). A FIFO ring ev
 bound and entries age out past the TTL, so a sender reboot (seq restart) self-clears.
 `TimerManager` owns a `SyncSeenCache` and keeps the UDP transport + the `parseCommand`
 re-entry; only the set/algorithm moved out (the cut-line mirrors ADR-0021). The
-extraction rationale is recorded in ADR-0022 (its own docs sub-issue).
+extraction rationale — and why the sibling is **not** merged with `PeerRegistry` under a
+generic — is recorded in [ADR-0022](docs/adr/0022-sync-seen-cache-extraction.md).
 
 _Avoid_: putting `duration` in the config snapshot; expecting a config *edit* to propagate
 (it no longer does — config rides only with a `start`, ADR-0018); or expecting a follower
