@@ -352,6 +352,14 @@ obeys), **follower** (follow on, no targets — obeys, never commands), **peer/m
 "group" primitive; membership is always expressed as one side's target list plus the
 other side's consent.
 
+The **factory default is follow-on with no targets**, so a fresh clock's default role is
+**follower**: it obeys sync it is targeted by but commands nobody (safe, because an empty
+target list means it can hijack no one). **Standalone is an explicit opt-out**
+(`follow=false`). The default lives in two places kept in step — the RAM initializer
+(`Globals.cpp`) and the `sync_follow` descriptor's persisted-settings fallback — but **NVS
+wins on migration**: a clock that already stored `follow=false` stays standalone across the
+update (#124).
+
 Mechanically, `TIMER_SYNC_FOLLOW` / `TIMER_SYNC_TARGETS` are the `inSnapshot == false`
 rows of `TIMER_SETTINGS_DESCS` — persisted and validated like every other table key, but
 deliberately excluded from the config snapshot so peers can't hijack each other's
