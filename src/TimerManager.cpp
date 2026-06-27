@@ -163,6 +163,10 @@ void TimerManager_::setup()
     _lastPresenceMs   = 0;
     _presenceEverSent = false;
 
+    // A (re)boot has applied no sync command yet; the dedup set is pure RAM
+    // (ADR-0022), repopulated by inbound commands.
+    _seen.clear();
+
     loadMelodiesCached();
 }
 
@@ -1214,22 +1218,6 @@ bool TimerManager_::syncTargetsMe(JsonVariantConst tgt) const
     return false;
 }
 
-bool TimerManager_::syncSeenRecently(const String &src, uint32_t seq, unsigned long nowMs)
-{
-    const unsigned long kTtlMs = 2000;
-    for (uint8_t i = 0; i < kSyncSeenMax; ++i)
-    {
-        if (_syncSeen[i].atMs != 0 && (nowMs - _syncSeen[i].atMs) <= kTtlMs
-            && _syncSeen[i].seq == seq && _syncSeen[i].src == src)
-            return true;
-    }
-    _syncSeen[_syncSeenIdx].src  = src;
-    _syncSeen[_syncSeenIdx].seq  = seq;
-    _syncSeen[_syncSeenIdx].atMs = (nowMs == 0) ? 1 : nowMs;   // 0 doubles as "empty slot"
-    _syncSeenIdx = (uint8_t)((_syncSeenIdx + 1) % kSyncSeenMax);
-    return false;
-}
-
 void TimerManager_::applySyncCommand(const char *json)
 {
     if (json == nullptr || json[0] == '\0') return;
@@ -1255,7 +1243,7 @@ void TimerManager_::applySyncCommand(const char *json)
 
     if (!TIMER_SYNC_FOLLOW) return;                   // consent gate
     if (!syncTargetsMe(sync["tgt"])) return;          // not addressed to this clock
-    if (syncSeenRecently(src, sync["seq"].as<uint32_t>(), millis())) return; // redundant copy
+    if (_seen.seen(src, sync["seq"].as<uint32_t>(), millis())) return; // redundant copy
 
     // Re-enter the local control surface. The send-path _remoteApply guard prevents
     // this from re-broadcasting (one-hop). parseCommand ignores the _sync envelope.
