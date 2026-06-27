@@ -335,6 +335,20 @@ triggers and must not be conflated:
   attribute bags, which stay **saved** (ADR-0017 §3, ADR-0018 §4). Inline melodies never
   travel (the snapshot reads the saved bare name).
 
+**Receive dedup** — a clock broadcasts each command as a small burst of redundant copies
+(loss tolerance), so the receiver must apply each `(src, seq)` **exactly once**. That
+bounded recently-seen set lives in its own host-testable module, `SyncSeenCache`
+([src/SyncSeenCache.h](src/SyncSeenCache.h)) — a deliberate **sibling of `PeerRegistry`**
+(same bounded, TTL-aged, src-keyed RAM-set shape), kept separate rather than merged under a
+shared generic. Its single `seen(src, seq, nowMs)` op test-and-records in one atomic call:
+the first copy records and returns `false` (apply it), redundant copies within the TTL
+return `true` (drop them) **without** refreshing the entry, so first-seen ages out (the
+dedup semantic — opposite `PeerRegistry`'s keep-alive refresh). A FIFO ring evicts at the
+bound and entries age out past the TTL, so a sender reboot (seq restart) self-clears.
+`TimerManager` owns a `SyncSeenCache` and keeps the UDP transport + the `parseCommand`
+re-entry; only the set/algorithm moved out (the cut-line mirrors ADR-0021). The
+extraction rationale is recorded in ADR-0022 (its own docs sub-issue).
+
 _Avoid_: putting `duration` in the config snapshot; expecting a config *edit* to propagate
 (it no longer does — config rides only with a `start`, ADR-0018); or expecting a follower
 to persist a synced run (it is always one-shot on receive and reverts on Idle).
