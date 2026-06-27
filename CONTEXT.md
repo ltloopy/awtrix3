@@ -390,7 +390,13 @@ not the `uniqueID`. See [ADR-0019](docs/adr/0019-peer-presence-registry.md).
 - **Peer registry** — a bounded (`kPeerMax` ~16) RAM set of `{uniqueID, lastSeen}`. The
   clock's **own id is excluded**; entries **age out** after the TTL (`kPeerTtlMs` ~100s,
   ~3 missed beacons), pruned on each `tickPresence()`. Pure LAN-derived state: cleared on
-  boot, never persisted. `peerIds()` returns the current ids **sorted** for consumers.
+  boot, never persisted. `peerIds()` returns the current ids **sorted** for consumers. The
+  registry itself lives in its own host-testable module, `PeerRegistry`
+  ([src/PeerRegistry.h](src/PeerRegistry.h)) — `record`/`prune`/`has`/`ids`/`count`/`clear`
+  over an injected `nowMs` and an injected own-id, with **no** globals; `TimerManager` owns a
+  `PeerRegistry` and keeps only the beacon cadence + UDP send, exposing `peerCount`/`hasPeer`/
+  `peerIds` as thin forwarders so consumers (the dynamic HA Targets select) are unchanged. See
+  [ADR-0021](docs/adr/0021-peer-registry-extraction.md).
 - **Dynamic HA Targets select** — the Home Assistant **Timer sync targets** select
   (writable since #110) consumes the registry: its options are built at runtime as
   `Off`, `All`, then each discovered peer id (sorted), and the entity's discovery is

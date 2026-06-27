@@ -125,6 +125,11 @@ identity — exposing them in HA changed no propagation semantics.
   `prunePeers` / `hasPeer` / `peerCount` / `peerIds` (sorted accessor), the
   `broadcastPresence` beacon and the `tickPresence(nowMs)` loop hook; `applySyncCommand`
   grows the ungated presence short-circuit. `main.cpp`'s loop calls `tickPresence(millis())`.
+  > **Superseded in part by [ADR-0021](0021-peer-registry-extraction.md):** the registry
+  > *set* (`recordPeer`/`prunePeers`/`hasPeer`/`peerIds` + `_peers`/`_peerCount`) moved into a
+  > standalone host-testable `PeerRegistry`; `TimerManager` now owns a `PeerRegistry` and
+  > exposes `peerCount`/`hasPeer`/`peerIds` as forwarders, keeping only the beacon
+  > cadence + send. The behaviour above is unchanged.
 - `TimerHa` gains the pure option-build + id↔index helpers
   (`timerSyncTargetsBuildOptions`, `timerSyncTargetsIndexForValue`,
   `timerSyncTargetsValueForIndex`); `HASelect` gains `resetOptions()`; `MQTTManager`

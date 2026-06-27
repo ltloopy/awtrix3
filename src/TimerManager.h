@@ -8,6 +8,7 @@
 #include "TimerConfigEditor.h"   // display-free duration editor; owns the config-mode working state (ADR-0011)
 #include "TimerHa.h"             // TimerHaEntity (the HA carrier publishAttributeGroup targets)
 #include "TimerSettings.h"       // TcValue + TIMER_SETTINGS_DESC_CAP (one-shot override snapshot, PRD #99)
+#include "PeerRegistry.h"        // the LAN peer set (extracted from this class, ADR-0019/0021)
 
 // Result of parseCommand. All control surfaces share one validation policy
 // (reject invalid input atomically); only the HTTP API surfaces this as a
@@ -72,22 +73,16 @@ private:
     uint8_t  _syncSeenIdx = 0;
     bool syncSeenRecently(const String &src, uint32_t seq, unsigned long nowMs);
 
-    // -- Peer presence registry (#111 / ADR-0019) --
-    // Which peer clocks are on the LAN, keyed by stable uniqueID (the targeting
-    // key; the mutable hostname is unsuitable). Harvested UNGATED from inbound
-    // presence beacons (presence is informational, not a command — it bypasses the
-    // follow/target gate and applies no timer state). Bounded; own id excluded;
-    // entries age out after ~3 missed beacons (kPeerTtlMs) on each tickPresence().
-    struct Peer { String uniqueID; unsigned long lastSeen = 0; };
-    static constexpr uint8_t       kPeerMax           = 16;
+    // -- Peer presence registry (#111 / ADR-0019, extracted to PeerRegistry per
+    //    ADR-0021) --
+    // The LAN peer set lives in its own host-testable module (PeerRegistry); this
+    // class keeps only the beacon cadence + UDP send. Harvested UNGATED from
+    // inbound presence beacons (presence is informational, not a command — it
+    // bypasses the follow/target gate and applies no timer state).
     static constexpr unsigned long kPresenceIntervalMs = 30000;   // beacon cadence
-    static constexpr unsigned long kPeerTtlMs          = 100000;  // ~3 missed beacons
-    Peer          _peers[kPeerMax];
-    uint8_t       _peerCount         = 0;
+    PeerRegistry  _registry;
     unsigned long _lastPresenceMs    = 0;
     bool          _presenceEverSent  = false;
-    void recordPeer(const String &src, unsigned long nowMs);   // add/refresh; own id & full-registry guarded
-    void prunePeers(unsigned long nowMs);                      // drop entries past kPeerTtlMs
     void broadcastPresence();                                  // emit one {_sync,presence:true} beacon
 
     // -- One-shot override (save:false), PRD #99 / issue #100 --
@@ -319,12 +314,11 @@ public:
     // standalone clock is still discoverable), and ages out stale peers each call.
     void tickPresence(unsigned long nowMs);
     // Peer registry observers (consumed by the dynamic HA Targets select in #112).
-    int  peerCount() const { return _peerCount; }
-    bool hasPeer(const String &id) const;
-    // Copy up to `cap` current peer uniqueIDs into out[], SORTED ascending, and return
-    // the count written (<= min(peerCount, cap)). The sort makes the select's option
-    // list stable regardless of the order peers were discovered in. Never writes past cap.
-    size_t peerIds(String *out, size_t cap) const;
+    // Thin forwarders onto the extracted PeerRegistry, so consumers (MQTTManager)
+    // are unchanged by the extraction (ADR-0021).
+    int  peerCount() const { return _registry.count(); }
+    bool hasPeer(const String &id) const { return _registry.has(id); }
+    size_t peerIds(String *out, size_t cap) const { return _registry.ids(out, cap); }
 
     void onShowTimerChange(bool prev, bool now);
 
