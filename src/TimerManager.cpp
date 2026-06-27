@@ -1,6 +1,7 @@
 #include "TimerManager.h"
 #include "TimerSettings.h"
 #include "TimerHa.h"
+#include "SyncEnvelope.h"     // wire envelope + pure inbound receive gate (ADR-0023)
 #include "Globals.h"
 #include "PeripheryManager.h"
 #include "DisplayManager.h"
@@ -1109,21 +1110,9 @@ void TimerManager_::publishAllWire()
 
 void TimerManager_::addSyncEnvelope(JsonObject &sync)
 {
-    sync["src"] = uniqueID;
-    sync["seq"] = ++_syncSeq;
-    String t = TIMER_SYNC_TARGETS; t.trim();
-    if (t == "all") { sync["tgt"] = "all"; return; }
-    JsonArray arr = sync.createNestedArray("tgt");
-    int start = 0;
-    const int n = t.length();
-    while (start < n)
-    {
-        int comma = t.indexOf(',', start);
-        if (comma < 0) comma = n;
-        String id = t.substring(start, comma); id.trim();
-        if (id.length() > 0) arr.add(id);
-        start = comma + 1;
-    }
+    // Thin forwarder: this class owns the monotonic _syncSeq counter (injected as
+    // seq); the envelope shape + target-CSV parsing live in SyncEnvelope (ADR-0023).
+    SyncEnvelope::build(sync, uniqueID, ++_syncSeq, TIMER_SYNC_TARGETS);
 }
 
 void TimerManager_::buildConfigSnapshot(JsonDocument &doc) const
@@ -1200,24 +1189,6 @@ void TimerManager_::broadcastConfig()
     ServerManager.sendTimerSync(out);
 }
 
-bool TimerManager_::syncTargetsMe(JsonVariantConst tgt) const
-{
-    if (tgt.is<const char *>())
-    {
-        String s = tgt.as<String>(); s.trim();
-        return s == "all";
-    }
-    if (tgt.is<JsonArrayConst>())
-    {
-        for (JsonVariantConst v : tgt.as<JsonArrayConst>())
-        {
-            String id = v.as<String>(); id.trim();
-            if (id == uniqueID) return true;
-        }
-    }
-    return false;
-}
-
 void TimerManager_::applySyncCommand(const char *json)
 {
     if (json == nullptr || json[0] == '\0') return;
@@ -1225,31 +1196,33 @@ void TimerManager_::applySyncCommand(const char *json)
     DynamicJsonDocument doc(kTimerCmdJsonSize);
     if (deserializeJson(doc, json)) return;
 
-    JsonVariantConst sync = doc["_sync"];
-    if (sync.isNull()) return;                       // not a sync packet
+    // The echo/presence/follow/target decision is a PURE function (SyncEnvelope,
+    // ADR-0023): this shell only deserializes, then acts on the Decision. Dedup is
+    // deliberately NOT in classify — SyncSeenCache::seen() is stateful (test-and-
+    // record), so it stays here as the single guard before re-entry.
+    SyncEnvelope::Decision d =
+        SyncEnvelope::classify(doc.as<JsonVariantConst>(), {uniqueID, TIMER_SYNC_FOLLOW});
 
-    String src = sync["src"].as<String>();
-    if (src.length() == 0 || src == uniqueID) return; // malformed / own echo
-
-    // Presence beacon (#111 / ADR-0019): harvest the sender's uniqueID into the peer
-    // registry UNGATED — presence is informational, not a command, so it bypasses the
-    // follow/target gate, applies NO timer state, and changes nothing else. It carries
-    // no action/duration/config; short-circuit before the command path entirely.
-    if (doc["presence"].as<bool>())
+    switch (d.kind)
     {
-        _registry.record(src, millis());
-        return;
+    case SyncEnvelope::Decision::HarvestPresence:
+        // Presence harvest (#111 / ADR-0019): record the sender ungated, apply no
+        // timer state. classify already bypassed the follow/target gate.
+        _registry.record(d.src, millis());
+        break;
+
+    case SyncEnvelope::Decision::Apply:
+        if (_seen.seen(d.src, d.seq, millis())) return;   // redundant copy of a burst
+        // Re-enter the local control surface. The send-path _remoteApply guard
+        // prevents re-broadcasting (one-hop); parseCommand ignores the _sync envelope.
+        _remoteApply = true;
+        parseCommand(json);
+        _remoteApply = false;
+        break;
+
+    case SyncEnvelope::Decision::Ignore:
+        break;
     }
-
-    if (!TIMER_SYNC_FOLLOW) return;                   // consent gate
-    if (!syncTargetsMe(sync["tgt"])) return;          // not addressed to this clock
-    if (_seen.seen(src, sync["seq"].as<uint32_t>(), millis())) return; // redundant copy
-
-    // Re-enter the local control surface. The send-path _remoteApply guard prevents
-    // this from re-broadcasting (one-hop). parseCommand ignores the _sync envelope.
-    _remoteApply = true;
-    parseCommand(json);
-    _remoteApply = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -1261,11 +1234,12 @@ void TimerManager_::broadcastPresence()
 {
     // A small unconditional beacon: {_sync:{src,seq}, presence:true}. No tgt — it is
     // informational, harvested ungated by every receiver. Independent of sync targets
-    // so even a clock that commands nobody is still discoverable.
-    StaticJsonDocument<128> doc;
+    // so even a clock that commands nobody is still discoverable. 256 matches the
+    // pause/reset run-state beacon buffer (the src/seq envelope routes through
+    // SyncEnvelope::build, which wants a touch more pool headroom on the 64-bit host).
+    StaticJsonDocument<256> doc;
     JsonObject sync = doc.createNestedObject("_sync");
-    sync["src"] = uniqueID;
-    sync["seq"] = ++_syncSeq;
+    SyncEnvelope::build(sync, uniqueID, ++_syncSeq);   // bare {src,seq}: no tgt (informational)
     doc["presence"] = true;
 
     String out; serializeJson(doc, out);

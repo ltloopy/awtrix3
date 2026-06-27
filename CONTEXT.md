@@ -350,9 +350,30 @@ re-entry; only the set/algorithm moved out (the cut-line mirrors ADR-0021). The
 extraction rationale — and why the sibling is **not** merged with `PeerRegistry` under a
 generic — is recorded in [ADR-0022](docs/adr/0022-sync-seen-cache-extraction.md).
 
+**The sync gate** — the inbound **decision** ("what should this clock do with this
+packet?") lives in its own host-testable module, `SyncEnvelope`
+([src/SyncEnvelope.h](src/SyncEnvelope.h)) — a deliberate **third sibling** of
+`PeerRegistry`/`SyncSeenCache`, but **stateless** (free functions over a value struct, no
+set to own). Its `classify(packet, {ownId, follow}) -> Decision {Ignore | HarvestPresence |
+Apply}` is a **pure** function deciding the **four** gates — echo-drop, ungated presence,
+follow consent, target match (`targetsMe`) — reading no globals, no clock, no cache. Its
+context is `{ownId, follow}` **only**: the receive decision turns on the **sender's** `tgt`
+plus this clock's **own consent**, never this clock's own target list (the two independent
+**Sync roles** axes — putting the local target list here would break the follower role).
+The **dedup** is deliberately *not* in `classify` — `SyncSeenCache.seen()` is stateful
+(test-and-record), so it stays the **shell's** single guard between the `Apply` verdict and
+the re-entry. `SyncEnvelope::build` is the symmetric send half (the `{src,seq,tgt}` envelope
++ the target-CSV split, `seq` injected from `TimerManager`'s `_syncSeq`). `TimerManager`
+keeps the impure shell: deserialize, then act on the `Decision` (record presence /
+dedup-then-`parseCommand` under `_remoteApply` / send). See
+[ADR-0023](docs/adr/0023-sync-gate-extraction.md).
+
 _Avoid_: putting `duration` in the config snapshot; expecting a config *edit* to propagate
 (it no longer does — config rides only with a `start`, ADR-0018); or expecting a follower
-to persist a synced run (it is always one-shot on receive and reverts on Idle).
+to persist a synced run (it is always one-shot on receive and reverts on Idle); confusing
+the **wire-gate** `SyncEnvelope::targetsMe` (does the sender's `tgt` cover me?) with
+`TimerHa`'s **HA-select** `timerSyncTargets*` cluster (mapping the Targets *select*'s
+`Off`/`All`/peer-id ↔ option index) — same words, opposite surfaces, separate files.
 
 ### Sync roles
 
