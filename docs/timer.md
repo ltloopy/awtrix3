@@ -212,9 +212,11 @@ without overwriting the settings you keep for next time. See
   sync all keep reporting your **saved** configuration, never the one-off values.
   The top-level `duration` (and `buzzer`/`finished`) of `GET /api/timer` still
   show the **live** one-shot values so you can observe what is counting down.
-- **Run-state still syncs.** Start/pause/reset and the one-off `duration` still
-  propagate to your sync followers (so synced timers start together), but the
-  one-off *config* does not (followers have no notion of revert).
+- **Run-state still syncs.** Start/pause/reset propagate to your sync followers (so
+  synced timers start together), and a `start` carries its one-off `duration` and
+  effective config so followers mirror the run one-shot. A *bare* duration or config
+  edit does **not** propagate (#126): followers adopt the leader's values on the next
+  `start` and revert to their own on Idle.
 - **Commit mid-run if you choose.** A normal (`save:true`) config command sent
   *during* an active one-shot run becomes your new saved baseline.
 - **Inline melodies.** `melody_end`/`melody_tick` accept **either** a bare saved
@@ -553,15 +555,17 @@ every clock to `sync_targets=all` and `sync_follow=true`.
 
 ### What propagates, and when
 
-- **Run-state** — a `start` / `pause` / `reset` (and on-device duration edits) propagate
-  the action and, for a start, the `duration`. `duration` is run-state: a bare start
-  never carries config, so it cannot clobber a peer's settings.
+- **Run-state** — a `start` / `pause` / `reset` propagate the action; a `start` also
+  carries the `duration` (it is the **sole duration-bearing packet**). A bare duration
+  edit propagates **nothing** (#126): `duration` is run-state that rides only with a
+  start, so a length edit never moves a follower's countdown, and a start never carries
+  config that could clobber a peer's settings.
 - **Config** — a deliberate config edit (buzzer, finished, the timing knobs, behavior
   parameters, bar/icon toggles, icon images, melodies) propagates a **full config
   snapshot**; the group ends up configured identically (last-config-writer-wins).
 - **Not propagated:** `sync_follow` / `sync_targets` (each clock's own identity), and the
   live `remaining` (receivers snapshot their own; a missed packet self-heals on the next
-  start/reset).
+  `start`, which re-establishes a shared duration).
 
 ### Behavior notes
 

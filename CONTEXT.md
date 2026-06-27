@@ -306,20 +306,23 @@ join or weaken it.
 What the propagation surface carries splits into two classes that move on different
 triggers and must not be conflated:
 
-- **Run-state propagation** — carries `action` (start / pause / reset) and/or
-  `duration`. Fired by a start, pause, reset, or duration edit. Carries the `action`
-  only — never the live `remaining`: receivers snapshot their own remaining, so a
-  propagated pause aligns to within network latency, and a *missed* run-state packet
-  self-corrects on the next start or reset (which re-establishes a shared duration).
-  `duration` is **run-state, not config**: it defines "the same countdown," so it
-  travels with the run-state, never inside the config block. A bare start never clobbers
-  a peer's config.
+- **Run-state propagation** — carries `action` (start / pause / reset). Fired by a
+  start, pause, or reset. Carries the `action` only — never the live `remaining`:
+  receivers snapshot their own remaining, so a propagated pause aligns to within network
+  latency, and a *missed* run-state packet self-corrects on the next `start` (which
+  re-establishes a shared duration). `duration` is **run-state, not config**: it defines
+  "the same countdown," so it rides **only inside a `start`**, never inside the config
+  block and never on its own. A **bare duration edit propagates nothing** (#126): a
+  leader's length change no longer moves a follower's displayed time — the follower
+  adopts the leader's duration on the next `start` and reverts to its own on Idle. A bare
+  start never clobbers a peer's config.
 - **Run-scoped config mirror** — config no longer propagates on a config *edit*; it
   travels **only bundled with a `start`** (ADR-0018, superseding ADR-0006's config-edit
   snapshot). A `start` broadcasts **one combined packet** = the leader's **effective**
-  config snapshot + `duration` + `action:"start"`, scoped to that run; `pause`/`reset`
-  stay run-state-only and a bare duration edit still propagates `duration` alone. A
-  follower applies a received command **one-shot** (receiver-forced via the `_remoteApply`
+  config snapshot + `duration` + `action:"start"`, scoped to that run — the `start` is
+  the **sole duration-bearing packet**; `pause`/`reset` stay run-state-only (action
+  alone) and a bare duration edit propagates **nothing** (#126). A follower applies a
+  received command **one-shot** (receiver-forced via the `_remoteApply`
   guard, reusing the ADR-0017 override core): it mirrors the leader for the run, persists
   **nothing**, and reverts to its **own** saved config/duration on return to Idle —
   regardless of the leader's `save` flag. So a config edit no longer rewrites peers' saved
