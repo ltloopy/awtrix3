@@ -9,6 +9,7 @@
 #include "TimerHa.h"             // TimerHaEntity (the HA carrier publishAttributeGroup targets)
 #include "TimerSettings.h"       // TcValue + TIMER_SETTINGS_DESC_CAP (one-shot override snapshot, PRD #99)
 #include "PeerRegistry.h"        // the LAN peer set (extracted from this class, ADR-0019/0021)
+#include "SyncSeenCache.h"       // the sync dedup set (extracted from this class, ADR-0022)
 
 // Result of parseCommand. All control surfaces share one validation policy
 // (reject invalid input atomically); only the HTTP API surfaces this as a
@@ -65,13 +66,11 @@ private:
     bool     _remoteApply = false;
     uint32_t _syncSeq     = 0;     // per-command sequence; only needs uniqueness within the dedup window
 
-    // Bounded recently-seen (src,seq) cache so the 3x redundant send is applied
-    // once. TTL-based, so a sender reboot (seq restart) self-clears by ageing out.
-    struct SyncSeen { String src; uint32_t seq = 0; unsigned long atMs = 0; };
-    static constexpr uint8_t kSyncSeenMax = 8;
-    SyncSeen _syncSeen[kSyncSeenMax];
-    uint8_t  _syncSeenIdx = 0;
-    bool syncSeenRecently(const String &src, uint32_t seq, unsigned long nowMs);
+    // Bounded recently-seen (src,seq) dedup set so the 3x redundant send is applied
+    // once. Extracted to its own host-testable module (SyncSeenCache, ADR-0022); the
+    // UDP transport + parseCommand re-entry stay here. TTL-based, so a sender reboot
+    // (seq restart) self-clears by ageing out.
+    SyncSeenCache _seen;
 
     // -- Peer presence registry (#111 / ADR-0019, extracted to PeerRegistry per
     //    ADR-0021) --
