@@ -15,7 +15,15 @@
 const uint16_t PORT = 1883;
 
 namespace {
-    constexpr uint8_t  kMaxHAEntities  = 34;
+    // HA entity registration cap. ArduinoHA's HAMqtt::addDeviceType has an off-by-one
+    // (`_devicesTypesNb + 1 >= _maxDevicesTypesNb`), so the EFFECTIVE capacity is
+    // kMaxHAEntities - 1 (= 39 here). Inventory: 25 base entities (incl. battery on
+    // ulanzi) + 10 Timer entities (TIMER_HA_DESCRIPTOR_COUNT) = 35, leaving 4 spare
+    // slots. Raised from 34 (issue #125): at 34 the effective cap of 33 silently
+    // dropped the two Timer sync-control entities (the last to register). No clean
+    // compile-time guard — the base count is build-flag conditional — so the runtime
+    // guard is the DEBUG_MODE warning in createTimerHAEntities() via haRegistrationAtCap().
+    constexpr uint8_t  kMaxHAEntities  = 40;
 }
 
 WiFiClient espClient;
@@ -224,6 +232,20 @@ void MQTTManager_::createTimerHAEntities()
     // present — the read-only attribute stays authoritative for the exact value.
     timerSyncTargetsSel->setState(
         timerSyncTargetsIndexForValue(TIMER_SYNC_TARGETS.c_str(), stPtrs, stN), true);
+
+    // Issue #125: every `new HAX` above auto-registered with HAMqtt via the
+    // HABaseDeviceType ctor. ArduinoHA drops entities once registration reaches the
+    // effective cap (kMaxHAEntities - 1; see haRegistrationAtCap) — which silently
+    // dropped these two sync-control entities until the cap was raised. Log the count
+    // and warn if we're back at the cap (the runtime guard, since the build-flag-
+    // conditional base count rules out a clean compile-time check).
+    if (DEBUG_MODE)
+    {
+        uint8_t registered = mqtt.getDevicesTypesNb();
+        DEBUG_PRINTF("HA entities registered: %u of %u", registered, kMaxHAEntities);
+        if (haRegistrationAtCap(registered, kMaxHAEntities))
+            DEBUG_PRINTLN(F("WARN: HA entity registration at effective cap; entities may be dropped (raise kMaxHAEntities)"));
+    }
 }
 
 // Re-publish the Targets select's discovery when peer-registry membership changes,

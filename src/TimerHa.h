@@ -112,4 +112,13 @@ int8_t timerSyncTargetsIndexForValue(const char *syncTargets, const char *const 
 // (and leaves out untouched) when index is out of range — the command path's BadField.
 bool timerSyncTargetsValueForIndex(int8_t index, const char *const *ids, size_t n, char *out, size_t outLen);
 
+// ArduinoHA's HAMqtt::addDeviceType drops an entity when
+// `_devicesTypesNb + 1 >= _maxDevicesTypesNb`, so the EFFECTIVE capacity is
+// maxEntities - 1, not maxEntities (an off-by-one that silently dropped the two
+// Timer sync-control entities — issue #125). This helper encodes that guard once,
+// host-tested, so the DEBUG_MODE registration check and ArduinoHA agree: it returns
+// true when `registered` entities already fill the effective cap, i.e. the next
+// addDeviceType would be rejected. Pure (no ArduinoHA/Globals) so it is host-testable.
+bool haRegistrationAtCap(uint8_t registered, uint8_t maxEntities);
+
 #endif
