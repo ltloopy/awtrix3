@@ -335,12 +335,18 @@ public:
      */
     void processMessage(const char *topic, const uint8_t *payload, uint16_t length);
 
-#ifdef ARDUINOHA_TEST
+    /**
+     * Number of device types currently registered. Note ArduinoHA's effective
+     * capacity is one less than the max passed to the constructor (addDeviceType
+     * rejects once _devicesTypesNb + 1 >= _maxDevicesTypesNb). Used by the firmware
+     * to log/guard HA entity registration against the cap (awtrix issue #125).
+     */
     inline uint8_t getDevicesTypesNb() const
     {
         return _devicesTypesNb;
     }
 
+#ifdef ARDUINOHA_TEST
     inline HABaseDeviceType **getDevicesTypes() const
     {
         return _devicesTypes;

@@ -1625,6 +1625,23 @@ void test_U54_timer_ha_ids_create_teardown_symmetric(void) {
     }
 }
 
+// U60 — haRegistrationAtCap encodes ArduinoHA's HAMqtt::addDeviceType off-by-one
+// (`_devicesTypesNb + 1 >= _maxDevicesTypesNb`), so the effective capacity is
+// maxEntities - 1. This is the root cause of issue #125: at max=34 the 34th add
+// (registered==33) is rejected, which silently dropped the two Timer sync-control
+// entities once the inventory reached 35. The DEBUG_MODE registration warning and
+// the cap math both lean on this; pin the boundary so the off-by-one can't drift.
+void test_U60_ha_registration_off_by_one(void) {
+    // Old cap of 34: effective 33. The 33rd add (registered==32) still fits; the
+    // 34th (registered==33) is the one that was dropped.
+    TEST_ASSERT_FALSE(haRegistrationAtCap(32, 34));
+    TEST_ASSERT_TRUE(haRegistrationAtCap(33, 34));
+    // Raised cap of 40: effective 39. The 35-entity inventory fits with headroom;
+    // only at the effective cap does the next add get rejected.
+    TEST_ASSERT_FALSE(haRegistrationAtCap(35, 40));
+    TEST_ASSERT_TRUE(haRegistrationAtCap(39, 40));
+}
+
 // ============================================================================
 // D1–D6 — Timer rendering, via the display-free TimerView model (src/TimerView).
 // The renderer's decision logic (per-state text, the compact display format,
@@ -4610,6 +4627,7 @@ int main(int, char **) {
     RUN_TEST(test_U34_descriptor_type_specific_fields);
     RUN_TEST(test_U35_select_options_match_enums);
     RUN_TEST(test_U54_timer_ha_ids_create_teardown_symmetric);
+    RUN_TEST(test_U60_ha_registration_off_by_one);
     RUN_TEST(test_D1_view_idle_shows_duration_no_bar);
     RUN_TEST(test_D2_view_running_shows_remaining_with_bar);
     RUN_TEST(test_D3_view_finished_blinks_0_00);

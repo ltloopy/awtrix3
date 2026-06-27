@@ -161,3 +161,11 @@ void formatTimerHaAttrTopic(const char *dataPrefix, const char *deviceUniqueId,
     // in TimerHa.h.
     snprintf(out, outLen, "%s/%s/%s/json_attr_t", dataPrefix, deviceUniqueId, entityId);
 }
+
+bool haRegistrationAtCap(uint8_t registered, uint8_t maxEntities)
+{
+    // Mirror byte-for-byte ArduinoHA's HAMqtt::addDeviceType guard
+    // (`_devicesTypesNb + 1 >= _maxDevicesTypesNb`); the uint16_t widening keeps a
+    // maxEntities of 255 from wrapping. See the contract in TimerHa.h.
+    return (uint16_t)registered + 1 >= maxEntities;
+}
