@@ -47,6 +47,13 @@ subject to the identical atomic-reject contract. Atomic-reject is *reused*, not 
 
 ### Two-axis roles with a `follow` consent gate
 
+> **Amended (default) by [#124](https://github.com/ltloopy/awtrix3/issues/124).** `follow`
+> now defaults **on**, not off (below): a fresh clock boots as a **follower** — it obeys
+> sync it is targeted by but, with an empty target list, commands nobody — and
+> **standalone is an explicit opt-out** (`follow=false`). NVS wins on migration, so a
+> device that already stored `false` stays standalone. The two-axis model, role names and
+> the consent gate are otherwise unchanged.
+
 Participation is two independent axes, not one on/off:
 
 - `TIMER_SYNC_TARGETS` (**send**) — whom this clock commands on a local action: `""`

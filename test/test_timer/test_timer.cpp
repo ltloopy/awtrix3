@@ -2621,6 +2621,38 @@ void test_T4_table_nvs_roundtrip(void) {
 }
 
 // ============================================================================
+// T4b — Follow defaults ON for a fresh clock (issue #124). A device with NO
+// stored sync_follow value loads `true`: listening is the factory default, so a
+// brand-new clock obeys sync it is targeted by, and standalone is an explicit
+// opt-out. The persisted-settings fallback (descriptor dfltNum) governs the
+// loaded value when NVS has no key. setUp() cleared the stub, so there is none.
+// ============================================================================
+void test_T4b_sync_follow_defaults_on_for_fresh_device(void) {
+    Preferences p;               // fresh device: setUp() cleared the NVS stub (no TSYNF)
+
+    TIMER_SYNC_FOLLOW = false;   // pin to the OLD default so the load's effect is visible
+    timerSettingsLoadNvs(p);
+
+    TEST_ASSERT_TRUE(TIMER_SYNC_FOLLOW);
+}
+
+// ============================================================================
+// T4c — NVS wins on migration (issue #124). A device that EXPLICITLY stored
+// sync_follow=false keeps it false after the firmware update: only a device that
+// never stored the value flips to default-on, so a deliberate standalone opt-out
+// survives. The stored key shadows the new descriptor default.
+// ============================================================================
+void test_T4c_sync_follow_stored_false_survives_update(void) {
+    Preferences p;
+    p.putBool("TSYNF", false);   // a user who explicitly turned Follow off
+
+    TIMER_SYNC_FOLLOW = true;    // pin to the NEW default so a stale load would show
+    timerSettingsLoadNvs(p);
+
+    TEST_ASSERT_FALSE(TIMER_SYNC_FOLLOW);
+}
+
+// ============================================================================
 // T5 — dev.json is per-key best-effort: a valid key applies, an out-of-range
 // sibling is skipped (not atomic-rejected), and other keys still land.
 // ============================================================================
@@ -4652,6 +4684,8 @@ int main(int, char **) {
     RUN_TEST(test_T2_table_strict_types);
     RUN_TEST(test_T3_table_bespoke_validators);
     RUN_TEST(test_T4_table_nvs_roundtrip);
+    RUN_TEST(test_T4b_sync_follow_defaults_on_for_fresh_device);
+    RUN_TEST(test_T4c_sync_follow_stored_false_survives_update);
     RUN_TEST(test_T5_devjson_best_effort);
     RUN_TEST(test_T6_snapshot_excludes_local_identity);
     RUN_TEST(test_T7_member_config_table_well_formed);

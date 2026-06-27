@@ -142,7 +142,7 @@ const TimerSettingDesc TIMER_SETTINGS_DESCS[] = {
     {"bar_bg_color",               "timer_bar_bg_color",               "TBARBC",  TcType::U32,  TcCheck::Bespoke,  0,   0,      0,     nullptr,       parseBarColor,   true,  &TIMER_BAR_BG_COLOR},
     {"melody_tick",                "timer_melody_tick",                "TMTICK",  TcType::Str,  TcCheck::Name,     0,   0,      0,     "timer_tick",  nullptr,         true,  &TIMER_MELODY_TICK},
     {"melody_end",                 "timer_melody_end",                 "TMEND",   TcType::Str,  TcCheck::Name,     0,   0,      0,     "timer_end",   nullptr,         true,  &TIMER_MELODY_END},
-    {"sync_follow",                "timer_sync_follow",                "TSYNF",   TcType::Bool, TcCheck::Bool,     0,   0,      0,     nullptr,       nullptr,         false, &TIMER_SYNC_FOLLOW},
+    {"sync_follow",                "timer_sync_follow",                "TSYNF",   TcType::Bool, TcCheck::Bool,     0,   0,      1,     nullptr,       nullptr,         false, &TIMER_SYNC_FOLLOW},
     {"sync_targets",               "timer_sync_targets",               "TSYNT",   TcType::Str,  TcCheck::Bespoke,  0,   0,      0,     "",            parseSyncTargets, false, &TIMER_SYNC_TARGETS},
 };
 

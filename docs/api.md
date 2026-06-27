@@ -472,7 +472,7 @@ Clear an override so the slot falls back to the Idle icon:
     "bar_bg_color": "none",
     "melody_tick": "timer_tick",
     "melody_end": "timer_end",
-    "sync_follow": false,
+    "sync_follow": true,
     "sync_targets": "",
     "buzzer": "end",
     "finished": "auto-clear",

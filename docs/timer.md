@@ -59,7 +59,7 @@ no Home Assistant or MQTT subscription required. `dev.json` keys override NVS on
 
 | Item | API / MQTT key | dev.json | GET /api/timer | Home Assistant | On-device |
 |------|----------------|----------|----------------|----------------|-----------|
-| Sync follow (dflt false) | `sync_follow` ✅ | `timer_sync_follow` ✅ | 👁 `config.sync_follow` | ✅ Follow `switch`; 👁 attr on state sensor | — |
+| Sync follow (dflt on) | `sync_follow` ✅ | `timer_sync_follow` ✅ | 👁 `config.sync_follow` | ✅ Follow `switch`; 👁 attr on state sensor | — |
 | Sync targets (`all` / CSV, dflt empty) | `sync_targets` ✅ | `timer_sync_targets` ✅ | 👁 `config.sync_targets` | ✅ Targets `select` (static `Off`/`All`; unknown for a specific-ID CSV); 👁 attr on state sensor | — |
 
 ### Master enable
@@ -525,7 +525,7 @@ observation only and never a write path.
 | `TIMER_BAR_ENABLED` | `true` | When `false`, the Running/Paused progress bar is hidden. |
 | `TIMER_ICON_ENABLED` | `true` | When `false`, the timer icon is hidden and the time text + bar reflow to the full panel (ADR-0005). |
 | `TIMER_BAR_COLOR` | `0` (= `TEXTCOLOR_888`) | Hex color for the progress bar. `0` follows the global text color. |
-| `TIMER_SYNC_FOLLOW` | `false` | When `true`, this clock applies inbound timer-sync packets it is targeted by (the follow consent gate). See **Multi-device sync** below. |
+| `TIMER_SYNC_FOLLOW` | `true` | The factory default: a fresh clock is a **follower** — it applies inbound timer-sync packets it is targeted by (the follow consent gate). Set `false` for **standalone** (an explicit opt-out). NVS wins on migration: a device that already stored `false` stays standalone. See **Multi-device sync** below. |
 | `TIMER_SYNC_TARGETS` | `""` | Whom this clock commands when *it* acts: `""` (sync off), `all`, or a comma list of peer device IDs (e.g. `awtrix_ab12,awtrix_cd34`). See **Multi-device sync** below. |
 
 ---
@@ -544,7 +544,7 @@ rides a dedicated **UDP broadcast** on **port 4212**. Full rationale in
 | Setting | Axis | Meaning |
 | --- | --- | --- |
 | `sync_targets` | **send** | Whom this clock commands on a *local* action. `""` = send nothing; `all`; or a comma list of peer `uniqueID`s. |
-| `sync_follow` | **receive** | Whether this clock *obeys* inbound sync it is targeted by (consent gate; default off). |
+| `sync_follow` | **receive** | Whether this clock *obeys* inbound sync it is targeted by (consent gate; default **on** — a fresh clock is a follower, standalone is an explicit opt-out). |
 
 Compose them: a **leader** (targets set, follow off) commands but never obeys; a
 **follower** (follow on, no targets) obeys but never commands; a **peer/mirror** (both)

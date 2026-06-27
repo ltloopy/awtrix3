@@ -489,7 +489,7 @@ bool TIMER_BAR_ENABLED = true;
 bool TIMER_ICON_ENABLED = true;
 uint32_t TIMER_BAR_COLOR = 0;
 uint32_t TIMER_BAR_BG_COLOR = 0;   // 0 = black = no track (literal off; see ADR-0020)
-bool TIMER_SYNC_FOLLOW = false;
+bool TIMER_SYNC_FOLLOW = true;   // fresh clock is a follower; standalone is opt-out (#124)
 String TIMER_SYNC_TARGETS = "";
 uint8_t MAX_BRIGHTNESS = 160;
 double movementFactor = 0.5;
