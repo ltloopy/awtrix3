@@ -126,8 +126,7 @@ private:
     };
 
     void buildConfigSnapshot(JsonDocument &doc) const;   // config keys only; no action/duration/sync_*
-    void addSyncEnvelope(JsonObject &sync);              // src/seq/tgt
-    bool syncTargetsMe(JsonVariantConst tgt) const;      // does _sync.tgt cover this clock's uniqueID?
+    void addSyncEnvelope(JsonObject &sync);              // forwards to SyncEnvelope::build (injects _syncSeq)
 
     uint32_t computeCurrentRemaining() const;
     void enterRunning();
