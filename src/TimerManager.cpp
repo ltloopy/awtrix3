@@ -158,8 +158,8 @@ void TimerManager_::setup()
 
     // A (re)boot knows no peers and has emitted no beacon yet — the peer registry is
     // pure RAM/LAN-derived state, repopulated by inbound beacons (#111 / ADR-0019).
-    for (uint8_t i = 0; i < _peerCount; ++i) _peers[i].uniqueID = String();
-    _peerCount        = 0;
+    _registry.setOwnId(uniqueID);
+    _registry.clear();
     _lastPresenceMs   = 0;
     _presenceEverSent = false;
 
@@ -1249,7 +1249,7 @@ void TimerManager_::applySyncCommand(const char *json)
     // no action/duration/config; short-circuit before the command path entirely.
     if (doc["presence"].as<bool>())
     {
-        recordPeer(src, millis());
+        _registry.record(src, millis());
         return;
     }
 
@@ -1265,84 +1265,9 @@ void TimerManager_::applySyncCommand(const char *json)
 }
 
 // ---------------------------------------------------------------------------
-// Peer presence registry (#111 / ADR-0019). A bounded set of {uniqueID, lastSeen}
-// learned from inbound presence beacons; the backend the dynamic HA Targets select
-// (#112) consumes. Own id is never stored; entries age out past kPeerTtlMs.
+// Peer presence beacon (#111 / ADR-0019). The peer SET lives in PeerRegistry
+// (extracted per ADR-0021); this class keeps only the beacon cadence + UDP send.
 // ---------------------------------------------------------------------------
-
-void TimerManager_::recordPeer(const String &src, unsigned long nowMs)
-{
-    if (src.length() == 0 || src == uniqueID) return;   // never store our own id
-    unsigned long seen = (nowMs == 0) ? 1 : nowMs;      // 0 doubles as "never"
-
-    // Refresh an existing entry.
-    for (uint8_t i = 0; i < _peerCount; ++i)
-    {
-        if (_peers[i].uniqueID == src)
-        {
-            _peers[i].lastSeen = seen;
-            return;
-        }
-    }
-
-    // New peer: append while bounded; otherwise overwrite the stalest slot so a busy
-    // LAN keeps the freshest peers rather than rejecting all new ones once full.
-    if (_peerCount < kPeerMax)
-    {
-        _peers[_peerCount].uniqueID = src;
-        _peers[_peerCount].lastSeen = seen;
-        ++_peerCount;
-        return;
-    }
-    uint8_t oldest = 0;
-    for (uint8_t i = 1; i < _peerCount; ++i)
-        if (_peers[i].lastSeen < _peers[oldest].lastSeen) oldest = i;
-    _peers[oldest].uniqueID = src;
-    _peers[oldest].lastSeen = seen;
-}
-
-void TimerManager_::prunePeers(unsigned long nowMs)
-{
-    uint8_t w = 0;
-    for (uint8_t i = 0; i < _peerCount; ++i)
-    {
-        if ((nowMs - _peers[i].lastSeen) <= kPeerTtlMs)
-        {
-            if (w != i) _peers[w] = _peers[i];
-            ++w;
-        }
-    }
-    for (uint8_t i = w; i < _peerCount; ++i) _peers[i].uniqueID = String();
-    _peerCount = w;
-}
-
-bool TimerManager_::hasPeer(const String &id) const
-{
-    for (uint8_t i = 0; i < _peerCount; ++i)
-        if (_peers[i].uniqueID == id) return true;
-    return false;
-}
-
-size_t TimerManager_::peerIds(String *out, size_t cap) const
-{
-    // Sort the FULL set first, then copy the lowest `cap`, so a small buffer still
-    // gets a stable prefix of the sorted list (not just the first-discovered ids).
-    // The registry is tiny (kPeerMax ~16) so an O(n^2) selection sort on a local
-    // copy is cheaper than dragging in <algorithm> and stays allocation-light.
-    String sorted[kPeerMax];
-    for (uint8_t i = 0; i < _peerCount; ++i) sorted[i] = _peers[i].uniqueID;
-    for (uint8_t i = 0; i + 1 < _peerCount; ++i)
-    {
-        uint8_t lo = i;
-        for (uint8_t j = i + 1; j < _peerCount; ++j)
-            if (sorted[j] < sorted[lo]) lo = j;
-        if (lo != i) { String t = sorted[i]; sorted[i] = sorted[lo]; sorted[lo] = t; }
-    }
-
-    size_t n = 0;
-    for (uint8_t i = 0; i < _peerCount && n < cap; ++i) out[n++] = sorted[i];
-    return n;
-}
 
 void TimerManager_::broadcastPresence()
 {
@@ -1361,7 +1286,7 @@ void TimerManager_::broadcastPresence()
 
 void TimerManager_::tickPresence(unsigned long nowMs)
 {
-    prunePeers(nowMs);
+    _registry.prune(nowMs);
 
     if (AP_MODE) return;   // no beacon in AP mode (a standalone clock with no real LAN)
 

@@ -86,7 +86,7 @@ void onTimerDurationMessage(const char *message, uint16_t length, HAText *sender
 // The Targets select consumes the peer registry: its options are "Off;All" plus
 // each currently-discovered peer id (sorted), rebuilt at runtime. These helpers
 // snapshot the current peer ids and join them through the pure TimerHa builder.
-// kSyncTargetPeerCap matches TimerManager's kPeerMax; the worst-case option string
+// kSyncTargetPeerCap matches PeerRegistry's kPeerMax; the worst-case option string
 // is "Off;All" + kPeerMax ids (<=32 chars each, the sync_targets token cap) + seps.
 static const size_t kSyncTargetPeerCap = 16;
 static const size_t kSyncTargetOptsCap = 8 + kSyncTargetPeerCap * 33 + 1; // "Off;All" + ";<id>"...

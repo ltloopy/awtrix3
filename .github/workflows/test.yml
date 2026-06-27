@@ -11,7 +11,7 @@ on:
 
 jobs:
   native_unit_tests:
-    name: Native unit tests (TimerManager)
+    name: Native unit tests (Timer + PeerRegistry)
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repository
@@ -43,8 +43,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install --upgrade platformio
 
+      # native runs test_timer; native_peer runs the dependency-free test_peerregistry
+      # in its own env (it links only PeerRegistry.cpp — see platformio.ini).
       - name: Run native unit tests
-        run: pio test -e native -f test_timer --verbose
+        run: pio test -e native -e native_peer --verbose
 
   device_build:
     name: Device firmware build (ulanzi + awtrix2_upgrade)
