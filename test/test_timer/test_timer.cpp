@@ -4544,17 +4544,6 @@ void test_HA8_sync_targets_select_routes_through_parsecommand(void) {
     TEST_ASSERT_EQUAL_INT(1, saveSettings_calls);
 }
 
-// HA9 — the select-reflection helper maps the current sync_targets value to its
-// option index: "" -> Off (0), "all" -> All (1), and a specific-ID CSV (set
-// out-of-band via API/dev.json) -> -1 (unknown), so the select shows blank while
-// the read-only attribute stays authoritative for the exact value.
-void test_HA9_sync_targets_select_index_reflects_value(void) {
-    TEST_ASSERT_EQUAL_INT(0,  timerSyncTargetsSelectIndex(""));
-    TEST_ASSERT_EQUAL_INT(1,  timerSyncTargetsSelectIndex("all"));
-    TEST_ASSERT_EQUAL_INT(-1, timerSyncTargetsSelectIndex("awtrix_ab12,awtrix_cd34"));
-    TEST_ASSERT_EQUAL_INT(-1, timerSyncTargetsSelectIndex("awtrix_peer"));
-}
-
 // HA10 — an invalid Targets write is rejected wholesale (atomic-reject parity):
 // a malformed sync_targets value returns a non-Ok result and changes nothing, so the
 // select snaps back to the value actually applied. The bespoke parseSyncTargets
@@ -4572,7 +4561,7 @@ void test_HA10_invalid_sync_targets_write_rejected(void) {
             "awtrix_0123456789012345678901234567890")));
     TEST_ASSERT_EQUAL_STRING("all", TIMER_SYNC_TARGETS.c_str());
     // The applied value still reflects All in the select.
-    TEST_ASSERT_EQUAL_INT(1, timerSyncTargetsSelectIndex(TIMER_SYNC_TARGETS.c_str()));
+    TEST_ASSERT_EQUAL_INT(1, timerSyncTargetsIndexForValue(TIMER_SYNC_TARGETS.c_str(), nullptr, 0));
 }
 
 // HA11 — applying sync_follow / sync_targets through the HA adapter NEVER
@@ -4787,7 +4776,6 @@ int main(int, char **) {
     RUN_TEST(test_HA6_buttons_propagate_run_state_to_peers);
     RUN_TEST(test_HA7_sync_follow_switch_routes_through_parsecommand);
     RUN_TEST(test_HA8_sync_targets_select_routes_through_parsecommand);
-    RUN_TEST(test_HA9_sync_targets_select_index_reflects_value);
     RUN_TEST(test_HA10_invalid_sync_targets_write_rejected);
     RUN_TEST(test_HA11_sync_control_writes_do_not_propagate);
     return UNITY_END();

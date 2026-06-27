@@ -27,8 +27,8 @@ enum class TimerHaEntity : uint8_t
 };
 
 // The static option indices for the SyncTargets select (issue #110). The select
-// ships ONLY these two options ("Off"/"All"); a specific-ID CSV set out-of-band
-// is reflected as unknown (-1) — see timerSyncTargetsSelectIndex.
+// ships ONLY these two base options ("Off"/"All"); a specific-ID CSV set out-of-band
+// is reflected as unknown (-1) — see timerSyncTargetsIndexForValue.
 enum class TimerSyncTargetsOption : int8_t
 {
     Off = 0,   // sync_targets == ""  (receive only / no relay)
@@ -83,14 +83,6 @@ void formatTimerHaDataTopic(const char *dataPrefix, const char *deviceUniqueId,
 void formatTimerHaAttrTopic(const char *dataPrefix, const char *deviceUniqueId,
                             const char *entityId, char *out, size_t outLen);
 
-// Map a sync_targets value to the SyncTargets select's option index for state
-// reflection (issue #110): "" -> Off (0), "all" -> All (1), anything else (a
-// specific-ID CSV set out-of-band via API/dev.json) -> -1 (unknown). HASelect
-// treats -1 as "no option selected", so the select shows blank while the
-// read-only sync_targets attribute remains authoritative for the exact value.
-// Pure data (no String/Globals) so it is host-testable.
-int8_t timerSyncTargetsSelectIndex(const char *syncTargets);
-
 // Dynamic SyncTargets select (#112). The select consumes the peer registry, so its
 // option list and id<->index mapping are built at runtime from the CURRENT set of
 // discovered peer ids (already sorted) rather than the static "Off;All" table field.
@@ -104,7 +96,7 @@ void timerSyncTargetsBuildOptions(const char *const *ids, size_t n, char *out, s
 // Forward map (sync_targets value -> select option index) over the CURRENT id list:
 // "" -> 0 (Off), "all" -> 1 (All), a single id present at sorted position k -> 2+k,
 // an id no longer present OR a multi-id CSV -> -1 (unknown / no option selected).
-// With n==0 this reduces to the static Off/All/-1 behaviour of timerSyncTargetsSelectIndex.
+// With n==0 this reduces to static Off/All/-1 behaviour (the select's base options).
 int8_t timerSyncTargetsIndexForValue(const char *syncTargets, const char *const *ids, size_t n);
 
 // Reverse map (select option index -> sync_targets value) over the CURRENT id list:
