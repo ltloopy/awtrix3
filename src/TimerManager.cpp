@@ -373,44 +373,12 @@ String TimerManager_::formatHMS(uint32_t seconds)
     return String(buf);
 }
 
+// Forwarder: the parse logic now lives in the descriptor-table family as the free
+// function timerParseHMS (#142), so the command validator links the table and not
+// this singleton. Callers reach it unchanged through this static.
 bool TimerManager_::parseHMS(const String &in, uint32_t &outSeconds)
 {
-    String s = in;
-    s.trim();
-    if (s.length() == 0) return false;
-
-    // Split on ':' into up to three numeric fields. Colon count decides units:
-    // two colons = HH:MM:SS, one = MM:SS, none = bare seconds. Each field must be
-    // a non-empty run of digits. Fields are summed without a 0-59 cap (carry).
-    uint32_t fields[3] = {0, 0, 0};
-    int count = 0;
-    int start = 0;
-    for (int i = 0; i <= s.length(); i++)
-    {
-        if (i == s.length() || s[i] == ':')
-        {
-            if (count >= 3) return false;          // more than two colons
-            int len = i - start;
-            if (len == 0) return false;            // empty field (e.g. "5:", ":30")
-            uint32_t v = 0;
-            for (int j = start; j < i; j++)
-            {
-                char c = s[j];
-                if (c < '0' || c > '9') return false;  // non-numeric
-                v = v * 10 + (uint32_t)(c - '0');
-            }
-            fields[count++] = v;
-            start = i + 1;
-        }
-    }
-
-    uint32_t h = 0, m = 0, sec = 0;
-    if (count == 3)      { h = fields[0]; m = fields[1]; sec = fields[2]; }
-    else if (count == 2) {                m = fields[0]; sec = fields[1]; }
-    else                 {                                sec = fields[0]; }
-
-    outSeconds = hmsToSeconds(h, m, sec);
-    return true;
+    return timerParseHMS(in, outSeconds);
 }
 
 bool TimerManager_::isValidDuration(uint32_t seconds)
@@ -445,10 +413,11 @@ bool TimerManager_::isValidIconName(const String &name)
     return validateIconName(name) == name;
 }
 
+// Forwarder: the predicate now lives in the descriptor-table family as the free
+// function timerIsValidAction (#142). Callers reach it unchanged through this static.
 bool TimerManager_::isValidAction(const String &s)
 {
-    String a = s; a.toLowerCase();
-    return a == "start" || a == "pause" || a == "reset";
+    return timerIsValidAction(s);
 }
 
 // Legacy Timer-app config-mode forwarders. The TIMER menu's DURATION leaf replaced

@@ -211,7 +211,7 @@ public:
     static void     secondsToHMS(uint32_t sec, uint32_t &h, uint32_t &m, uint32_t &s);
     static uint32_t hmsToSeconds(uint32_t h, uint32_t m, uint32_t s);
     static String   formatHMS(uint32_t seconds);
-    static bool     parseHMS(const String &s, uint32_t &outSeconds);
+    static bool     parseHMS(const String &s, uint32_t &outSeconds);  // forwards to timerParseHMS (#142)
 
     // Validation predicates shared by parseCommand (every control surface) and
     // the HA duration callback. Range/out-of-range is rejected, not clamped.
@@ -219,7 +219,7 @@ public:
     static bool     parseBuzzerMode(const String &s, BuzzerMode &out);
     static bool     parseFinishedMode(const String &s, FinishedMode &out);
     static bool     isValidIconName(const String &name);
-    static bool     isValidAction(const String &s);
+    static bool     isValidAction(const String &s);  // forwards to timerIsValidAction (#142)
 
     void setIconIdle    (const String &name, bool publish = true);
     void setIconRunning (const String &name, bool publish = true);

@@ -969,6 +969,50 @@ void test_U25_parseHMS_rejects(void) {
 }
 
 // ============================================================================
+// #142 — parseHMS relocated into the descriptor-table family as the free
+// function timerParseHMS (TimerManager_::parseHMS now forwards to it). Direct
+// host test in its new home: the same accept+reject contract as U24/U25,
+// asserted on the free function so the relocation is pinned independent of the
+// forwarder. carry (no 0-59 cap) and whitespace-trim are the load-bearing edges.
+// ============================================================================
+void test_timerParseHMS_direct(void) {
+    uint32_t s = 0;
+    TEST_ASSERT_TRUE(timerParseHMS("00:05:00", s)); TEST_ASSERT_EQUAL_UINT32(300, s);
+    TEST_ASSERT_TRUE(timerParseHMS("3:00", s));     TEST_ASSERT_EQUAL_UINT32(180, s);   // MM:SS
+    TEST_ASSERT_TRUE(timerParseHMS("90", s));       TEST_ASSERT_EQUAL_UINT32(90, s);    // bare seconds
+    TEST_ASSERT_TRUE(timerParseHMS("3:90", s));     TEST_ASSERT_EQUAL_UINT32(270, s);   // carry, no 0-59 cap
+    TEST_ASSERT_TRUE(timerParseHMS(" 1:00:00 ", s));TEST_ASSERT_EQUAL_UINT32(3600, s);  // trims
+
+    uint32_t r = 12345;  // sentinel; must be left untouched on reject
+    TEST_ASSERT_FALSE(timerParseHMS("aa:bb", r));
+    TEST_ASSERT_FALSE(timerParseHMS("5:", r));
+    TEST_ASSERT_FALSE(timerParseHMS(":30", r));
+    TEST_ASSERT_FALSE(timerParseHMS("1:2:3:4", r));
+    TEST_ASSERT_FALSE(timerParseHMS("", r));
+    TEST_ASSERT_FALSE(timerParseHMS("   ", r));
+    TEST_ASSERT_EQUAL_UINT32(12345, r);
+}
+
+// ============================================================================
+// #142 — isValidAction relocated into the descriptor-table family as the free
+// function timerIsValidAction (TimerManager_::isValidAction now forwards to it).
+// Direct host test in its new home: the action verb predicate accepts exactly
+// {start, pause, reset} case-insensitively and rejects everything else. It does
+// NOT trim, so a trailing space is a reject -- that no-trim edge pins the move.
+// ============================================================================
+void test_timerIsValidAction_direct(void) {
+    TEST_ASSERT_TRUE(timerIsValidAction("start"));
+    TEST_ASSERT_TRUE(timerIsValidAction("pause"));
+    TEST_ASSERT_TRUE(timerIsValidAction("reset"));
+    TEST_ASSERT_TRUE(timerIsValidAction("START"));    // case-insensitive
+    TEST_ASSERT_TRUE(timerIsValidAction("Reset"));
+
+    TEST_ASSERT_FALSE(timerIsValidAction("stop"));
+    TEST_ASSERT_FALSE(timerIsValidAction(""));
+    TEST_ASSERT_FALSE(timerIsValidAction("start "));  // no trim in the predicate
+}
+
+// ============================================================================
 // U26 — parseCommand "duration" accepts a clock string or a numeric value;
 // both resolve to the same seconds. Bad string is ignored (duration unchanged).
 // ============================================================================
@@ -4625,6 +4669,8 @@ int main(int, char **) {
     RUN_TEST(test_U23_formatHMS_trimmed);
     RUN_TEST(test_U24_parseHMS_accepts);
     RUN_TEST(test_U25_parseHMS_rejects);
+    RUN_TEST(test_timerParseHMS_direct);
+    RUN_TEST(test_timerIsValidAction_direct);
     RUN_TEST(test_U26_parseCommand_duration_string_and_number);
     RUN_TEST(test_U27_config_roundtrip_unchanged);
     RUN_TEST(test_U28_isValidDuration);
