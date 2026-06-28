@@ -134,6 +134,44 @@ _Avoid_: calling `GET /api/timer` a "control surface" or implying it participate
 
 **Icons are the one deliberate HA observation non-gap.** The four `icon_<state>` names are readable over HTTP (`config.icon_*`, ADR-0015) and MQTT (retained `{prefix}/timer/icons`), but have **no HA read path** by design: they already have two read paths, HA cannot usefully render an AWTRIX icon file, and they sit outside the settings/attribute-group tables. Documented, not an oversight.
 
+### The command plan
+
+The validated, staged form of one control-surface command, produced by the **pure**
+classifier `TimerCommand::classify(packet, Context) -> Plan`
+([src/TimerCommand.h](src/TimerCommand.h)) — a deliberate **fourth sibling** of
+`PeerRegistry`/`SyncSeenCache`/`SyncEnvelope`, and like `SyncEnvelope` **stateless** (free
+functions over value structs, no set to own). `classify` runs the whole **atomic-reject
+validation contract** (ADR-0001) in one mutate-nothing pass — the table rows
+(`TIMER_SETTINGS_DESCS`), the `duration` cross-field check, the member-backed half
+(`TIMER_MEMBER_CONFIG_DESCS`), the `action`, the payload-level `save` flag and inline-melody
+classification — and on the first invalid field returns `{ok=false, reject}` (the coarse
+`TimerCmdResult::BadField`, wire parity) having staged nothing. On success the `Plan` carries
+**everything apply needs**: the staged table/member values, `durationSec`, `oneShot`, the
+parsed `action`, the dirty HA-attr-carrier set and `configInCommand` — so apply never re-reads
+the packet. Its `Context {savedMaxDuration, remoteApply}` injects the only two non-packet
+inputs (the saved `TIMER_MAX_DURATION` ceiling and the receiver-forced one-shot flag, mirroring
+`SyncEnvelope`'s `{ownId, follow}` discipline), so `classify` reads **no globals** and is
+host-tested in its own `[env:native_validate]` linking the descriptor-table family
+(`TimerSettings.cpp` + the codecs + `parseHMS`/`isValidAction`, relocated out of the singleton)
+and ArduinoJson, but **no singleton**. That isolation claim is deliberately weaker than the
+three siblings' "links nothing" — the validator *is* the descriptor tables, the contract it
+enforces. `TimerManager::parseCommand` keeps the **impure shell**: fill `Context`, `classify`,
+then on `ok` apply the `Plan` (one `PersistBatch`; the override capture/rebaseline that **stays
+in `TimerManager`** per ADR-0024; the HA-attr republish; the run-state broadcast). Only the
+validation **decision** leaves — the override **store** does not. See ADR-0025.
+
+**Apply keeps one ordering invariant.** `setDuration` re-clamps against the **global**
+`TIMER_MAX_DURATION`, not the staged ceiling, so applying a `Plan` **must** write the table
+rows (landing a raised `max_duration`) **before** `setDuration`, or a duration `classify`
+accepted against the new ceiling is silently clamped to the old one (the ADR-0001 addendum).
+The `Plan` is order-free data; the one constraint lives in apply.
+
+_Avoid_: calling the command plan a control surface (it is the validated *form* of one
+command, not a write path); putting any of the receiver's own state into `Context` beyond
+`{savedMaxDuration, remoteApply}` (the `SyncEnvelope` lesson — an unused gate field gets
+"wired up" wrong later); implying the override snapshot moved out (ADR-0024 keeps it in
+`TimerManager`); expecting `classify` to write anything (it stages only — the shell applies).
+
 ### One-shot command (`save:false`)
 
 A Timer command carrying the payload-level boolean **`save:false`** (PRD #99 / ADR-0017). Its config changes apply to the **current run only** and revert to the saved settings the moment the timer returns to Idle (via `reset()` or auto-clear, through the shared `returnToIdle()` seam), **writing nothing to flash**. `save` defaults to `true` (the legacy persist-everything behaviour); it is one **payload-level** flag covering *all* config keys in the payload, validated in the atomic-reject pass (a non-boolean `save` is `BadField`/400). A normal (`save:true`) config command arriving *during* an active one-shot run **rebaselines** — it commits the live config, including the prior one-shot values, as the new saved baseline and ends the override. The on-device **TIMER menu always persists** (it never emits `save:false`) — a documented parity note, not an ADR-0001 control-surface divergence (`save` is a wire-payload concept the menu has no payload for).
