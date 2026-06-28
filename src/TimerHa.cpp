@@ -78,7 +78,7 @@ static const char HAtimerSyncTargetsID[] PROGMEM   = {"%s_timer_sync_targets"};
 static const char HAtimerSyncTargetsIcon[] PROGMEM = {"mdi:target-account"};
 static const char HAtimerSyncTargetsName[] PROGMEM = {"Timer sync targets"};
 // Static option list, in TimerSyncTargetsOption order (Off=0, All=1). The select's
-// state index reflects sync_targets via timerSyncTargetsSelectIndex.
+// state index reflects sync_targets via timerSyncTargetsIndexForValue.
 static const char HAtimerSyncTargetsOptions[] PROGMEM = {"Off;All"};
 
 const TimerHaDescriptor TIMER_HA_DESCRIPTORS[TIMER_HA_DESCRIPTOR_COUNT] = {
@@ -93,16 +93,6 @@ const TimerHaDescriptor TIMER_HA_DESCRIPTORS[TIMER_HA_DESCRIPTOR_COUNT] = {
     {TimerHaEntity::SyncFollow,  "switch", HAtimerSyncFollowID,  HAtimerSyncFollowIcon,  HAtimerSyncFollowName,  nullptr,                   nullptr, nullptr},
     {TimerHaEntity::SyncTargets, "select", HAtimerSyncTargetsID, HAtimerSyncTargetsIcon, HAtimerSyncTargetsName, HAtimerSyncTargetsOptions, nullptr, nullptr},
 };
-
-int8_t timerSyncTargetsSelectIndex(const char *syncTargets)
-{
-    if (syncTargets == nullptr) return (int8_t)TimerSyncTargetsOption::Off;
-    if (syncTargets[0] == '\0') return (int8_t)TimerSyncTargetsOption::Off;   // "" -> Off
-    // Case-sensitive match on the canonical "all" wire spelling (parseSyncTargets
-    // accepts exactly "all"); any other non-empty value is a specific-ID CSV.
-    if (strcmp(syncTargets, "all") == 0) return (int8_t)TimerSyncTargetsOption::All;
-    return -1;   // specific-ID CSV -> unknown (HASelect: no option selected)
-}
 
 // --- Dynamic SyncTargets select (#112) ---------------------------------------
 // The select's options and id<->index mapping are derived at runtime from the
