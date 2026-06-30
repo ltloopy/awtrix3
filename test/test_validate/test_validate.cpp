@@ -295,6 +295,36 @@ void test_V24_unknown_key_ignored(void) {
     TEST_ASSERT_TRUE(classifyJson("{\"app_config_timeout\":4}").ok);
 }
 
+// V25 -- timerClock(Trimmed): drop the hours group when zero; most-significant field
+// unpadded, lower fields zero-padded. This is the timerFormatHMS spelling (#158).
+void test_V25_clock_trimmed(void) {
+    TEST_ASSERT_EQUAL_STRING("0:00",     timerClock(0,     ClockStyle::Trimmed).c_str());
+    TEST_ASSERT_EQUAL_STRING("0:45",     timerClock(45,    ClockStyle::Trimmed).c_str());  // sub-minute
+    TEST_ASSERT_EQUAL_STRING("59:59",    timerClock(3599,  ClockStyle::Trimmed).c_str());  // sub-hour
+    TEST_ASSERT_EQUAL_STRING("1:00:00",  timerClock(3600,  ClockStyle::Trimmed).c_str());  // >=1h
+    TEST_ASSERT_EQUAL_STRING("24:00:00", timerClock(86400, ClockStyle::Trimmed).c_str());  // 24h ceiling
+}
+
+// V26 -- timerClock(Padded): always zero-padded HH:MM:SS (menu / config-screen form).
+void test_V26_clock_padded(void) {
+    TEST_ASSERT_EQUAL_STRING("00:00:00", timerClock(0,     ClockStyle::Padded).c_str());
+    TEST_ASSERT_EQUAL_STRING("00:00:45", timerClock(45,    ClockStyle::Padded).c_str());  // sub-minute
+    TEST_ASSERT_EQUAL_STRING("00:59:59", timerClock(3599,  ClockStyle::Padded).c_str());  // sub-hour
+    TEST_ASSERT_EQUAL_STRING("01:00:00", timerClock(3600,  ClockStyle::Padded).c_str());  // >=1h
+    TEST_ASSERT_EQUAL_STRING("24:00:00", timerClock(86400, ClockStyle::Padded).c_str());  // 24h ceiling
+}
+
+// V27 -- timerClock(Compact): two segments, seconds dropped past the hour; M:SS (<1h),
+// H:MM (<10h), HH:MM (>=10h). The running-display form.
+void test_V27_clock_compact(void) {
+    TEST_ASSERT_EQUAL_STRING("0:00",  timerClock(0,     ClockStyle::Compact).c_str());
+    TEST_ASSERT_EQUAL_STRING("0:45",  timerClock(45,    ClockStyle::Compact).c_str());  // sub-minute
+    TEST_ASSERT_EQUAL_STRING("59:59", timerClock(3599,  ClockStyle::Compact).c_str());  // sub-hour
+    TEST_ASSERT_EQUAL_STRING("1:00",  timerClock(3600,  ClockStyle::Compact).c_str());  // >=1h, <10h
+    TEST_ASSERT_EQUAL_STRING("10:00", timerClock(36000, ClockStyle::Compact).c_str());  // >=10h, padded hour
+    TEST_ASSERT_EQUAL_STRING("24:00", timerClock(86400, ClockStyle::Compact).c_str());  // 24h ceiling
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_V1_valid_config_ok);
@@ -321,5 +351,8 @@ int main(int, char **) {
     RUN_TEST(test_V22_malformed_duration_rejected);
     RUN_TEST(test_V23_atomic_reject_with_paired_action);
     RUN_TEST(test_V24_unknown_key_ignored);
+    RUN_TEST(test_V25_clock_trimmed);
+    RUN_TEST(test_V26_clock_padded);
+    RUN_TEST(test_V27_clock_compact);
     return UNITY_END();
 }

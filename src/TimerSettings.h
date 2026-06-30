@@ -148,9 +148,20 @@ bool timerIsValidIconName(const String &name);
 bool timerParseBuzzerMode(const String &s, BuzzerMode &out);
 bool timerParseFinishedMode(const String &s, FinishedMode &out);
 
-// Trimmed clock string ("24:00:00" / "1:00:00" / "0:45"): drop the hours group when
-// zero; most-significant shown field unpadded, lower fields zero-padded. Pure math
-// behind TimerManager_::formatHMS, reused by the max_duration HA formatter. No globals.
+// The one seconds->clock renderer (#153/#158). Three deliberate spellings the timer
+// surfaces speak, collapsed into one function:
+//   Trimmed  drop the hours group when zero; most-significant field unpadded, lower
+//            fields zero-padded ("24:00:00" / "1:00:00" / "0:45"). HA/config-read form.
+//   Padded   always zero-padded HH:MM:SS ("24:00:00" / "01:00:00" / "00:00:45"). Menu
+//            / config-screen form.
+//   Compact  two segments, seconds dropped past the hour mark: M:SS (<1h), H:MM (<10h),
+//            HH:MM (>=10h). The running-display form. No globals.
+enum class ClockStyle { Trimmed, Padded, Compact };
+String timerClock(uint32_t seconds, ClockStyle style);
+
+// Trimmed clock string ("24:00:00" / "1:00:00" / "0:45"). Thin alias for
+// timerClock(seconds, ClockStyle::Trimmed); see TimerManager_::formatHMS and the
+// max_duration HA formatter. No globals.
 String timerFormatHMS(uint32_t seconds);
 
 // ---------------------------------------------------------------------------
