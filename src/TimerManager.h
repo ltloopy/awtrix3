@@ -20,6 +20,20 @@ enum class TimerCmdResult : uint8_t { Ok = 0, BadJson = 1, BadField = 2, Disable
 // here so the PersistBatch guard below can perform the table-half commit).
 void saveSettings();
 
+// The member-backed config half (B1) as one value, mirroring TIMER_MEMBER_CONFIG_DESCS
+// ({buzzer, finished, the four icon_<state> names}) -- the singleton fields that are NOT
+// driven by the generic TIMER_SETTINGS_DESCS table. It is exactly the set the one-shot
+// override snapshots and SavedConfigScope swaps, so "swap == copy this struct" holds.
+// Deliberately excludes durationSec (run-state) and the resolved melody RAM
+// (endRtttl/tickRtttl -- the saved melody NAME is a table key); those revert with the
+// override but are not config the observation carriers project as "saved". See ADR-0024.
+struct TimerMemberConfig
+{
+    BuzzerMode   buzzer   = BuzzerMode::End;
+    FinishedMode finished = FinishedMode::AutoClear;
+    String       iconIdle, iconRunning, iconPaused, iconFinished;
+};
+
 class TimerManager_
 {
 private:
@@ -91,16 +105,21 @@ private:
     // an override is active no NVS write, no config broadcast and no HA config-
     // attribute republish occur. A normal (save:true) config command mid-override
     // promotes the live config to the new saved baseline and ends the override.
-    bool         _overrideActive = false;
-    TcValue      _snapTable[TIMER_SETTINGS_DESC_CAP];   // Family A (inSnapshot rows), generic capture
-    BuzzerMode   _snapBuzzer     = BuzzerMode::End;
-    FinishedMode _snapFinished   = FinishedMode::AutoClear;
-    String       _snapIconIdle, _snapIconRunning, _snapIconPaused, _snapIconFinished;
-    uint32_t     _snapDuration   = 300;
-    String       _snapEndRtttl, _snapTickRtttl;
+    bool             _overrideActive = false;
+    TcValue          _snapTable[TIMER_SETTINGS_DESC_CAP];   // Family A (inSnapshot rows), generic capture
+    TimerMemberConfig _snapMember;                          // Family B (member-backed half)
+    uint32_t         _snapDuration   = 300;
+    String           _snapEndRtttl, _snapTickRtttl;
     void captureSnapshot();   // record the saved config (both tables + duration + melody RAM)
     void restoreSnapshot();   // write the snapshot back (no publish/persist side effects)
     void returnToIdle();      // revert seam shared by reset() and the tick auto-clear transition
+
+    // The only two places that name the member-backed config fields: read the live
+    // singleton state into a value (snapshot), and write a value back RAW -- no persist,
+    // no publish, no broadcast -- as the override revert + the honest-observation swap
+    // both require. Used by captureSnapshot/restoreSnapshot and SavedConfigScope.
+    TimerMemberConfig snapshotMemberConfig() const;
+    void              restoreMemberConfig(const TimerMemberConfig &c);
 
     // Honest observation carriers (issue #101). RAII: while an override is active,
     // present the SAVED config block (table inSnapshot rows + member-backed half) in
@@ -117,12 +136,10 @@ private:
         SavedConfigScope(const SavedConfigScope &) = delete;
         SavedConfigScope &operator=(const SavedConfigScope &) = delete;
     private:
-        TimerManager_ &tm;
-        bool           active;
-        TcValue        effTable[TIMER_SETTINGS_DESC_CAP];
-        BuzzerMode     effBuzzer     = BuzzerMode::End;
-        FinishedMode   effFinished   = FinishedMode::AutoClear;
-        String         effIconIdle, effIconRunning, effIconPaused, effIconFinished;
+        TimerManager_    &tm;
+        bool              active;
+        TcValue           effTable[TIMER_SETTINGS_DESC_CAP];
+        TimerMemberConfig effMember;   // the effective (one-shot) member half, restored on scope exit
     };
 
     void buildConfigSnapshot(JsonDocument &doc) const;   // config keys only; no action/duration/sync_*

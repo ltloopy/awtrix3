@@ -1,6 +1,16 @@
 # The one-shot override store stays in TimerManager (no ConfigSnapshot extraction)
 
-Status: accepted
+Status: accepted (amended 2026-06-29)
+
+> **Amendment (2026-06-29, branch `refactor-timer-member-config`).** The headline decision
+> stands unchanged — **no `ConfigSnapshot` module is extracted; the override store stays
+> private to `TimerManager`.** One *sub*-decision was revisited and reversed: the
+> "[snapshot DTO middle ground](#reconsidered-and-accepted-snapshot-dto--captureapply-helpers)"
+> below, rejected as a "mirage" in the original ADR, was reconsidered in the form the original
+> reasoning did **not** picture — a DTO **paired with a capture/apply helper method pair** —
+> and accepted. The "[accepted resting state](#accepted-resting-state)" and consequences are
+> updated to match. The two larger rejections (extract `ConfigSnapshot`; unify *live* config
+> into a struct) are **untouched and still rejected**.
 
 This ADR records a **rejected** extraction. It is the fourth and final cut considered in
 the #131 deepening trajectory, after [ADR-0021](0021-peer-registry-extraction.md)
@@ -40,9 +50,11 @@ makes it deep, or to decline.
 ## Decision
 
 **Keep the one-shot override store in `TimerManager`.** No `ConfigSnapshot` module is created.
-The grilling found no seam that makes the extraction deep, and the extraction's stated payoff
-(host-testability without the full fixture) is unreachable. Three alternatives were considered
-and each is rejected for a specific reason:
+The grilling found no seam that makes the *extraction* deep, and the extraction's stated payoff
+(host-testability without the full fixture) is unreachable. Three alternatives were considered;
+the two structural ones (extract a module; unify the *live* config into a struct) are rejected
+below, and the third (a snapshot DTO) was rejected as a bare type but **later accepted in its
+DTO-plus-helpers form** (see the 2026-06-29 amendment):
 
 ### Rejected: extract `ConfigSnapshot` as-is
 
@@ -79,23 +91,56 @@ effective-stash) become value semantics. This is rejected on cost-vs-benefit:
 A large, risky, half-covering refactor that fights an existing ADR, on a responsibility with
 no cited bug or test pain, is not justified.
 
-### Rejected: a snapshot DTO as a middle ground
+### Reconsidered and accepted: snapshot DTO + capture/apply helpers
 
-A tempting half-measure is to leave config as scattered members but introduce a snapshot
-**DTO** (`struct { BuzzerMode buzzer; FinishedMode finished; String icon[4]; uint32_t
-duration; String end, tick; }`) so capture, restore and the scope-stash share one field list.
-This is a mirage: without also making the *live* config a struct (the ~100-site refactor
-above), each copy site still assigns field-by-field (`_snap.buzzer = buzzerMode`), so the DTO
-merely **relocates** the three 9-field lists rather than collapsing them to `_snap = _live`.
-It adds a type without removing the drift risk it appears to fix, so it is not worth the churn.
+> *Originally rejected; reversed by the 2026-06-29 amendment.*
+
+The original rejection pictured a **bare** DTO — a passive `struct` that capture, restore and
+the scope-stash each still fill **field-by-field at the call site** (`_snap.buzzer =
+buzzerMode`). In that form it is indeed a mirage: it relocates the field lists rather than
+removing them, since the live config is not itself a struct (that is the ~100-site refactor
+above, still rejected).
+
+What the original reasoning did **not** picture is the DTO paired with a **capture/apply helper
+method pair** on `TimerManager`:
+
+```cpp
+struct TimerMemberConfig { BuzzerMode buzzer; FinishedMode finished;
+                           String iconIdle, iconRunning, iconPaused, iconFinished; };
+TimerMemberConfig snapshotMemberConfig() const;            // the ONE read  of the field list
+void              restoreMemberConfig(const TimerMemberConfig &);  // the ONE raw write
+```
+
+With the pair in place the **call sites carry no field names at all** — `captureSnapshot`,
+`restoreSnapshot` and both ends of `SavedConfigScope` reduce to `_snapMember =
+snapshotMemberConfig()` / `restoreMemberConfig(_snapMember)` / `effMember =
+snapshotMemberConfig()` / `restoreMemberConfig(effMember)`. The Family-B field list, formerly
+enumerated across **five scattered sites** (capture, restore, the scope ctor's effective-stash
+*and* its saved-present, and the scope dtor's restore), now lives in exactly **three
+co-located, symmetric places**: the struct declaration, the one reader, the one writer. Adding
+a member-backed config key is a three-line edit in one neighbourhood instead of a five-site
+lockstep change, and the call sites are structurally **incapable of drifting**.
+
+This is strictly more than the bare DTO the rejection dismissed, and it is **not** the
+~100-site refactor: the *live* config stays as scattered members (so the side-effecting setters,
+the `TIMER_MEMBER_CONFIG_DESCS` hooks and the duration/melody-RAM exclusions are all
+untouched), and the store still does not reach the `_snap = _live` ideal — the helpers map the
+fields, the call sites no longer do. The genuinely intricate override logic (the
+`_overrideActive` gate, the mid-run rebaseline, the honest-carrier RAII swap) stays welded to
+`parseCommand` exactly as before; this changes only how the data copy is spelled. The win is a
+real, bounded drift reduction at near-zero risk — fully covered by the existing
+`test_OS*`/`test_HC*` suites, which pass unchanged.
 
 ### Accepted resting state
 
-The current structure is the accepted endpoint: **Family A snapshotted generically through the
-settings table** (already deep, already extracted into `TimerSettings.cpp`) and **Family B
-copied member-by-member** inside `TimerManager`. The triple member-copy (capture / restore /
-`SavedConfigScope` stash) is an acknowledged minor cost, retained because the only thing that
-would remove it — a unified live-config struct — is the rejected ~100-site refactor.
+The accepted endpoint is now: **Family A snapshotted generically through the settings table**
+(deep, in `TimerSettings.cpp`) and **Family B carried as a `TimerMemberConfig` value through a
+`snapshotMemberConfig`/`restoreMemberConfig` helper pair** inside `TimerManager`. The former
+triple member-copy is gone; the field list has one home (the struct) and one read/write pair.
+The store, the helpers, the `SavedConfigScope` swap and the `returnToIdle` seam all stay
+private to `TimerManager` — no module, no new file, no API/NVS/wire change. Run-state
+`durationSec` and the resolved melody RAM (`endRtttl`/`tickRtttl`) remain plain `_snap*`
+members, deliberately outside the value type (run-state, not the config the carriers project).
 
 ## Consequences
 
