@@ -20,12 +20,7 @@ namespace
 
 void TimerViewModel::formatTimerDisplay(uint32_t seconds, char *out, size_t outLen)
 {
-    if (seconds < 3600)
-        snprintf(out, outLen, "%u:%02u", (unsigned)(seconds / 60), (unsigned)(seconds % 60));
-    else if (seconds < 36000)
-        snprintf(out, outLen, "%u:%02u", (unsigned)(seconds / 3600), (unsigned)((seconds % 3600) / 60));
-    else
-        snprintf(out, outLen, "%02u:%02u", (unsigned)(seconds / 3600), (unsigned)((seconds % 3600) / 60));
+    snprintf(out, outLen, "%s", timerClock(seconds, ClockStyle::Compact).c_str());
 }
 
 TimerView TimerViewModel::compute(const TimerSnapshot &s)
