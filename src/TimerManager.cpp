@@ -50,33 +50,43 @@ void TimerManager_::loadMelodiesCached()
 // One-shot override (PRD #99 / issue #100). captureSnapshot records the SAVED config
 // before a save:false command applies on top of it; restoreSnapshot writes it back
 // when the timer returns to Idle. The table half (Family A inSnapshot rows) is captured
-// generically over TIMER_SETTINGS_DESCS; the member-backed half (Family B) plus the
-// run-state duration and the resolved melody RAM are TimerManager's own members, so they
-// are captured/restored directly. Restore writes members directly (no setter), so it
-// triggers no persist/publish side effects — carriers reported saved values throughout.
+// generically over TIMER_SETTINGS_DESCS; the member-backed half (Family B) is captured as
+// one TimerMemberConfig value (the two helpers below are the single home of its field
+// list); the run-state duration and the resolved melody RAM are TimerManager's own members
+// captured directly. Restore writes members directly (no setter), so it triggers no
+// persist/publish side effects — carriers reported saved values throughout.
+// The single home of the member-half field list: read live -> value.
+TimerMemberConfig TimerManager_::snapshotMemberConfig() const
+{
+    return TimerMemberConfig{buzzerMode, finishedMode,
+                             iconIdle, iconRunning, iconPaused, iconFinished};
+}
+
+// ...and value -> live, RAW: no persist, no publish, no broadcast. The override revert
+// and the honest-observation swap both need exactly this side-effect-free write.
+void TimerManager_::restoreMemberConfig(const TimerMemberConfig &c)
+{
+    buzzerMode   = c.buzzer;
+    finishedMode = c.finished;
+    iconIdle     = c.iconIdle;
+    iconRunning  = c.iconRunning;
+    iconPaused   = c.iconPaused;
+    iconFinished = c.iconFinished;
+}
+
 void TimerManager_::captureSnapshot()
 {
     timerSettingsCaptureSnapshot(_snapTable);
-    _snapBuzzer       = buzzerMode;
-    _snapFinished     = finishedMode;
-    _snapIconIdle     = iconIdle;
-    _snapIconRunning  = iconRunning;
-    _snapIconPaused   = iconPaused;
-    _snapIconFinished = iconFinished;
-    _snapDuration     = durationSec;
-    _snapEndRtttl     = endRtttl;
-    _snapTickRtttl    = tickRtttl;
+    _snapMember    = snapshotMemberConfig();
+    _snapDuration  = durationSec;   // run-state: reverts with the override, outside the member half
+    _snapEndRtttl  = endRtttl;      // resolved melody RAM: ditto (the saved NAME is a table key)
+    _snapTickRtttl = tickRtttl;
 }
 
 void TimerManager_::restoreSnapshot()
 {
     timerSettingsRestoreSnapshot(_snapTable);
-    buzzerMode    = _snapBuzzer;
-    finishedMode  = _snapFinished;
-    iconIdle      = _snapIconIdle;
-    iconRunning   = _snapIconRunning;
-    iconPaused    = _snapIconPaused;
-    iconFinished  = _snapIconFinished;
+    restoreMemberConfig(_snapMember);
     durationSec   = _snapDuration;
     endRtttl      = _snapEndRtttl;
     tickRtttl     = _snapTickRtttl;
@@ -104,32 +114,17 @@ TimerManager_::SavedConfigScope::SavedConfigScope(const TimerManager_ &t)
     if (!active) return;
     // Stash the effective (one-shot) config block, then present the saved config.
     timerSettingsCaptureSnapshot(effTable);
-    effBuzzer       = tm.buzzerMode;
-    effFinished     = tm.finishedMode;
-    effIconIdle     = tm.iconIdle;
-    effIconRunning  = tm.iconRunning;
-    effIconPaused   = tm.iconPaused;
-    effIconFinished = tm.iconFinished;
+    effMember = tm.snapshotMemberConfig();
 
     timerSettingsRestoreSnapshot(tm._snapTable);
-    tm.buzzerMode   = tm._snapBuzzer;
-    tm.finishedMode = tm._snapFinished;
-    tm.iconIdle     = tm._snapIconIdle;
-    tm.iconRunning  = tm._snapIconRunning;
-    tm.iconPaused   = tm._snapIconPaused;
-    tm.iconFinished = tm._snapIconFinished;
+    tm.restoreMemberConfig(tm._snapMember);
 }
 
 TimerManager_::SavedConfigScope::~SavedConfigScope()
 {
     if (!active) return;
     timerSettingsRestoreSnapshot(effTable);
-    tm.buzzerMode   = effBuzzer;
-    tm.finishedMode = effFinished;
-    tm.iconIdle     = effIconIdle;
-    tm.iconRunning  = effIconRunning;
-    tm.iconPaused   = effIconPaused;
-    tm.iconFinished = effIconFinished;
+    tm.restoreMemberConfig(effMember);
 }
 
 void TimerManager_::setup()
