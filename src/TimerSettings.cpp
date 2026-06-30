@@ -1,12 +1,33 @@
 #include "TimerSettings.h"
 
 #include <stdlib.h>
+#include <stdio.h>          // snprintf (timerFormatHMS, the bar-color formatters)
 
-#include "Globals.h"
-#include "TimerManager.h"   // TimerManager_::isValidIconName (shared Name char-rule)
-#include "MQTTManager.h"    // the (topic, payload) wire seam the publish hooks emit on
-#include "TimerHa.h"        // TimerHaEntity slots for the hooks' canonical topics
-#include <Preferences.h>
+// The descriptor-table family is the PURE Timer validation surface (#143): it links
+// against ArduinoJson + the enum codec tables ONLY -- no Globals.h (FastLED), no
+// TimerManager singleton, no MQTTManager, no Preferences. That dependency-light link
+// is what lets TimerCommand::classify be host-tested in [env:native_validate] with no
+// stubs. The impure half -- the member-config apply/emit/publish hooks, the NVS
+// round-trip, and the full-config dump, all of which DO touch the singleton / MQTT /
+// Preferences -- lives in TimerSettingsApply.cpp, linked only in device + full-suite
+// builds. The two share this header.
+//
+// The 13 persisted timer-setting globals are DEFINED here (moved out of Globals.cpp;
+// Globals.h keeps the extern decls so every other caller is source-unchanged) so the
+// TIMER_SETTINGS_DESCS storage pointers resolve without dragging in Globals.cpp.
+uint32_t TIMER_MAX_DURATION      = 86400;
+uint16_t TIMER_PUBLISH_INTERVAL  = 1;
+uint16_t TIMER_FINISHED_HOLD     = 10;
+uint16_t TIMER_REALERT_INTERVAL  = 15;
+uint16_t TIMER_COUNTDOWN_SECONDS = 3;
+String   TIMER_MELODY_TICK       = "timer_tick";
+String   TIMER_MELODY_END        = "timer_end";
+bool     TIMER_BAR_ENABLED       = true;
+bool     TIMER_ICON_ENABLED      = true;
+uint32_t TIMER_BAR_COLOR         = 0;
+uint32_t TIMER_BAR_BG_COLOR      = 0;     // 0 = black = no track (literal off; see ADR-0020)
+bool     TIMER_SYNC_FOLLOW       = true;  // fresh clock is a follower; standalone is opt-out (#124)
+String   TIMER_SYNC_TARGETS      = "";
 
 namespace
 {
@@ -66,42 +87,6 @@ namespace
         return false;
     }
 
-    // bar_color HA-attribute formatter (PRD #57 / issue #59): renders the stored
-    // 0xRRGGBB int as the human string HA shows -- "default" when 0 (follow the
-    // text color, ADR-0004), else uppercase "#RRGGBB" (matching DisplayManager's
-    // "#%02X%02X%02X" spelling). Deliberately different from the raw-int form the
-    // config snapshot emits via timerSettingEmitValue, which is why it needs a hook.
-    void formatBarColor(const TimerSettingDesc &d, JsonDocument &doc)
-    {
-        uint32_t v = *static_cast<uint32_t *>(d.storage);
-        if (v == 0)
-        {
-            doc[d.cmdKey] = "default";
-            return;
-        }
-        char buf[8];
-        snprintf(buf, sizeof(buf), "#%06X", (unsigned)(v & 0xFFFFFFu));
-        doc[d.cmdKey] = buf;
-    }
-
-    // bar_bg_color HA-attribute formatter (ADR-0020): the background track's color.
-    // Mirrors formatBarColor's structure but with the background's literal-off
-    // semantics -- 0 means BLACK = no track (LEDs off), NOT the foreground's
-    // "follow text color" sentinel -- so 0 renders as "none" (deliberately distinct
-    // from bar_color's "default"); any other value renders uppercase "#RRGGBB".
-    void formatBarBgColor(const TimerSettingDesc &d, JsonDocument &doc)
-    {
-        uint32_t v = *static_cast<uint32_t *>(d.storage);
-        if (v == 0)
-        {
-            doc[d.cmdKey] = "none";
-            return;
-        }
-        char buf[8];
-        snprintf(buf, sizeof(buf), "#%06X", (unsigned)(v & 0xFFFFFFu));
-        doc[d.cmdKey] = buf;
-    }
-
     // max_duration carrier-native HA-attribute formatter (PRD #66 / issue #68):
     // renders the stored cap (raw seconds, a U32) as the trimmed H:MM:SS clock
     // string the Duration text entity's OWN state speaks, by reusing the exact
@@ -113,7 +98,7 @@ namespace
     void formatMaxDurationHMS(const TimerSettingDesc &d, JsonDocument &doc)
     {
         uint32_t v = *static_cast<uint32_t *>(d.storage);
-        doc[d.cmdKey] = TimerManager_::formatHMS(v);
+        doc[d.cmdKey] = timerFormatHMS(v);   // family-local pure formatter (#143)
     }
 
     // sync_targets: strict string type, then the comma-list rule above.
@@ -125,6 +110,30 @@ namespace
         out.str = s;
         return true;
     }
+}
+
+// bar_color / bar_bg_color HA-attribute formatters (PRD #57 / issue #59, ADR-0020).
+// External linkage (not file-local) so both the attribute-group table here and the
+// HTTP full-config dump in TimerSettingsApply.cpp render the stored 0xRRGGBB int the
+// same way (#143) -- they cannot disagree about the string form. bar_color's off
+// sentinel (0) is "default" (follow text color, ADR-0004); bar_bg_color's off is
+// "none" (black = no track, literal off); any other value is uppercase "#RRGGBB".
+void timerFormatBarColor(const TimerSettingDesc &d, JsonDocument &doc)
+{
+    uint32_t v = *static_cast<uint32_t *>(d.storage);
+    if (v == 0) { doc[d.cmdKey] = "default"; return; }
+    char buf[8];
+    snprintf(buf, sizeof(buf), "#%06X", (unsigned)(v & 0xFFFFFFu));
+    doc[d.cmdKey] = buf;
+}
+
+void timerFormatBarBgColor(const TimerSettingDesc &d, JsonDocument &doc)
+{
+    uint32_t v = *static_cast<uint32_t *>(d.storage);
+    if (v == 0) { doc[d.cmdKey] = "none"; return; }
+    char buf[8];
+    snprintf(buf, sizeof(buf), "#%06X", (unsigned)(v & 0xFFFFFFu));
+    doc[d.cmdKey] = buf;
 }
 
 // One row per persisted value-config Timer key. The two inSnapshot=false rows are
@@ -179,7 +188,7 @@ bool timerSettingParse(const TimerSettingDesc &d, JsonVariantConst v, TcValue &o
             // coerce time (matches legacy melody semantics). Mirrors the legacy path,
             // which coerced via as<String>() without a strict pre-type-check.
             String s = v.as<String>();
-            if (!TimerManager_::isValidIconName(s)) return false;
+            if (!timerIsValidIconName(s)) return false;
             out.str = (s.length() == 0) ? String(d.dfltStr) : s;
             return true;
         }
@@ -226,35 +235,9 @@ bool timerSettingStore(const TimerSettingDesc &d, const TcValue &v)
     return false;
 }
 
-void timerSettingsLoadNvs(Preferences &prefs)
-{
-    for (size_t i = 0; i < TIMER_SETTINGS_DESC_COUNT; ++i)
-    {
-        const TimerSettingDesc &d = TIMER_SETTINGS_DESCS[i];
-        switch (d.type)
-        {
-            case TcType::U16:  *static_cast<uint16_t *>(d.storage) = (uint16_t)prefs.getUInt(d.nvsKey, d.dfltNum); break;
-            case TcType::U32:  *static_cast<uint32_t *>(d.storage) = prefs.getUInt(d.nvsKey, d.dfltNum);           break;
-            case TcType::Bool: *static_cast<bool *>    (d.storage) = prefs.getBool(d.nvsKey, d.dfltNum != 0);      break;
-            case TcType::Str:  *static_cast<String *>  (d.storage) = prefs.getString(d.nvsKey, d.dfltStr);         break;
-        }
-    }
-}
-
-void timerSettingsSaveNvs(Preferences &prefs)
-{
-    for (size_t i = 0; i < TIMER_SETTINGS_DESC_COUNT; ++i)
-    {
-        const TimerSettingDesc &d = TIMER_SETTINGS_DESCS[i];
-        switch (d.type)
-        {
-            case TcType::U16:  prefs.putUInt(d.nvsKey, *static_cast<uint16_t *>(d.storage)); break;
-            case TcType::U32:  prefs.putUInt(d.nvsKey, *static_cast<uint32_t *>(d.storage)); break;
-            case TcType::Bool: prefs.putBool(d.nvsKey, *static_cast<bool *>    (d.storage)); break;
-            case TcType::Str:  prefs.putString(d.nvsKey, *static_cast<String *>(d.storage)); break;
-        }
-    }
-}
+// timerSettingsLoadNvs / timerSettingsSaveNvs (Preferences round-trip) moved to the
+// impure TimerSettingsApply.cpp (#143): they touch Preferences, which this pure TU
+// deliberately does not link.
 
 void timerSettingsLoadDevJson(JsonObjectConst obj)
 {
@@ -431,6 +414,53 @@ bool timerIsValidAction(const String &s)
     return a == "start" || a == "pause" || a == "reset";
 }
 
+// Relocated out of TimerManager's statics (#143) so the command validator links the
+// table family, not the singleton. Behaviour-identical to the former statics;
+// TimerManager keeps thin forwarders (TimerManager_::isValidIconName / parseBuzzerMode
+// / parseFinishedMode / formatHMS).
+
+bool timerIsValidIconName(const String &name)
+{
+    // Empty is valid (clears the icon). Otherwise [A-Za-z0-9_-], length cap 32.
+    if (name.length() == 0) return true;
+    if (name.length() > 32) return false;
+    for (size_t i = 0; i < name.length(); ++i)
+    {
+        char c = name[i];
+        bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+               || (c >= '0' && c <= '9') || c == '_' || c == '-';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+bool timerParseBuzzerMode(const String &s, BuzzerMode &out)
+{
+    uint8_t idx;
+    if (!timerEnumParse(TIMER_BUZZER_CODEC, TIMER_BUZZER_CODEC_COUNT, s, idx)) return false;
+    out = (BuzzerMode)idx;
+    return true;
+}
+
+bool timerParseFinishedMode(const String &s, FinishedMode &out)
+{
+    uint8_t idx;
+    if (!timerEnumParse(TIMER_FINISHED_CODEC, TIMER_FINISHED_CODEC_COUNT, s, idx)) return false;
+    out = (FinishedMode)idx;
+    return true;
+}
+
+String timerFormatHMS(uint32_t seconds)
+{
+    uint32_t h = seconds / 3600;
+    uint32_t m = (seconds % 3600) / 60;
+    uint32_t s = seconds % 60;
+    char buf[16];
+    if (h > 0) snprintf(buf, sizeof(buf), "%u:%02u:%02u", (unsigned)h, (unsigned)m, (unsigned)s);
+    else       snprintf(buf, sizeof(buf), "%u:%02u",                 (unsigned)m, (unsigned)s);
+    return String(buf);
+}
+
 // ---------------------------------------------------------------------------
 // HA attribute-group projection (PRD #57 / issues #58, #59). The buzzer + finished
 // HASelects were lit up first (#58); #59 extended the JSON-attributes opt-in to
@@ -458,8 +488,8 @@ const TimerAttrGroupDesc TIMER_ATTR_GROUP_DESCS[] = {
     {TimerHaEntity::State,     "remaining_publish_interval", nullptr},
     {TimerHaEntity::State,     "icon_enabled",               nullptr},
     {TimerHaEntity::State,     "bar_enabled",                nullptr},
-    {TimerHaEntity::State,     "bar_color",                  formatBarColor},
-    {TimerHaEntity::State,     "bar_bg_color",               formatBarBgColor},
+    {TimerHaEntity::State,     "bar_color",                  timerFormatBarColor},
+    {TimerHaEntity::State,     "bar_bg_color",               timerFormatBarBgColor},
     {TimerHaEntity::State,     "sync_follow",                nullptr},
     {TimerHaEntity::State,     "sync_targets",               nullptr},
 };
@@ -481,156 +511,57 @@ void timerBuildAttributeGroup(TimerHaEntity carrier, JsonDocument &doc)
 }
 
 // ===========================================================================
-// Member-backed config half (B1) -- the second table of the config block.
-// Each hook routes through TimerManager's existing public setters/getters; the
-// enum rows stage the enum cast in TcValue::num, the icon rows stage the name in
-// TcValue::str (validate is pure -- no global is touched until apply).
+// Member-backed config half (B1) -- PURE validation projection (#143).
+// The validate predicates + the parallel {cmdKey, validate} table
+// (TIMER_MEMBER_VALIDATORS) that TimerCommand::classify uses live HERE, with no
+// singleton/MQTT dependency. The impure half -- the apply/emit/publish hooks, the
+// full TIMER_MEMBER_CONFIG_DESCS table, and its snapshot/publish helpers -- lives in
+// TimerSettingsApply.cpp (they route through TimerManager's setters and the MQTT
+// seam). Both tables reference the SAME validate function pointers below, so a drift
+// guard test pins them row-for-row: they cannot disagree about a member key.
 // ===========================================================================
-namespace
+bool timerMemValidateBuzzer(JsonVariantConst v, TcValue &out)
 {
-    // -- buzzer --
-    bool memValidateBuzzer(JsonVariantConst v, TcValue &out)
-    {
-        BuzzerMode m;
-        if (!TimerManager_::parseBuzzerMode(v.as<String>(), m)) return false;
-        out.num = (uint32_t)m;
-        return true;
-    }
-    void memApplyBuzzer(const TcValue &v) { TimerManager.setBuzzerMode((BuzzerMode)v.num); }
-    void memEmitBuzzer (JsonDocument &doc) { doc["buzzer"] = TimerManager.buzzerModeString(); }
-    // Publish hook (issue #33): the live value onto the wire seam, payload the
-    // per-enum codec's canonical `wire` string -- never the numeric index, and
-    // deliberately not the HASelect `ha` label the retired setState path sent.
-    void memPublishBuzzer()
-    {
-        MQTTManager.publishTimerWire(MQTTManager.timerWireTopic(TimerHaEntity::Buzzer).c_str(),
-                                     TimerManager.buzzerModeString());
-    }
-
-    // -- finished --
-    bool memValidateFinished(JsonVariantConst v, TcValue &out)
-    {
-        FinishedMode m;
-        if (!TimerManager_::parseFinishedMode(v.as<String>(), m)) return false;
-        out.num = (uint32_t)m;
-        return true;
-    }
-    void memApplyFinished(const TcValue &v) { TimerManager.setFinishedMode((FinishedMode)v.num); }
-    void memEmitFinished (JsonDocument &doc) { doc["finished"] = TimerManager.finishedModeString(); }
-    // Publish hook: see memPublishBuzzer.
-    void memPublishFinished()
-    {
-        MQTTManager.publishTimerWire(MQTTManager.timerWireTopic(TimerHaEntity::Finished).c_str(),
-                                     TimerManager.finishedModeString());
-    }
-
-    // -- icon_<state> (shared validate; per-state apply/emit) --
-    bool memValidateIcon(JsonVariantConst v, TcValue &out)
-    {
-        String s = v.as<String>();
-        if (!TimerManager_::isValidIconName(s)) return false;
-        out.str = s;
-        return true;
-    }
-    void memApplyIconIdle    (const TcValue &v) { TimerManager.setIconIdle    (v.str); }
-    void memApplyIconRunning (const TcValue &v) { TimerManager.setIconRunning (v.str); }
-    void memApplyIconPaused  (const TcValue &v) { TimerManager.setIconPaused  (v.str); }
-    void memApplyIconFinished(const TcValue &v) { TimerManager.setIconFinished(v.str); }
-    void memEmitIconIdle    (JsonDocument &doc) { doc["icon_idle"]     = TimerManager.getIconIdle(); }
-    void memEmitIconRunning (JsonDocument &doc) { doc["icon_running"]  = TimerManager.getIconRunning(); }
-    void memEmitIconPaused  (JsonDocument &doc) { doc["icon_paused"]   = TimerManager.getIconPaused(); }
-    void memEmitIconFinished(JsonDocument &doc) { doc["icon_finished"] = TimerManager.getIconFinished(); }
-    // Publish hook, shared by all four icon rows (issue #34): the icon keys have
-    // ONE wire artifact — the aggregate four-state JSON on the plain
-    // {MQTT_PREFIX}/timer/icons topic (not an HA entity data topic), payload
-    // byte-identical to the retired MQTTManager::publishTimerIcons composer.
-    void memPublishIcons()
-    {
-        DynamicJsonDocument doc(256);
-        doc["idle"]     = TimerManager.getIconIdle();
-        doc["running"]  = TimerManager.getIconRunning();
-        doc["paused"]   = TimerManager.getIconPaused();
-        doc["finished"] = TimerManager.getIconFinished();
-        String payload;
-        serializeJson(doc, payload);
-        MQTTManager.publishTimerWire(MQTTManager.timerIconsTopic().c_str(), payload.c_str());
-    }
+    BuzzerMode m;
+    if (!timerParseBuzzerMode(v.as<String>(), m)) return false;
+    out.num = (uint32_t)m;
+    return true;
 }
 
-const TimerMemberConfigDesc TIMER_MEMBER_CONFIG_DESCS[] = {
-    {"buzzer",        memValidateBuzzer,   memApplyBuzzer,        memEmitBuzzer,        memPublishBuzzer},
-    {"finished",      memValidateFinished, memApplyFinished,      memEmitFinished,      memPublishFinished},
-    {"icon_idle",     memValidateIcon,     memApplyIconIdle,      memEmitIconIdle,      memPublishIcons},
-    {"icon_running",  memValidateIcon,     memApplyIconRunning,   memEmitIconRunning,   memPublishIcons},
-    {"icon_paused",   memValidateIcon,     memApplyIconPaused,    memEmitIconPaused,    memPublishIcons},
-    {"icon_finished", memValidateIcon,     memApplyIconFinished,  memEmitIconFinished,  memPublishIcons},
+bool timerMemValidateFinished(JsonVariantConst v, TcValue &out)
+{
+    FinishedMode m;
+    if (!timerParseFinishedMode(v.as<String>(), m)) return false;
+    out.num = (uint32_t)m;
+    return true;
+}
+
+bool timerMemValidateIcon(JsonVariantConst v, TcValue &out)
+{
+    String s = v.as<String>();
+    if (!timerIsValidIconName(s)) return false;
+    out.str = s;
+    return true;
+}
+
+const TimerMemberValidatorDesc TIMER_MEMBER_VALIDATORS[] = {
+    {"buzzer",        timerMemValidateBuzzer},
+    {"finished",      timerMemValidateFinished},
+    {"icon_idle",     timerMemValidateIcon},
+    {"icon_running",  timerMemValidateIcon},
+    {"icon_paused",   timerMemValidateIcon},
+    {"icon_finished", timerMemValidateIcon},
 };
 
-const size_t TIMER_MEMBER_CONFIG_DESC_COUNT =
-    sizeof(TIMER_MEMBER_CONFIG_DESCS) / sizeof(TIMER_MEMBER_CONFIG_DESCS[0]);
+const size_t TIMER_MEMBER_VALIDATOR_COUNT =
+    sizeof(TIMER_MEMBER_VALIDATORS) / sizeof(TIMER_MEMBER_VALIDATORS[0]);
 
-void timerMemberConfigBuildSnapshot(JsonDocument &doc)
-{
-    for (size_t i = 0; i < TIMER_MEMBER_CONFIG_DESC_COUNT; ++i)
-        TIMER_MEMBER_CONFIG_DESCS[i].emit(doc);
-}
+static_assert(sizeof(TIMER_MEMBER_VALIDATORS) / sizeof(TIMER_MEMBER_VALIDATORS[0]) == TIMER_MEMBER_CONFIG_DESC_CAP,
+              "TIMER_MEMBER_CONFIG_DESC_CAP must equal the member-config row count");
 
 bool timerDocTouchesMemberConfig(const JsonDocument &doc)
 {
-    for (size_t i = 0; i < TIMER_MEMBER_CONFIG_DESC_COUNT; ++i)
-        if (doc.containsKey(TIMER_MEMBER_CONFIG_DESCS[i].cmdKey)) return true;
+    for (size_t i = 0; i < TIMER_MEMBER_VALIDATOR_COUNT; ++i)
+        if (doc.containsKey(TIMER_MEMBER_VALIDATORS[i].cmdKey)) return true;
     return false;
-}
-
-void timerMemberConfigPublish(const char *cmdKey)
-{
-    for (size_t i = 0; i < TIMER_MEMBER_CONFIG_DESC_COUNT; ++i)
-    {
-        const TimerMemberConfigDesc &d = TIMER_MEMBER_CONFIG_DESCS[i];
-        if (strcmp(d.cmdKey, cmdKey) != 0) continue;
-        if (d.publish) d.publish();
-        return;
-    }
-}
-
-// ===========================================================================
-// HTTP GET /api/timer config mirror (PRD #73). The complete persisted-config
-// projection: both tables, no snapshot filter, raw values. Lives here beside the
-// descriptor tables (and, from #75, the file-local carrier-native formatters it
-// will reuse) rather than in the manager. See the header for the full contract.
-// ===========================================================================
-void timerBuildFullConfig(JsonDocument &doc)
-{
-    // Table half: EVERY settings row, ignoring inSnapshot, so the sync-role keys
-    // (sync_follow/sync_targets) are part of the read mirror even though they are
-    // never propagated. Raw value per row via the shared single-row emitter, with
-    // the two deliberate carrier-native overrides (PRD #73 D2) reusing the
-    // file-local formatters beside them -- diverging from the raw propagation
-    // snapshot by design, yet never able to disagree in value (same storage).
-    for (size_t i = 0; i < TIMER_SETTINGS_DESC_COUNT; ++i)
-    {
-        const TimerSettingDesc &d = TIMER_SETTINGS_DESCS[i];
-        if (strcmp(d.cmdKey, "bar_color") == 0)
-        {
-            formatBarColor(d, doc);          // "default" / uppercase "#RRGGBB", not the raw int
-        }
-        else if (strcmp(d.cmdKey, "bar_bg_color") == 0)
-        {
-            formatBarBgColor(d, doc);        // "none" / uppercase "#RRGGBB", not the raw int
-        }
-        else if (strcmp(d.cmdKey, "max_duration") == 0)
-        {
-            timerSettingEmitValue(d, doc);   // raw seconds kept (e.g. 86400)
-            // ...plus a trimmed clock-string sibling, this endpoint's raw+_str
-            // duration precedent, reusing the exact formatHMS the duration fields use.
-            doc["max_duration_str"] = TimerManager_::formatHMS(*static_cast<uint32_t *>(d.storage));
-        }
-        else
-        {
-            timerSettingEmitValue(d, doc);
-        }
-    }
-
-    // Member-backed half: buzzer/finished + the four icon_* live values.
-    timerMemberConfigBuildSnapshot(doc);
 }

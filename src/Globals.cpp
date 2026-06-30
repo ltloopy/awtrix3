@@ -474,23 +474,15 @@ bool DEBUG_MODE = true;
 uint8_t MIN_BRIGHTNESS = 2;
 bool SHOW_TIMER = true;
 bool SHOW_TIMER_HA_PREV = true;
-uint32_t TIMER_MAX_DURATION = 86400;
-uint16_t TIMER_PUBLISH_INTERVAL = 1;
-uint16_t TIMER_FINISHED_HOLD = 10;
-uint16_t TIMER_REALERT_INTERVAL = 15;
-uint16_t TIMER_COUNTDOWN_SECONDS = 3;
+// The 13 table-backed timer settings (max_duration, melodies, bar/sync, etc.) are
+// DEFINED in TimerSettings.cpp beside the descriptor table whose storage pointers
+// reference them (#143). The extern decls stay in Globals.h. These four icon_<state>
+// values are member-backed (owned by TimerManager's setters, not the table), so they
+// stay here.
 String TIMER_ICON_IDLE = "";
 String TIMER_ICON_RUNNING = "";
 String TIMER_ICON_PAUSED = "";
 String TIMER_ICON_FINISHED = "";
-String TIMER_MELODY_TICK = "timer_tick";
-String TIMER_MELODY_END = "timer_end";
-bool TIMER_BAR_ENABLED = true;
-bool TIMER_ICON_ENABLED = true;
-uint32_t TIMER_BAR_COLOR = 0;
-uint32_t TIMER_BAR_BG_COLOR = 0;   // 0 = black = no track (literal off; see ADR-0020)
-bool TIMER_SYNC_FOLLOW = true;   // fresh clock is a follower; standalone is opt-out (#124)
-String TIMER_SYNC_TARGETS = "";
 uint8_t MAX_BRIGHTNESS = 160;
 double movementFactor = 0.5;
 int8_t TRANS_EFFECT = 1;

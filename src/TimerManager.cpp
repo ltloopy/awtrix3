@@ -1,5 +1,6 @@
 #include "TimerManager.h"
 #include "TimerSettings.h"
+#include "TimerCommand.h"   // the pure atomic-reject command plan (classify, #143)
 #include "TimerHa.h"
 #include "SyncEnvelope.h"     // wire envelope + pure inbound receive gate (ADR-0023)
 #include "Globals.h"
@@ -17,7 +18,6 @@ namespace {
     // the propagation surface, with headroom for ArduinoJson's larger 64-bit slots
     // (host tests). The HTTP/MQTT control surfaces never approach it.
     constexpr uint16_t kTimerCmdJsonSize     = 2048;
-    constexpr uint8_t  kIconNameMaxLen       = 32;
     constexpr uint32_t kConfigHHMax          = 99UL * 3600UL;
 
     const char *FALLBACK_END_RTTTL  = "timer:d=4,o=5,b=120:c,8p,c,8p,c";
@@ -197,22 +197,12 @@ void TimerManager_::persistIfDirty()
 
 String TimerManager_::validateIconName(const String &name)
 {
-    if (name.length() == 0) return name;
-    if (name.length() > kIconNameMaxLen) return String("");
-    for (size_t i = 0; i < name.length(); ++i)
-    {
-        char c = name[i];
-        bool ok = (c >= 'A' && c <= 'Z')
-               || (c >= 'a' && c <= 'z')
-               || (c >= '0' && c <= '9')
-               || c == '_' || c == '-';
-        if (!ok)
-        {
-            if (DEBUG_MODE) DEBUG_PRINTLN("timer: icon name rejected");
-            return String("");
-        }
-    }
-    return name;
+    // Coercing wrapper around the family's char-rule (#143): accepted name passes
+    // through (empty = clear), a rejected one coerces to "" (and logs). Single source
+    // of the char-rule is timerIsValidIconName, so this cannot drift from the parser.
+    if (timerIsValidIconName(name)) return name;
+    if (DEBUG_MODE) DEBUG_PRINTLN("timer: icon name rejected");
+    return String("");
 }
 
 const String &TimerManager_::getIconForState(TimerState s) const
@@ -361,16 +351,12 @@ uint32_t TimerManager_::hmsToSeconds(uint32_t h, uint32_t m, uint32_t s)
     return h * 3600UL + m * 60UL + s;
 }
 
+// Forwarder: the trimmed-clock formatting now lives in the descriptor-table family as
+// the free function timerFormatHMS (#143), so the family's max_duration HA formatter
+// can render it without this singleton. Callers reach it unchanged through this static.
 String TimerManager_::formatHMS(uint32_t seconds)
 {
-    uint32_t h, m, s;
-    secondsToHMS(seconds, h, m, s);
-    char buf[16];
-    // Trimmed clock string: drop the hours group when zero; the most-significant
-    // shown field is unpadded, lower fields are zero-padded to two digits.
-    if (h > 0) snprintf(buf, sizeof(buf), "%u:%02u:%02u", (unsigned)h, (unsigned)m, (unsigned)s);
-    else       snprintf(buf, sizeof(buf), "%u:%02u",                 (unsigned)m, (unsigned)s);
-    return String(buf);
+    return timerFormatHMS(seconds);
 }
 
 // Forwarder: the parse logic now lives in the descriptor-table family as the free
@@ -388,29 +374,22 @@ bool TimerManager_::isValidDuration(uint32_t seconds)
     return true;
 }
 
-// String->enum is a case-insensitive scan of the codec table (canonical wire
-// spelling or any alias). The matched row index is the enum value. ADR-0010.
+// Forwarders: the enum-parse + icon-name char-rule now live in the descriptor-table
+// family (timerParseBuzzerMode / timerParseFinishedMode / timerIsValidIconName, #143),
+// so the command validator + the member validators link the family, not this singleton.
 bool TimerManager_::parseBuzzerMode(const String &s, BuzzerMode &out)
 {
-    uint8_t idx;
-    if (!timerEnumParse(TIMER_BUZZER_CODEC, TIMER_BUZZER_CODEC_COUNT, s, idx)) return false;
-    out = (BuzzerMode)idx;
-    return true;
+    return timerParseBuzzerMode(s, out);
 }
 
 bool TimerManager_::parseFinishedMode(const String &s, FinishedMode &out)
 {
-    uint8_t idx;
-    if (!timerEnumParse(TIMER_FINISHED_CODEC, TIMER_FINISHED_CODEC_COUNT, s, idx)) return false;
-    out = (FinishedMode)idx;
-    return true;
+    return timerParseFinishedMode(s, out);
 }
 
 bool TimerManager_::isValidIconName(const String &name)
 {
-    // validateIconName returns the name unchanged when acceptable (empty = clear),
-    // or "" when rejected. So a name is valid iff it survives unchanged.
-    return validateIconName(name) == name;
+    return timerIsValidIconName(name);
 }
 
 // Forwarder: the predicate now lives in the descriptor-table family as the free
@@ -664,232 +643,117 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
         return TimerCmdResult::BadJson;
     }
 
-    // -- Validation pass: mutate nothing; reject the whole command on the first
-    //    invalid field. Out-of-range is rejected here, not clamped (parity). --
-
-    // Table settings (TIMER_SETTINGS_DESCS): validate + coerce each present row into a
-    // staging array. Nothing is written until every field below has validated too, so a
-    // single bad field rejects the whole command (ADR-0001 atomic-reject). max_duration
-    // is range-defining for duration: capture its staged value so a payload that raises
-    // the ceiling and sets a duration within it in the same call is accepted atomically
-    // (ADR-0001 addendum).
-    // Inline RTTTL melodies (PRD #99 / issue #102): melody_end/melody_tick accept
-    // EITHER a bare file-name token (the normal table path below) OR an inline tune
-    // (detected by content). An inline tune is validated as RTTTL here, staged into
-    // RAM, and the table row is excluded from the bare-name store — the saved melody
-    // name global is never touched. An inline tune is always one-shot (it has no
-    // persistable file form), so its presence forces the command one-shot.
-    String inlineEnd, inlineTick;
-    bool   haveInlineEnd = false, haveInlineTick = false;
-
-    TcValue  tableStaged[TIMER_SETTINGS_DESC_COUNT];
-    bool     tablePresent[TIMER_SETTINGS_DESC_COUNT];
-    uint32_t effectiveMaxDuration = TIMER_MAX_DURATION;
-    for (size_t i = 0; i < TIMER_SETTINGS_DESC_COUNT; ++i)
-    {
-        const TimerSettingDesc &d = TIMER_SETTINGS_DESCS[i];
-        tablePresent[i] = doc.containsKey(d.cmdKey);
-        if (!tablePresent[i]) continue;
-
-        bool isMelodyKey = (strcmp(d.cmdKey, "melody_end") == 0 || strcmp(d.cmdKey, "melody_tick") == 0);
-        if (isMelodyKey)
-        {
-            String mv = doc[d.cmdKey].as<String>();
-            if (timerMelodyIsInline(mv))
-            {
-                if (!timerMelodyValidateInline(mv)) return TimerCmdResult::BadField;
-                if (strcmp(d.cmdKey, "melody_end") == 0) { inlineEnd = mv;  haveInlineEnd = true; }
-                else                                     { inlineTick = mv; haveInlineTick = true; }
-                tablePresent[i] = false;   // excluded from the bare-name parse/store/snapshot
-                continue;
-            }
-        }
-
-        if (!timerSettingParse(d, doc[d.cmdKey], tableStaged[i])) return TimerCmdResult::BadField;
-        if (strcmp(d.cmdKey, "max_duration") == 0) effectiveMaxDuration = tableStaged[i].num;
-    }
-
-    // duration stays member-backed (B1, ADR-0007): validated here against the effective
-    // ceiling staged above.
-    uint32_t durSecs = 0;
-    bool haveDuration = doc.containsKey("duration");
-    if (haveDuration)
-    {
-        JsonVariant dv = doc["duration"];
-        if (dv.is<const char *>())
-        {
-            if (!parseHMS(dv.as<String>(), durSecs)) return TimerCmdResult::BadField;
-        }
-        else if (dv.is<long>() || dv.is<float>())   // any JSON number (int or float); not bool/object/null
-        {
-            durSecs = dv.as<uint32_t>();
-        }
-        else
-        {
-            return TimerCmdResult::BadField;
-        }
-        if (durSecs < 1 || (effectiveMaxDuration > 0 && durSecs > effectiveMaxDuration)) return TimerCmdResult::BadField;
-    }
-
-    // Member-backed config half (B1): validate + coerce each present row into a staging
-    // array via its hook. Pure -- no global written until the apply pass below, so a bad
-    // member field rejects the whole command atomically (ADR-0001), same as the table half.
-    TcValue memberStaged[TIMER_MEMBER_CONFIG_DESC_COUNT];
-    bool    memberPresent[TIMER_MEMBER_CONFIG_DESC_COUNT];
-    for (size_t i = 0; i < TIMER_MEMBER_CONFIG_DESC_COUNT; ++i)
-    {
-        const TimerMemberConfigDesc &d = TIMER_MEMBER_CONFIG_DESCS[i];
-        memberPresent[i] = doc.containsKey(d.cmdKey);
-        if (!memberPresent[i]) continue;
-        if (!d.validate(doc[d.cmdKey], memberStaged[i])) return TimerCmdResult::BadField;
-    }
-
-    bool haveAction = doc.containsKey("action");
-    if (haveAction && !isValidAction(doc["action"].as<String>())) return TimerCmdResult::BadField;
-
-    // One-shot flag (PRD #99 / issue #100): a payload-level boolean, default true.
-    // A non-boolean rejects the whole command (atomic-reject, ADR-0001). save:false
-    // makes this command one-shot — its config applies to the current run only and
-    // reverts when the timer next returns to Idle (see the override block below).
-    bool saveFlag = true;
-    if (doc.containsKey("save"))
-    {
-        JsonVariantConst sv = doc["save"];
-        if (!sv.is<bool>()) return TimerCmdResult::BadField;
-        saveFlag = sv.as<bool>();
-    }
-    // An inline melody (issue #102) is always one-shot, so its presence forces the
-    // whole command one-shot regardless of `save` — it has no persistable file form.
-    // Receiver-forced one-shot (issue #108 / ADR-0018): a remote-applied command is
-    // ALWAYS one-shot regardless of the leader's `save` flag, so a follower mirrors the
-    // synced run but never persists it and reverts to its own saved config/duration on
-    // return to Idle. Reuses the ADR-0017 override core via the existing _remoteApply guard.
-    bool oneShot = !saveFlag || haveInlineEnd || haveInlineTick || _remoteApply;
+    // -- Validation: the whole atomic-reject pass runs once in the pure
+    //    TimerCommand::classify, mutating nothing (ADR-0001, extracted #143). The shell
+    //    fills the Context from the globals it owns (the saved ceiling + _remoteApply)
+    //    and drives apply from the returned Plan -- the packet is never re-read below. --
+    TimerCommand::Plan plan =
+        TimerCommand::classify(doc.as<JsonObjectConst>(),
+                               TimerCommand::Context{TIMER_MAX_DURATION, _remoteApply});
+    if (!plan.ok) return TimerCmdResult::BadField;   // first invalid field; nothing applied
 
     // -- Command is known-good: only now disturb device state. --
     if (configEditor.isActive())
     {
-        // An accepted inbound command discards an in-progress on-device edit and
-        // drains any notifications deferred during config. A rejected command (above)
-        // leaves the edit untouched. exit() deactivates; the return is intentionally
-        // discarded (the edit is aborted, not committed via setDuration).
+        // An accepted inbound command discards an in-progress on-device edit and drains
+        // any notifications deferred during config. A rejected command (above) leaves the
+        // edit untouched. exit() deactivates; the return is intentionally discarded (the
+        // edit is aborted, not committed via setDuration).
         configEditor.exit();
         DisplayManager.drainDeferredNotifications();
         if (DEBUG_MODE) DEBUG_PRINTLN("timer: config aborted by inbound command");
     }
 
-    // -- Command is known-good: apply, inside ONE PersistBatch window; its scope
-    //    exit commits the whole config (both NVS namespaces, each at most once).
-    //    Table rows first, so TIMER_MAX_DURATION lands before setDuration() sees
-    //    it (ADR-0001 addendum). Then duration (run-state, B1; applied before any
-    //    member-config side effects), then the member-backed applies via their
-    //    publish-aware setters. --
     // One-shot override (issue #100): before applying, snapshot the saved config so
-    // returnToIdle() can restore it. Only the first save:false in a run captures
-    // (latest-command-wins, single snapshot); a later save:false applies on top of
-    // the same baseline.
-    if (oneShot && !_overrideActive)
+    // returnToIdle() can restore it. Only the first one-shot in a run captures (latest-
+    // command-wins, single snapshot); a later one-shot applies on top of the same baseline.
+    if (plan.oneShot && !_overrideActive)
     {
         captureSnapshot();
         _overrideActive = true;
     }
 
-    bool snapshotChanged = false;   // any config-block (inSnapshot) table key -> broadcastConfig()
-    bool melodyChanged   = false;
+    // -- Apply, inside ONE PersistBatch window; its scope exit commits the whole config
+    //    (both NVS namespaces, each at most once). Table rows FIRST, so a raised
+    //    TIMER_MAX_DURATION lands before setDuration() re-clamps against the GLOBAL
+    //    ceiling (ADR-0001 addendum -- a duration classify accepted against the staged
+    //    ceiling would otherwise be silently clamped to the old one). Then duration
+    //    (run-state, B1), then the member-backed applies via their publish-aware setters. --
+    bool melodyChanged = false;
     {
         PersistBatch batch(*this);
-        if (oneShot) batch.setTransient();   // one-shot: scope exit writes nothing to flash
+        if (plan.oneShot) batch.setTransient();   // one-shot: scope exit writes nothing to flash
         for (size_t i = 0; i < TIMER_SETTINGS_DESC_COUNT; ++i)
         {
-            if (!tablePresent[i]) continue;
+            if (!plan.tablePresent[i]) continue;
             const TimerSettingDesc &d = TIMER_SETTINGS_DESCS[i];
-            if (timerSettingStore(d, tableStaged[i])) batch.markTableDirty();
-            if (d.inSnapshot) snapshotChanged = true;
+            if (timerSettingStore(d, plan.tableStaged[i])) batch.markTableDirty();
             if (strcmp(d.cmdKey, "melody_tick") == 0 || strcmp(d.cmdKey, "melody_end") == 0) melodyChanged = true;
         }
-        if (haveDuration) setDuration(durSecs);   // pre-validated in range
+        if (plan.haveDuration) setDuration(plan.durationSec);   // pre-validated in range
         for (size_t i = 0; i < TIMER_MEMBER_CONFIG_DESC_COUNT; ++i)
-            if (memberPresent[i]) TIMER_MEMBER_CONFIG_DESCS[i].apply(memberStaged[i]);
+            if (plan.memberPresent[i]) TIMER_MEMBER_CONFIG_DESCS[i].apply(plan.memberStaged[i]);
     }
 
     if (melodyChanged) loadMelodiesCached();
-    // Inline melodies (issue #102): use the tune directly as the resolved RAM, after
-    // any bare-name re-resolve above so it wins. The saved name globals are untouched,
-    // so the config mirror keeps showing the saved name; the snapshot captured the
-    // saved-resolved RAM, so returnToIdle() reverts these on return to Idle.
-    if (haveInlineEnd)  endRtttl  = inlineEnd;
-    if (haveInlineTick) tickRtttl = inlineTick;
-
-    // configInCommand: this payload carries a config-block key (table inSnapshot half
-    // OR the member-backed half). Drives both the rebaseline trigger and the config
-    // broadcast. sync_* (inSnapshot=false) and action/duration (run-state) are excluded.
-    bool configInCommand = snapshotChanged || timerDocTouchesMemberConfig(doc);
+    // Inline melodies (issue #102): use the validated tune directly as the resolved RAM,
+    // after any bare-name re-resolve above so it wins. The saved name globals are
+    // untouched (config mirror keeps the saved name); the snapshot captured the saved-
+    // resolved RAM, so returnToIdle() reverts these on return to Idle.
+    if (plan.haveInlineEnd)  endRtttl  = plan.inlineEnd;
+    if (plan.haveInlineTick) tickRtttl = plan.inlineTick;
 
     // Rebaseline (issue #100, story 21): a normal (save:true) config command arriving
     // during an active one-shot run commits the live config — including prior one-shot
-    // values — as the new saved baseline and ends the override, so a later revert
-    // leaves the promoted truth in place. A pure action/duration command does NOT
-    // rebaseline (it carries no config to commit), so the override survives to revert.
-    if (!oneShot && _overrideActive && configInCommand)
+    // values — as the new saved baseline and ends the override, so a later revert leaves
+    // the promoted truth in place. A pure action/duration command does NOT rebaseline (it
+    // carries no config to commit), so the override survives to revert. configInCommand
+    // (table inSnapshot half OR member half; sync_* and run-state excluded) is computed
+    // by classify.
+    if (!plan.oneShot && _overrideActive && plan.configInCommand)
     {
         persist();        // member half: full live state -> "timer" NVS
         saveSettings();   // table half: full live state -> "awtrix" NVS
         _overrideActive = false;
     }
 
-    // Settings projected as read-only HA attributes (PRD #57) are not wire rows
-    // with their own setters, so republish each affected carrier's bag here when
-    // any of its mapped keys was in the command. Table-driven, so a multi-carrier
-    // key republishes every carrier; deduped so a carrier publishes at most once.
-    // Fires on the remote-apply path too (not _remoteApply-gated), keeping each
-    // synced peer's HA attributes consistent with no extra code (generalizes #52).
-    // Suppressed under a one-shot command so the retained HA attribute bags keep
-    // reporting the saved config (carriers stay honest, issue #101 builds on this).
-    if (!oneShot)
+    // Settings projected as read-only HA attributes (PRD #57): republish each affected
+    // carrier's bag when any of its mapped keys was in the command (classify computed the
+    // dirty set). Fires on the remote-apply path too (not _remoteApply-gated), keeping
+    // each synced peer's HA attributes consistent (generalizes #52). Suppressed under a
+    // one-shot command so the retained bags keep reporting the saved config (#101).
+    if (!plan.oneShot)
     {
-        bool attrCarrierDirty[(size_t)TimerHaEntity::COUNT] = {false};
-        for (size_t i = 0; i < TIMER_ATTR_GROUP_DESC_COUNT; ++i)
-        {
-            const TimerAttrGroupDesc &g = TIMER_ATTR_GROUP_DESCS[i];
-            if (doc.containsKey(g.cmdKey)) attrCarrierDirty[(size_t)g.carrier] = true;
-        }
         for (size_t c = 0; c < (size_t)TimerHaEntity::COUNT; ++c)
-            if (attrCarrierDirty[c]) publishAttributeGroup((TimerHaEntity)c);
+            if (plan.attrCarrierDirty[c]) publishAttributeGroup((TimerHaEntity)c);
     }
 
-    if (haveAction)
+    if (plan.action == TimerCommand::Action::Start)
     {
-        String a = doc["action"].as<String>();
-        a.toLowerCase();
-        if (a == "start")
+        bool fromIdle = (state == TimerState::Idle);
+        start();
+        if (fromIdle && !GAME_ACTIVE && !BLOCK_NAVIGATION)
         {
-            bool fromIdle = (state == TimerState::Idle);
-            start();
-            if (fromIdle && !GAME_ACTIVE && !BLOCK_NAVIGATION)
-            {
-                String j = "{\"name\":\"Timer\"}";
-                DisplayManager.switchToApp(j.c_str());
-            }
+            String j = "{\"name\":\"Timer\"}";
+            DisplayManager.switchToApp(j.c_str());
         }
-        else if (a == "pause") pause();
-        else if (a == "reset") reset();
     }
+    else if (plan.action == TimerCommand::Action::Pause) pause();
+    else if (plan.action == TimerCommand::Action::Reset) reset();
 
-    // Propagation surface (one-hop): mirror this locally-accepted command to peers.
-    // The broadcast* methods no-op when _remoteApply is set (inbound packet) or sync
-    // is off. Run-scoped config mirror (ADR-0018, superseding ADR-0006's config
-    // propagation): a config EDIT propagates nothing — config travels only bundled
-    // with a `start` (the combined packet broadcastRunState emits, carrying the
-    // leader's effective config snapshot). pause/reset propagate run-state only. A
-    // bare duration edit propagates NOTHING (#126): `duration` rides only with a
-    // `start`, so a leader's edit no longer moves a follower's displayed time — a
-    // follower adopts the leader's duration on the next start and reverts on Idle.
-    // sync_follow/sync_targets are local identity (inSnapshot=false) and never propagate.
-    if (!_remoteApply && haveAction)
+    // Propagation surface (one-hop): mirror this locally-accepted command to peers. The
+    // broadcast* methods no-op when _remoteApply is set (inbound packet) or sync is off.
+    // Run-scoped config mirror (ADR-0018, superseding ADR-0006): a config EDIT propagates
+    // nothing — config travels only bundled with a `start` (the combined packet
+    // broadcastRunState emits, carrying the leader's effective config snapshot);
+    // pause/reset propagate run-state only; a bare duration edit propagates NOTHING
+    // (#126). sync_follow/sync_targets are local identity and never propagate.
+    if (!_remoteApply && plan.action != TimerCommand::Action::None)
     {
-        String a = doc["action"].as<String>();
-        a.toLowerCase();
-        broadcastRunState(a.c_str());
+        const char *a = (plan.action == TimerCommand::Action::Start) ? "start"
+                      : (plan.action == TimerCommand::Action::Pause) ? "pause"
+                                                                     : "reset";
+        broadcastRunState(a);
     }
 
     return TimerCmdResult::Ok;
