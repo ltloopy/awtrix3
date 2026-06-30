@@ -115,6 +115,24 @@ bool timerMelodyIsInline(const String &s);
 bool timerMelodyValidateInline(const String &s);
 
 // ---------------------------------------------------------------------------
+// Pure validation helpers relocated out of TimerManager's statics (#142) so the
+// command validator links the descriptor-table family, not the singleton.
+// TimerManager keeps thin forwarders (TimerManager_::parseHMS / ::isValidAction)
+// so every existing caller (the on-device duration editor, the HA layer) is
+// source-unchanged.
+
+// Parse a duration string into seconds. Accepts bare seconds, MM:SS or HH:MM:SS;
+// each field is a non-empty digit run; fields are summed without a 0-59 cap
+// (carry); surrounding whitespace is trimmed. No clamp, no globals. Returns false
+// (leaving outSeconds untouched) on empty input, an empty field, more than two
+// colons, or a non-numeric field.
+bool timerParseHMS(const String &s, uint32_t &outSeconds);
+
+// True iff `s` is a valid timer action verb -- case-insensitive, exactly one of
+// {start, pause, reset}. No trim (a surrounding space rejects). No globals.
+bool timerIsValidAction(const String &s);
+
+// ---------------------------------------------------------------------------
 // HA attribute-group projection (PRD #57) -- the descriptor-table family's fifth
 // member. One row per (carrier entity, settings key) projection: a persisted
 // settings value surfaced as a read-only JSON attribute on the HA entity it is
