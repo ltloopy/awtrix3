@@ -53,12 +53,7 @@ String timerMenuValue(uint8_t slot)
         {
             // The committed duration as a zero-padded HH:MM:SS clock (matches the
             // wheel), independent of any live edit in the leaf engine.
-            uint32_t sec = TimerManager.getDuration();
-            uint32_t h = sec / 3600, m = (sec / 60) % 60, ss = sec % 60;
-            char buf[12];
-            snprintf(buf, sizeof(buf), "%02u:%02u:%02u",
-                     (unsigned)h, (unsigned)m, (unsigned)ss);
-            return String(buf);
+            return timerClock(TimerManager.getDuration(), ClockStyle::Padded);
         }
         case TimerMenuKind::EnumCycle:
             return String(s.codec[s.getEnum()].menu);
