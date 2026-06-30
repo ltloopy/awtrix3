@@ -1174,52 +1174,10 @@ void test_U36_parseCommand_tuning_keys_accepted_in_range(void) {
 }
 
 // ============================================================================
-// U37 — Out-of-range tuning values are REJECTED atomically per ADR-0001: the
-// whole command is rejected and no field (including a valid action) applies.
-// ============================================================================
-void test_U37_parseCommand_tuning_keys_atomic_reject_out_of_range(void) {
-    SHOW_TIMER = true;
-    TIMER_FINISHED_HOLD     = 10;
-    TIMER_REALERT_INTERVAL  = 15;
-    TIMER_COUNTDOWN_SECONDS = 3;
-
-    // finished_hold below min (1).
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
-                      static_cast<int>(TimerManager.parseCommand("{\"finished_hold\":0}")));
-    TEST_ASSERT_EQUAL_UINT16(10, TIMER_FINISHED_HOLD);
-
-    // finished_hold above max (300).
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
-                      static_cast<int>(TimerManager.parseCommand("{\"finished_hold\":301}")));
-    TEST_ASSERT_EQUAL_UINT16(10, TIMER_FINISHED_HOLD);
-
-    // realert_interval below min (5).
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
-                      static_cast<int>(TimerManager.parseCommand("{\"realert_interval\":4}")));
-    TEST_ASSERT_EQUAL_UINT16(15, TIMER_REALERT_INTERVAL);
-
-    // countdown_seconds above max (30).
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
-                      static_cast<int>(TimerManager.parseCommand("{\"countdown_seconds\":31}")));
-    TEST_ASSERT_EQUAL_UINT16(3, TIMER_COUNTDOWN_SECONDS);
-
-    // Non-numeric type → BadField.
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
-                      static_cast<int>(TimerManager.parseCommand("{\"finished_hold\":\"ten\"}")));
-    TEST_ASSERT_EQUAL_UINT16(10, TIMER_FINISHED_HOLD);
-
-    // Atomicity: one bad tuning field rejects the whole command — paired action
-    // does not run, paired good fields don't apply.
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle),
-                      static_cast<int>(TimerManager.getState()));
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
-                      static_cast<int>(TimerManager.parseCommand(
-                          "{\"action\":\"start\",\"finished_hold\":50,\"countdown_seconds\":99}")));
-    TEST_ASSERT_EQUAL_UINT16(10, TIMER_FINISHED_HOLD);
-    TEST_ASSERT_EQUAL_UINT16(3,  TIMER_COUNTDOWN_SECONDS);
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle),
-                      static_cast<int>(TimerManager.getState()));
-}
+// U37 — MIGRATED to native_validate (#144): the per-key out-of-range / wrong-type
+// tuning rejects now run as direct classify calls (test_V16/V17), and the atomic
+// paired-action reject as test_V23. classify mutates nothing, so the old
+// "global unchanged after reject" assertions are structural there.
 
 // ============================================================================
 // U38 — A tuning-key command persists via saveSettings(); a command with only
@@ -1290,38 +1248,9 @@ void test_U39_parseCommand_behavior_params_accepted_in_range(void) {
 }
 
 // ============================================================================
-// U40 (ADR-0004) — Out-of-range behavior parameters are rejected atomically.
-// ============================================================================
-void test_U40_parseCommand_behavior_params_atomic_reject(void) {
-    SHOW_TIMER = true;
-    TIMER_MAX_DURATION     = 86400;
-    TIMER_PUBLISH_INTERVAL = 1;
-
-    // max_duration below floor.
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
-                      static_cast<int>(TimerManager.parseCommand("{\"max_duration\":0}")));
-    TEST_ASSERT_EQUAL_UINT32(86400, TIMER_MAX_DURATION);
-
-    // max_duration above ceiling.
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
-                      static_cast<int>(TimerManager.parseCommand("{\"max_duration\":604801}")));
-    TEST_ASSERT_EQUAL_UINT32(86400, TIMER_MAX_DURATION);
-
-    // remaining_publish_interval out of range.
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
-                      static_cast<int>(TimerManager.parseCommand("{\"remaining_publish_interval\":0}")));
-    TEST_ASSERT_EQUAL_UINT16(1, TIMER_PUBLISH_INTERVAL);
-
-    // The removed app_config_timeout key is now unknown: even an out-of-range value
-    // is accepted (silently ignored), not rejected (back-compat, #88).
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
-                      static_cast<int>(TimerManager.parseCommand("{\"app_config_timeout\":4}")));
-
-    // Non-numeric is rejected.
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
-                      static_cast<int>(TimerManager.parseCommand("{\"max_duration\":\"big\"}")));
-    TEST_ASSERT_EQUAL_UINT32(86400, TIMER_MAX_DURATION);
-}
+// U40 — MIGRATED to native_validate (#144): the out-of-range / wrong-type behavior
+// parameter rejects now run as direct classify calls (test_V16/V17), and the
+// unknown-key (app_config_timeout) back-compat accept as test_V24.
 
 // ============================================================================
 // U41 (ADR-0004) — Melody filenames and progress-bar options.
@@ -1500,80 +1429,11 @@ void test_U42_parseCommand_multi_key_validation_ordering(void) {
 }
 
 // ============================================================================
-// U43 — bar_enabled is a STRICT bool. Only JSON true/false are
-// accepted; every other JSON shape (integer 0/1, float, numeric/word string,
-// null, object, array) is rejected with BadField and leaves TIMER_BAR_ENABLED
-// ArduinoJson is<bool>() coercion quirks
-// ============================================================================
-void test_U43_parseCommand_bar_enabled_strict_bool(void) {
-    SHOW_TIMER = true;
-
-    // Every non-bool JSON shape is rejected and leaves the prior value intact.
-    // Prior value held at `true` throughout so a sloppy coercion to false shows.
-    TIMER_BAR_ENABLED = true;
-    const char *rejected[] = {
-        "{\"bar_enabled\":1}",       // integer truthy
-        "{\"bar_enabled\":0}",       // integer falsy
-        "{\"bar_enabled\":1.0}",     // float
-        "{\"bar_enabled\":\"yes\"}", // arbitrary truthy string
-        "{\"bar_enabled\":\"true\"}",// literal bool-word string (not a JSON bool)
-        "{\"bar_enabled\":null}",    // null is not false
-        "{\"bar_enabled\":{}}",      // object
-        "{\"bar_enabled\":[]}",      // array
-    };
-    for (const char *cmd : rejected) {
-        TEST_ASSERT_EQUAL_MESSAGE(static_cast<int>(TimerCmdResult::BadField),
-                                  static_cast<int>(TimerManager.parseCommand(cmd)),
-                                  cmd);
-        TEST_ASSERT_TRUE_MESSAGE(TIMER_BAR_ENABLED, cmd);  // unchanged
-    }
-
-    // Only genuine JSON booleans apply.
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
-                      static_cast<int>(TimerManager.parseCommand("{\"bar_enabled\":false}")));
-    TEST_ASSERT_FALSE(TIMER_BAR_ENABLED);
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
-                      static_cast<int>(TimerManager.parseCommand("{\"bar_enabled\":true}")));
-    TEST_ASSERT_TRUE(TIMER_BAR_ENABLED);
-}
-
-// ============================================================================
-// U50 — icon_enabled is a STRICT bool (same contract as bar_enabled, U43).
-// Only JSON true/false are accepted; every other JSON shape (integer 0/1, float,
-// numeric/word string, null, object, array) is rejected with BadField and leaves
-// TIMER_ICON_ENABLED intact.
-// ============================================================================
-void test_U50_parseCommand_icon_enabled_strict_bool(void) {
-    SHOW_TIMER = true;
-
-    // Every non-bool JSON shape is rejected and leaves the prior value intact.
-    // Prior value held at `true` throughout so a sloppy coercion to false shows.
-    TIMER_ICON_ENABLED = true;
-    const char *rejected[] = {
-        "{\"icon_enabled\":1}",       // integer truthy
-        "{\"icon_enabled\":0}",       // integer falsy
-        "{\"icon_enabled\":1.0}",     // float
-        "{\"icon_enabled\":\"yes\"}", // arbitrary truthy string
-        "{\"icon_enabled\":\"true\"}",// literal bool-word string (not a JSON bool)
-        "{\"icon_enabled\":null}",    // null is not false
-        "{\"icon_enabled\":{}}",      // object
-        "{\"icon_enabled\":[]}",      // array
-    };
-    for (const char *cmd : rejected) {
-        TEST_ASSERT_EQUAL_MESSAGE(static_cast<int>(TimerCmdResult::BadField),
-                                  static_cast<int>(TimerManager.parseCommand(cmd)),
-                                  cmd);
-        TEST_ASSERT_TRUE_MESSAGE(TIMER_ICON_ENABLED, cmd);  // unchanged
-    }
-
-    // Only genuine JSON booleans apply.
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
-                      static_cast<int>(TimerManager.parseCommand("{\"icon_enabled\":false}")));
-    TEST_ASSERT_FALSE(TIMER_ICON_ENABLED);
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
-                      static_cast<int>(TimerManager.parseCommand("{\"icon_enabled\":true}")));
-    TEST_ASSERT_TRUE(TIMER_ICON_ENABLED);
-}
+// U43 / U50 — MIGRATED to native_validate (#144): the STRICT-bool reject
+// enumeration for bar_enabled and icon_enabled (integer 0/1, float, word-strings,
+// null, object, array all rejected; only genuine JSON booleans accepted) now runs
+// as a direct classify call over both keys (test_V18). The bool-applies-to-global
+// round-trip stays covered by test_U41.
 
 // ============================================================================
 // U32–U35 — Timer HA Presence descriptor table invariants.
@@ -4705,14 +4565,10 @@ int main(int, char **) {
     RUN_TEST(test_U30_parseCommand_atomic_reject);
     RUN_TEST(test_U31_config_abort_only_on_valid_command);
     RUN_TEST(test_U36_parseCommand_tuning_keys_accepted_in_range);
-    RUN_TEST(test_U37_parseCommand_tuning_keys_atomic_reject_out_of_range);
     RUN_TEST(test_U38_parseCommand_tuning_change_persists_via_saveSettings);
     RUN_TEST(test_U39_parseCommand_behavior_params_accepted_in_range);
-    RUN_TEST(test_U40_parseCommand_behavior_params_atomic_reject);
     RUN_TEST(test_U41_parseCommand_melody_and_bar);
     RUN_TEST(test_U42_parseCommand_multi_key_validation_ordering);
-    RUN_TEST(test_U43_parseCommand_bar_enabled_strict_bool);
-    RUN_TEST(test_U50_parseCommand_icon_enabled_strict_bool);
     RUN_TEST(test_U51_setDuration_while_paused_resets_to_idle);
     RUN_TEST(test_U53_tick_runs_runstate_when_not_in_config);
     RUN_TEST(test_U32_descriptor_table_well_formed);
