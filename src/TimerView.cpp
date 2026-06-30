@@ -1,5 +1,7 @@
 #include "TimerView.h"
 
+#include "TimerSettings.h"   // timerClock / ClockStyle
+
 #include <stdio.h>
 
 namespace
@@ -34,10 +36,10 @@ TimerView TimerViewModel::compute(const TimerSnapshot &s)
     if (s.inConfig)
     {
         v.screen = TimerView::Screen::Config;
-        snprintf(v.text, sizeof(v.text), "%02u:%02u:%02u",
-                 (unsigned)s.configHH,
-                 (unsigned)s.configMM,
-                 (unsigned)s.configSS);
+        const uint32_t cfg = (uint32_t)s.configHH * 3600u +
+                             (uint32_t)s.configMM * 60u + s.configSS;
+        snprintf(v.text, sizeof(v.text), "%s",
+                 timerClock(cfg, ClockStyle::Padded).c_str());
         v.showText       = true;
         v.textRegionX0   = 0;
         v.textRegionW    = kScreenW;
