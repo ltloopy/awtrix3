@@ -450,15 +450,33 @@ bool timerParseFinishedMode(const String &s, FinishedMode &out)
     return true;
 }
 
-String timerFormatHMS(uint32_t seconds)
+String timerClock(uint32_t seconds, ClockStyle style)
 {
     uint32_t h = seconds / 3600;
     uint32_t m = (seconds % 3600) / 60;
     uint32_t s = seconds % 60;
     char buf[16];
-    if (h > 0) snprintf(buf, sizeof(buf), "%u:%02u:%02u", (unsigned)h, (unsigned)m, (unsigned)s);
-    else       snprintf(buf, sizeof(buf), "%u:%02u",                 (unsigned)m, (unsigned)s);
+    switch (style)
+    {
+        case ClockStyle::Trimmed:
+            if (h > 0) snprintf(buf, sizeof(buf), "%u:%02u:%02u", (unsigned)h, (unsigned)m, (unsigned)s);
+            else       snprintf(buf, sizeof(buf), "%u:%02u",                 (unsigned)m, (unsigned)s);
+            break;
+        case ClockStyle::Padded:
+            snprintf(buf, sizeof(buf), "%02u:%02u:%02u", (unsigned)h, (unsigned)m, (unsigned)s);
+            break;
+        case ClockStyle::Compact:
+            if (seconds < 3600)       snprintf(buf, sizeof(buf), "%u:%02u",   (unsigned)(seconds / 60), (unsigned)s);
+            else if (seconds < 36000) snprintf(buf, sizeof(buf), "%u:%02u",   (unsigned)h, (unsigned)m);
+            else                      snprintf(buf, sizeof(buf), "%02u:%02u", (unsigned)h, (unsigned)m);
+            break;
+    }
     return String(buf);
+}
+
+String timerFormatHMS(uint32_t seconds)
+{
+    return timerClock(seconds, ClockStyle::Trimmed);
 }
 
 // ---------------------------------------------------------------------------
