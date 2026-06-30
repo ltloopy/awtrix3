@@ -41,23 +41,14 @@ uint8_t  BRIGHTNESS        = 100;
 
 bool     SHOW_TIMER             = true;
 bool     SHOW_TIMER_HA_PREV     = true;
-uint32_t TIMER_MAX_DURATION     = 86400;
-uint16_t TIMER_PUBLISH_INTERVAL = 1;
-uint16_t TIMER_FINISHED_HOLD    = 10;
-uint16_t TIMER_REALERT_INTERVAL = 15;
-uint16_t TIMER_COUNTDOWN_SECONDS = 3;
+// The 13 table-backed timer settings are now DEFINED in TimerSettings.cpp (#143),
+// which this env links, so the stub must NOT redefine them (one definition only).
+// The four member-backed icon_<state> globals still live here (TimerSettings owns
+// only the table-backed half).
 String   TIMER_ICON_IDLE        = "";
 String   TIMER_ICON_RUNNING     = "";
 String   TIMER_ICON_PAUSED      = "";
 String   TIMER_ICON_FINISHED    = "";
-String   TIMER_MELODY_TICK      = "timer_tick";
-String   TIMER_MELODY_END       = "timer_end";
-bool     TIMER_BAR_ENABLED      = true;
-bool     TIMER_ICON_ENABLED     = true;
-uint32_t TIMER_BAR_COLOR        = 0;
-uint32_t TIMER_BAR_BG_COLOR     = 0;
-bool        TIMER_SYNC_FOLLOW   = true;   // mirrors production default (#124)
-String      TIMER_SYNC_TARGETS  = "";
 const char *uniqueID            = "awtrix_self";
 bool        AP_MODE             = false;
 

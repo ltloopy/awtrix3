@@ -1455,6 +1455,13 @@ void test_U41_parseCommand_melody_and_bar(void) {
 // before duration so {max_duration, duration} is judged against the in-payload
 // ceiling, not the pre-payload one. Atomic-reject is preserved for inconsistent
 // payloads and single-key duration behavior is unchanged.
+//
+// This is ALSO the apply-ordering regression for the #143 shell extraction: classify
+// validates duration against the STAGED ceiling, but setDuration() re-clamps against
+// the GLOBAL TIMER_MAX_DURATION, so the shell must write the max_duration table row
+// BEFORE calling setDuration(). Case 1 (raise ceiling 5000->10000, set duration 9000
+// in the same command, assert getDuration()==9000 not clamped to 5000) fails if that
+// ordering is ever reversed.
 // ============================================================================
 void test_U42_parseCommand_multi_key_validation_ordering(void) {
     SHOW_TIMER = true;
@@ -2775,6 +2782,26 @@ void test_T7_member_config_table_well_formed(void) {
         TEST_ASSERT_NOT_NULL((void *)d.apply);
         TEST_ASSERT_NOT_NULL((void *)d.emit);
         TEST_ASSERT_NULL(timerSettingByCmdKey(d.cmdKey));   // not also a declarative row
+    }
+}
+
+// T7b (#143) — drift guard for the parallel member tables. TimerCommand::classify
+// validates the member half against the PURE TIMER_MEMBER_VALIDATORS table (the only
+// member table the dependency-light native_validate env links; the full
+// TIMER_MEMBER_CONFIG_DESCS carries impure apply/emit/publish hooks). The shell then
+// applies by the SAME row index via TIMER_MEMBER_CONFIG_DESCS. So the two tables must
+// stay row-for-row aligned: same count, same cmdKey in the same order, and the SAME
+// validate function pointer per row (sharing the pointer is what makes them unable to
+// validate a key differently). This pins that alignment so a future edit to one table
+// that forgets the other is caught here, not in production.
+void test_T7b_member_validator_table_no_drift(void) {
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)TIMER_MEMBER_CONFIG_DESC_COUNT,
+                             (uint32_t)TIMER_MEMBER_VALIDATOR_COUNT);
+    for (size_t i = 0; i < TIMER_MEMBER_VALIDATOR_COUNT; ++i) {
+        TEST_ASSERT_EQUAL_STRING(TIMER_MEMBER_CONFIG_DESCS[i].cmdKey,
+                                 TIMER_MEMBER_VALIDATORS[i].cmdKey);
+        TEST_ASSERT_EQUAL_PTR((void *)TIMER_MEMBER_CONFIG_DESCS[i].validate,
+                              (void *)TIMER_MEMBER_VALIDATORS[i].validate);
     }
 }
 
@@ -4741,6 +4768,7 @@ int main(int, char **) {
     RUN_TEST(test_T5_devjson_best_effort);
     RUN_TEST(test_T6_snapshot_excludes_local_identity);
     RUN_TEST(test_T7_member_config_table_well_formed);
+    RUN_TEST(test_T7b_member_validator_table_no_drift);
     RUN_TEST(test_T8_member_config_validate_and_snapshot_roundtrip);
     RUN_TEST(test_M1_slot_table_well_formed);
     RUN_TEST(test_M10_unresolved_cmdkey_guard_fires_and_names_slot);

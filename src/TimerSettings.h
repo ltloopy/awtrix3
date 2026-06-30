@@ -4,7 +4,8 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
-#include "TimerHa.h"   // TimerHaEntity (the HA carrier each attribute group rides)
+#include "TimerHa.h"      // TimerHaEntity (the HA carrier each attribute group rides)
+#include "TimerEnums.h"   // BuzzerMode / FinishedMode for the relocated enum parsers (#143)
 
 // Persisted Timer settings: the single descriptor table that drives validation,
 // apply, NVS persistence, dev.json overrides and the propagated config snapshot
@@ -132,6 +133,26 @@ bool timerParseHMS(const String &s, uint32_t &outSeconds);
 // {start, pause, reset}. No trim (a surrounding space rejects). No globals.
 bool timerIsValidAction(const String &s);
 
+// More pure validators/formatters relocated into the table family (#143) so the
+// command validator (TimerCommand::classify) links the family, not the singleton.
+// TimerManager keeps thin static forwarders so existing callers are source-unchanged.
+
+// Bare icon/melody file-name char-rule: [A-Za-z0-9_-], length 0..32 (empty = clear,
+// accepted). The validation predicate behind TimerManager_::isValidIconName and the
+// table's Name check. No globals.
+bool timerIsValidIconName(const String &name);
+
+// String->enum over the buzzer / finished codec tables (ADR-0010), case-insensitive
+// wire spelling or alias. The validation behind TimerManager_::parseBuzzerMode /
+// ::parseFinishedMode. No globals.
+bool timerParseBuzzerMode(const String &s, BuzzerMode &out);
+bool timerParseFinishedMode(const String &s, FinishedMode &out);
+
+// Trimmed clock string ("24:00:00" / "1:00:00" / "0:45"): drop the hours group when
+// zero; most-significant shown field unpadded, lower fields zero-padded. Pure math
+// behind TimerManager_::formatHMS, reused by the max_duration HA formatter. No globals.
+String timerFormatHMS(uint32_t seconds);
+
 // ---------------------------------------------------------------------------
 // HA attribute-group projection (PRD #57) -- the descriptor-table family's fifth
 // member. One row per (carrier entity, settings key) projection: a persisted
@@ -184,6 +205,42 @@ struct TimerMemberConfigDesc
 
 extern const TimerMemberConfigDesc TIMER_MEMBER_CONFIG_DESCS[];
 extern const size_t                TIMER_MEMBER_CONFIG_DESC_COUNT;
+
+// Compile-time row count for the member-config half (the runtime COUNT can't size a
+// fixed array), used by TimerCommand::Plan to stage member values. A static_assert
+// pins it to the table extent. Bump if a member-config row is added.
+constexpr size_t TIMER_MEMBER_CONFIG_DESC_CAP = 6;
+
+// The member-config half's PURE validation projection (#143). TIMER_MEMBER_CONFIG_DESCS
+// carries impure apply/emit/publish hooks (the TimerManager singleton + the MQTT wire
+// seam), so the whole table can't link in the dependency-light command-validator env
+// (native_validate). This parallel table carries ONLY the pure {cmdKey, validate}
+// columns -- the exact same validate function pointers -- so TimerCommand::classify
+// validates the member half without dragging in the apply machinery. A drift guard
+// (test) pins the two tables row-for-row (same cmdKey, same validate) so they cannot
+// disagree about what a member key is or how it validates.
+struct TimerMemberValidatorDesc
+{
+    const char *cmdKey;
+    bool (*validate)(JsonVariantConst, TcValue &out);   // pure: validate + coerce, no mutation
+};
+
+extern const TimerMemberValidatorDesc TIMER_MEMBER_VALIDATORS[];
+extern const size_t                   TIMER_MEMBER_VALIDATOR_COUNT;
+
+// The member-config validate predicates (pure; live in TimerSettings.cpp). Declared
+// so BOTH tables reference the SAME function pointers: TIMER_MEMBER_VALIDATORS (pure
+// half) and TIMER_MEMBER_CONFIG_DESCS' validate column (impure half). Sharing the
+// pointer is what makes the drift guard exact -- the two tables cannot validate a key
+// differently because they validate it with the same function.
+bool timerMemValidateBuzzer(JsonVariantConst v, TcValue &out);
+bool timerMemValidateFinished(JsonVariantConst v, TcValue &out);
+bool timerMemValidateIcon(JsonVariantConst v, TcValue &out);
+
+// bar_color / bar_bg_color attribute formatters (external linkage, defined in the pure
+// TU) shared by the attr-group table and the HTTP full-config dump (#143).
+void timerFormatBarColor(const TimerSettingDesc &d, JsonDocument &doc);
+void timerFormatBarBgColor(const TimerSettingDesc &d, JsonDocument &doc);
 
 // Emit each member-config key's live value into `doc` (the B1 half of the config snapshot).
 void timerMemberConfigBuildSnapshot(JsonDocument &doc);
