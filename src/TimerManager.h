@@ -131,7 +131,8 @@ private:
     class SavedConfigScope
     {
     public:
-        explicit SavedConfigScope(const TimerManager_ &t);
+        // enable=false forces a no-op even under an active override (View::Effective).
+        explicit SavedConfigScope(const TimerManager_ &t, bool enable = true);
         ~SavedConfigScope();
         SavedConfigScope(const SavedConfigScope &) = delete;
         SavedConfigScope &operator=(const SavedConfigScope &) = delete;
@@ -142,7 +143,11 @@ private:
         TimerMemberConfig effMember;   // the effective (one-shot) member half, restored on scope exit
     };
 
-    void buildConfigSnapshot(JsonDocument &doc) const;   // config keys only; no action/duration/sync_*
+    // Which config the snapshot reports: Saved opens a SavedConfigScope so an active
+    // one-shot override is masked (broadcastConfig / ADR-0006); Effective takes live
+    // storage as-is so a leader's own one-shot run mirrors to followers (ADR-0018 §4).
+    enum class View { Saved, Effective };
+    void buildConfigSnapshot(JsonDocument &doc, View view) const;   // config keys only; no action/duration/sync_*
     void addSyncEnvelope(JsonObject &sync);              // forwards to SyncEnvelope::build (injects _syncSeq)
 
     uint32_t computeCurrentRemaining() const;
