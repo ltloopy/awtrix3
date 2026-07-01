@@ -79,15 +79,17 @@ namespace
                                      TimerManager.finishedModeString());
     }
 
-    // -- icon_<state> (shared validate; per-state apply/emit) --
-    void memApplyIconIdle    (const TcValue &v) { TimerManager.setIconIdle    (v.str); }
-    void memApplyIconRunning (const TcValue &v) { TimerManager.setIconRunning (v.str); }
-    void memApplyIconPaused  (const TcValue &v) { TimerManager.setIconPaused  (v.str); }
-    void memApplyIconFinished(const TcValue &v) { TimerManager.setIconFinished(v.str); }
-    void memEmitIconIdle    (JsonDocument &doc) { doc["icon_idle"]     = TimerManager.getIconIdle(); }
-    void memEmitIconRunning (JsonDocument &doc) { doc["icon_running"]  = TimerManager.getIconRunning(); }
-    void memEmitIconPaused  (JsonDocument &doc) { doc["icon_paused"]   = TimerManager.getIconPaused(); }
-    void memEmitIconFinished(JsonDocument &doc) { doc["icon_finished"] = TimerManager.getIconFinished(); }
+    // -- icon_<state> (shared validate + shared aggregate publish; the per-slot
+    // apply/emit fold into these two TimerState-indexed templates over iconByState[]).
+    // A fifth timer state wires its apply + emit for free from its row's <State> tag
+    // instead of needing a hand-written pair that could be forgotten (#185). The
+    // snapshot/command key per state, ordered by TimerState (== each row's cmdKey).
+    static const char *const kIconCmdKeys[kTimerStateCount] = {
+        "icon_idle", "icon_running", "icon_paused", "icon_finished"};
+    template <TimerState S>
+    void memApplyIcon(const TcValue &v) { TimerManager.setIcon(S, v.str); }
+    template <TimerState S>
+    void memEmitIcon (JsonDocument &doc) { doc[kIconCmdKeys[(size_t)S]] = TimerManager.getIcon(S); }
     // Publish hook, shared by all four icon rows (issue #34): the icon keys have
     // ONE wire artifact — the aggregate four-state JSON on the plain
     // {MQTT_PREFIX}/timer/icons topic (not an HA entity data topic), payload
@@ -108,10 +110,10 @@ namespace
 const TimerMemberConfigDesc TIMER_MEMBER_CONFIG_DESCS[] = {
     {"buzzer",        timerMemValidateBuzzer,   memApplyBuzzer,        memEmitBuzzer,        memPublishBuzzer},
     {"finished",      timerMemValidateFinished, memApplyFinished,      memEmitFinished,      memPublishFinished},
-    {"icon_idle",     timerMemValidateIcon,     memApplyIconIdle,      memEmitIconIdle,      memPublishIcons},
-    {"icon_running",  timerMemValidateIcon,     memApplyIconRunning,   memEmitIconRunning,   memPublishIcons},
-    {"icon_paused",   timerMemValidateIcon,     memApplyIconPaused,    memEmitIconPaused,    memPublishIcons},
-    {"icon_finished", timerMemValidateIcon,     memApplyIconFinished,  memEmitIconFinished,  memPublishIcons},
+    {"icon_idle",     timerMemValidateIcon,     memApplyIcon<TimerState::Idle>,     memEmitIcon<TimerState::Idle>,     memPublishIcons},
+    {"icon_running",  timerMemValidateIcon,     memApplyIcon<TimerState::Running>,  memEmitIcon<TimerState::Running>,  memPublishIcons},
+    {"icon_paused",   timerMemValidateIcon,     memApplyIcon<TimerState::Paused>,   memEmitIcon<TimerState::Paused>,   memPublishIcons},
+    {"icon_finished", timerMemValidateIcon,     memApplyIcon<TimerState::Finished>, memEmitIcon<TimerState::Finished>, memPublishIcons},
 };
 
 const size_t TIMER_MEMBER_CONFIG_DESC_COUNT =
