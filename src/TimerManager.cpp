@@ -401,27 +401,28 @@ void TimerManager_::enterRunning()
     lastPublishMs = millis();
 }
 
-// Finished transition, now routed through the pure engine (issue #178): resolve the
-// environment gates the engine reads, let TimerRuntime::step() decide the ordered
-// effects, then apply them. The state mutation (which the effect set doesn't cover)
-// stays here; the effects run after it so the publishes carry Finished/0 as before.
-void TimerManager_::enterFinished()
+// Resolve the environment gates + config the pure engine reads into an Inputs
+// value (issue #179). tick() shares this across the Running and Finished branches,
+// so the globals/singletons the engine deliberately doesn't name are touched in
+// exactly one place.
+TimerRuntime::Inputs TimerManager_::buildInputs() const
 {
     TimerRuntime::Inputs in;
-    in.navigationFree = !GAME_ACTIVE && !BLOCK_NAVIGATION && !MenuManager.inMenu;
-    in.matrixOff      = MATRIX_OFF;
-    in.brightness     = BRIGHTNESS;
-    in.playEndTone    = SOUND_ACTIVE && buzzerMode != BuzzerMode::Off && endRtttl.length() > 0;
-
-    std::vector<TimerRuntime::Effect> effects =
-        TimerRuntime::step({TimerState::Running, 0}, millis(), in);
-
-    state = TimerState::Finished;
-    remainingSec = 0;
-    enteredFinishedMs = millis();
-    lastRealertMs = enteredFinishedMs;
-
-    for (const TimerRuntime::Effect &e : effects) applyEffect(e);
+    in.newRemaining     = computeCurrentRemaining();
+    in.countdownArmed   = SOUND_ACTIVE && buzzerMode == BuzzerMode::Countdown && tickRtttl.length() > 0;
+    in.isPlaying        = PeripheryManager.isPlaying();
+    in.countdownSeconds = TIMER_COUNTDOWN_SECONDS;
+    in.publishInterval  = TIMER_PUBLISH_INTERVAL;
+    in.navigationFree   = !GAME_ACTIVE && !BLOCK_NAVIGATION && !MenuManager.inMenu;
+    in.matrixOff        = MATRIX_OFF;
+    in.brightness       = BRIGHTNESS;
+    in.playEndTone      = SOUND_ACTIVE && buzzerMode != BuzzerMode::Off && endRtttl.length() > 0;
+    in.finishedMode     = finishedMode;
+    in.finishedHold     = TIMER_FINISHED_HOLD;
+    in.realertInterval  = TIMER_REALERT_INTERVAL;
+    in.realertArmed     = SOUND_ACTIVE && buzzerMode != BuzzerMode::Off;
+    in.realertToneSet   = endRtttl.length() > 0;
+    return in;
 }
 
 // Executes one effect against the hardware managers / wire seam. The full effect
@@ -536,73 +537,45 @@ void TimerManager_::setFinishedMode(FinishedMode m, bool persist)
     publishFinishedMode();
 }
 
+// Thin adapter over the pure engine (issue #179): resolve the inputs, let
+// TimerRuntime::step() decide the ordered effects + the run-state bookkeeping for
+// both the Running and Finished branches, then apply the bookkeeping and execute
+// the effects in order. The state mutation (and the ADR-0024 override restore
+// behind ToIdle) stays here; effects run after it so the publishes carry the new
+// phase/remaining, exactly as the imperative tick did.
 void TimerManager_::tick()
 {
+    if (state != TimerState::Running && state != TimerState::Finished) return;
+
     unsigned long now = millis();
+    TimerRuntime::Inputs in = buildInputs();
+    TimerRuntime::State  st{state, remainingSec, lastPublishMs, enteredFinishedMs, lastRealertMs};
+    TimerRuntime::Result r = TimerRuntime::step(st, now, in);
 
     if (state == TimerState::Running)
     {
-        uint32_t newRemaining = computeCurrentRemaining();
-        if (newRemaining != remainingSec)
+        remainingSec = in.newRemaining;
+        if (r.publishFired) lastPublishMs = now;
+        if (r.transition == TimerRuntime::Transition::ToFinished)
         {
-            uint32_t prevRemaining = remainingSec;
-            remainingSec = newRemaining;
-
-            if (SOUND_ACTIVE && buzzerMode == BuzzerMode::Countdown && tickRtttl.length() > 0)
-            {
-                // Beep if any second in [1, TIMER_COUNTDOWN_SECONDS] was crossed this tick.
-                // The buzzer plays one tone at a time, so a single beep covers the gap when
-                // tick() falls behind (rather than queuing N back-to-back plays).
-                uint32_t lo = newRemaining > 0 ? newRemaining : 1;
-                uint32_t hi = prevRemaining > 0 ? prevRemaining - 1 : 0;
-                if (hi > TIMER_COUNTDOWN_SECONDS) hi = TIMER_COUNTDOWN_SECONDS;
-                if (hi >= lo && !PeripheryManager.isPlaying())
-                {
-                    PeripheryManager.playRTTTLString(tickRtttl);
-                }
-            }
-
-            if (TIMER_PUBLISH_INTERVAL > 0 && (now - lastPublishMs >= (unsigned long)TIMER_PUBLISH_INTERVAL * 1000UL))
-            {
-                publishRemaining();
-                lastPublishMs = now;
-            }
-        }
-
-        if (newRemaining == 0)
-        {
-            enterFinished();
-        }
-    }
-    else if (state == TimerState::Finished)
-    {
-        if (finishedMode == FinishedMode::AutoClear
-            && (now - enteredFinishedMs >= (unsigned long)TIMER_FINISHED_HOLD * 1000UL))
-        {
-            PeripheryManager.stopSound();
-            returnToIdle();             // one-shot: restore saved config (shared seam, issue #100)
-            state = TimerState::Idle;
-            remainingSec = durationSec;
-            publishState();
-            publishRemaining();
-            if (MATRIX_OFF)
-            {
-                DisplayManager.setBrightness(0);
-            }
-            return;
-        }
-
-        if (finishedMode == FinishedMode::ReAlert
-            && SOUND_ACTIVE && buzzerMode != BuzzerMode::Off
-            && (now - lastRealertMs >= (unsigned long)TIMER_REALERT_INTERVAL * 1000UL))
-        {
-            if (!PeripheryManager.isPlaying())
-            {
-                if (endRtttl.length() > 0) PeripheryManager.playRTTTLString(endRtttl);
-            }
+            state = TimerState::Finished;
+            remainingSec = 0;
+            enteredFinishedMs = now;
             lastRealertMs = now;
         }
     }
+    else   // Finished
+    {
+        if (r.transition == TimerRuntime::Transition::ToIdle)
+        {
+            returnToIdle();             // one-shot: restore saved config (shared seam, issue #100)
+            state = TimerState::Idle;
+            remainingSec = durationSec;
+        }
+        if (r.realertFired) lastRealertMs = now;
+    }
+
+    for (const TimerRuntime::Effect &e : r.effects) applyEffect(e);
 }
 
 TimerCmdResult TimerManager_::parseCommand(const char *json)
