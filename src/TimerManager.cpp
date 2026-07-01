@@ -107,9 +107,10 @@ void TimerManager_::returnToIdle()
 // (one-shot) values. Only the config-block state the projections read is swapped —
 // the table inSnapshot rows (sync_* excluded by construction) and the member-backed
 // half (buzzer/finished/icons). Run-state (duration) and the resolved melody RAM are
-// not touched. No-op when no override is active.
-TimerManager_::SavedConfigScope::SavedConfigScope(const TimerManager_ &t)
-    : tm(const_cast<TimerManager_ &>(t)), active(t._overrideActive)
+// not touched. No-op when no override is active, or when enable is false (the caller
+// wants the EFFECTIVE view even under an override, e.g. buildConfigSnapshot(View::Effective)).
+TimerManager_::SavedConfigScope::SavedConfigScope(const TimerManager_ &t, bool enable)
+    : tm(const_cast<TimerManager_ &>(t)), active(enable && t._overrideActive)
 {
     if (!active) return;
     // Stash the effective (one-shot) config block, then present the saved config.
@@ -943,18 +944,20 @@ void TimerManager_::addSyncEnvelope(JsonObject &sync)
     SyncEnvelope::build(sync, uniqueID, ++_syncSeq, TIMER_SYNC_TARGETS);
 }
 
-void TimerManager_::buildConfigSnapshot(JsonDocument &doc) const
+void TimerManager_::buildConfigSnapshot(JsonDocument &doc, View view) const
 {
     // Config block only — never action/duration (run-state) or sync_* (local identity,
     // inSnapshot=false). Two tables, one config block: TIMER_SETTINGS_DESCS' inSnapshot
     // rows and TIMER_MEMBER_CONFIG_DESCS (the member-backed half, B1, ADR-0007/0009).
     // Each table also feeds the parseCommand broadcast trigger, so the snapshot can't
     // drift from what fires a broadcast.
-    // Under a one-shot override the propagated snapshot reports the SAVED config, so a
-    // follower never receives transient one-off values it has no notion of reverting
-    // (issue #101 / ADR-0006). broadcastConfig is itself suppressed during an override
-    // (issue #100), so this is also a defensive guarantee for any other caller.
-    SavedConfigScope saved(*this);
+    // View::Saved opens a SavedConfigScope so an active one-shot override is masked and
+    // the snapshot reports the SAVED config — a follower never receives transient one-off
+    // values it has no notion of reverting (issue #101 / ADR-0006; broadcastConfig is
+    // itself suppressed during an override, issue #100, so this is also defensive).
+    // View::Effective takes live storage as-is so a leader's own one-shot run mirrors to
+    // followers — the snapshot reports what is actually running (ADR-0018 §4).
+    SavedConfigScope saved(*this, view == View::Saved);
     timerSettingsBuildSnapshot(doc);
     timerMemberConfigBuildSnapshot(doc);
 }
@@ -981,12 +984,11 @@ void TimerManager_::broadcastRunState(const char *action)
         addSyncEnvelope(sync);
         doc["action"] = action;
         doc["duration"] = durationSec;   // duration rides only with a start (defines the countdown)
-        // EFFECTIVE config (no SavedConfigScope): a leader's own one-shot run mirrors
-        // to followers, so the snapshot reports what is actually running. sync_* are
-        // inSnapshot=false and excluded by construction; inline melodies never travel
-        // (the saved bare name globals back the snapshot, ADR-0017).
-        timerSettingsBuildSnapshot(doc);
-        timerMemberConfigBuildSnapshot(doc);
+        // EFFECTIVE config: a leader's own one-shot run mirrors to followers, so the
+        // snapshot reports what is actually running. sync_* are inSnapshot=false and
+        // excluded by construction; inline melodies never travel (the saved bare name
+        // globals back the snapshot, ADR-0017 / ADR-0018 §4).
+        buildConfigSnapshot(doc, View::Effective);
 
         String out; serializeJson(doc, out);
         ServerManager.sendTimerSync(out);
@@ -1011,7 +1013,7 @@ void TimerManager_::broadcastConfig()
     DynamicJsonDocument doc(kTimerCmdJsonSize);
     JsonObject sync = doc.createNestedObject("_sync");
     addSyncEnvelope(sync);
-    buildConfigSnapshot(doc);
+    buildConfigSnapshot(doc, View::Saved);   // propagated config reports SAVED (ADR-0006 / ADR-0017)
 
     String out; serializeJson(doc, out);
     ServerManager.sendTimerSync(out);
