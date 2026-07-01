@@ -140,3 +140,10 @@ reappears) when `origin = App`, and `GoToMainMenu` to the main menu when `origin
 The Timer app's other long-press actions are unchanged (Finished → start, Running → reset).
 `TimerManager`'s now-unreachable config-mode forwarders (`enterConfigMode` etc.) are left as
 dead code for a follow-up cleanup; the editor *class* remains in use behind the leaf.
+
+> **Superseded by [#154](https://github.com/ltloopy/awtrix3/issues/154).** That follow-up cleanup
+> is done: the dead config-mode forwarders (and the `isInConfig`/`getConfigField`/`getConfigHH/MM/SS`
+> getters) were removed from `TimerManager` by [#168](https://github.com/ltloopy/awtrix3/issues/168),
+> after [#167](https://github.com/ltloopy/awtrix3/issues/167) removed the config-screen render path
+> and [#166](https://github.com/ltloopy/awtrix3/issues/166) the config-mode button guards. The
+> `TimerConfigEditor` **class** remains live behind the `DURATION` leaf, as noted above.

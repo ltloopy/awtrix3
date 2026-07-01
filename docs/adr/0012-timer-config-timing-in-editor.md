@@ -49,6 +49,15 @@ threshold in `TimerManager`, contradicting the goal) — were rejected.
 
 ### `TimerManager::tick()` delegates while editing; the run-state machine is untouched
 
+> **Superseded in part by [#154](https://github.com/ltloopy/awtrix3/issues/154).** The timing this
+> ADR moved into the editor now drives **only** the TIMER menu's duration editor
+> ([ADR-0016](0016-timer-menu-drillin-navigation.md)). The `TimerManager` glue below that fed it —
+> the `configEditor.isActive()` delegation branch in `tick()`, the `enterConfigMode` /
+> `configAdjust` / `configCycleField` `noteInput` seeding, and the `exitConfigMode` commit/drain —
+> was removed with the rest of the config-mode surface by
+> [#168](https://github.com/ltloopy/awtrix3/issues/168). The injected-time/-button decision itself
+> is unchanged; the editor's `tick()` lives on behind the menu's `DURATION` leaf.
+
 ```cpp
 if (configEditor.isActive()) {
     EasyButton *bL = PeripheryManager.buttonL, *bR = PeripheryManager.buttonR;
