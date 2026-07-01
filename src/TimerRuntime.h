@@ -22,6 +22,12 @@ namespace TimerRuntime
     // RTTTL strings themselves: End -> endRtttl, Tick -> tickRtttl at the adapter.
     enum class Tone : uint8_t { End, Tick };
 
+    // What the adapter is asking the engine to decide. Tick is the wall-clock
+    // countdown step (issues #178/#179); the rest are the input-driven lifecycle
+    // commands (issue #180) — the same public verbs TimerManager exposes. Default
+    // is Tick so an Inputs built without naming a command is the countdown step.
+    enum class Command : uint8_t { Tick, Start, Pause, Reset, SetDuration };
+
     // The full effect vocabulary. The Running tick emits PlayTone(Tick)/publish;
     // the Finished transition emits the switch/brightness/end-tone bundle;
     // auto-clear emits StopSound + the return-to-Idle publish/brightness effects.
@@ -53,7 +59,11 @@ namespace TimerRuntime
     {
         None,        // no phase change
         ToFinished,  // Running reached zero
-        ToIdle,      // Finished auto-cleared after the hold
+        ToIdle,      // return to Idle: Finished auto-clear, reset, or a paused-duration edit
+                     // (adapter: returnToIdle() + remaining = durationSec)
+        ToRunning,   // start (fresh: load durationSec) or resume from Paused (keep remaining)
+        ToPaused,    // Running -> Paused (adapter freezes remaining = newRemaining)
+        IdleReload,  // duration edited while Idle: remaining = durationSec, phase stays Idle
     };
 
     // Environment gates resolved to plain bools/values so the engine needs none of
@@ -66,12 +76,19 @@ namespace TimerRuntime
     //   realertToneSet  = endRtttl set
     struct Inputs
     {
+        Command  command          = Command::Tick;   // which lifecycle decision to make
+
         // Running tick.
         uint32_t newRemaining     = 0;       // computeCurrentRemaining()
         bool     countdownArmed   = false;
         bool     isPlaying        = false;   // PeripheryManager.isPlaying()
         uint16_t countdownSeconds = 0;       // TIMER_COUNTDOWN_SECONDS
         uint16_t publishInterval  = 0;       // TIMER_PUBLISH_INTERVAL (sec; 0 disables)
+
+        // Lifecycle commands (start/pause/reset/setDuration). durationSec is the
+        // configured full duration; the adapter loads it into remaining on a fresh
+        // start / an Idle duration edit, and into remaining on the return-to-Idle.
+        uint32_t durationSec   = 0;
 
         // Running->Finished transition.
         bool    navigationFree = false;
