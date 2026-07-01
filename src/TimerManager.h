@@ -5,7 +5,6 @@
 #include <ArduinoJson.h>
 
 #include "TimerEnums.h"          // TimerState + BuzzerMode / FinishedMode + their codec tables (ADR-0010)
-#include "TimerConfigEditor.h"   // display-free duration editor; owns the config-mode working state (ADR-0011)
 #include "TimerHa.h"             // TimerHaEntity (the HA carrier publishAttributeGroup targets)
 #include "TimerSettings.h"       // TcValue + TIMER_SETTINGS_DESC_CAP (one-shot override snapshot, PRD #99)
 #include "PeerRegistry.h"        // the LAN peer set (extracted from this class, ADR-0019/0021)
@@ -59,12 +58,6 @@ private:
     unsigned long enteredFinishedMs = 0;
     unsigned long lastRealertMs = 0;
     unsigned long lastPublishMs = 0;
-
-    // Config-mode working state (field cursor + HH/MM/SS buffers + cap-aware adjust)
-    // AND timing (30 s no-input timeout + button hold-to-repeat) live in the
-    // display-free TimerConfigEditor; tick() feeds it the current time and injected
-    // button presses. See docs/adr/0011 (extraction) and docs/adr/0012 (timing).
-    TimerConfigEditor configEditor;
 
     bool _suspendPersist = false;
     // Member-backed RAM state differs from the "timer" NVS namespace: set by a
@@ -353,16 +346,6 @@ public:
     size_t peerIds(String *out, size_t cap) const { return _registry.ids(out, cap); }
 
     void onShowTimerChange(bool prev, bool now);
-
-    void enterConfigMode();
-    void exitConfigMode();
-    void configCycleField();
-    void configAdjust(int delta);
-    bool    isInConfig()      const { return configEditor.isActive(); }
-    uint8_t getConfigField()  const { return configEditor.field(); }
-    uint8_t getConfigHH()     const { return configEditor.hh(); }
-    uint8_t getConfigMM()     const { return configEditor.mm(); }
-    uint8_t getConfigSS()     const { return configEditor.ss(); }
 
     TimerState   getState()        const { return state; }
     uint32_t     getRemaining()    const { return remainingSec; }

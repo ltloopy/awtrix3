@@ -1011,19 +1011,7 @@ bool DisplayManager_::generateNotification(uint8_t source, const char *json)
 
   bool stack = doc.containsKey("stack") ? doc["stack"] : true;
 
-  // While the user is in the TIMER config screen, don't interrupt it: buffer
-  // notifications in a bounded drop-oldest FIFO (max 10). They are released into
-  // the live queue later by drainDeferredNotifications() when config is exited.
-  if (TimerManager.isInConfig())
-  {
-    static const size_t MAX_DEFERRED = 10;
-    if (deferredNotifications.size() >= MAX_DEFERRED)
-    {
-      deferredNotifications.erase(deferredNotifications.begin());
-    }
-    deferredNotifications.push_back(newNotification);
-  }
-  else if (stack)
+  if (stack)
   {
     notifications.push_back(newNotification);
   }
