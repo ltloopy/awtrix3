@@ -158,8 +158,8 @@ private:
 
     uint32_t computeCurrentRemaining() const;
     void enterRunning();
-    void enterFinished();
-    void applyEffect(const TimerRuntime::Effect &e);   // the effects-adapter seam (issue #178)
+    TimerRuntime::Inputs buildInputs() const;           // resolve engine inputs from the environment (issue #179)
+    void applyEffect(const TimerRuntime::Effect &e);    // the effects-adapter seam (issue #178)
     void persist();
     void persistIfDirty();
     void loadMelodiesCached();
