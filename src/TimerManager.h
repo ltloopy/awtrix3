@@ -5,6 +5,7 @@
 #include <ArduinoJson.h>
 
 #include "TimerEnums.h"          // TimerState + BuzzerMode / FinishedMode + their codec tables (ADR-0010)
+#include "TimerRuntime.h"        // pure run-state engine: step() returns effects this class applies (issue #178)
 #include "TimerHa.h"             // TimerHaEntity (the HA carrier publishAttributeGroup targets)
 #include "TimerSettings.h"       // TcValue + TIMER_SETTINGS_DESC_CAP (one-shot override snapshot, PRD #99)
 #include "PeerRegistry.h"        // the LAN peer set (extracted from this class, ADR-0019/0021)
@@ -158,6 +159,7 @@ private:
     uint32_t computeCurrentRemaining() const;
     void enterRunning();
     void enterFinished();
+    void applyEffect(const TimerRuntime::Effect &e);   // the effects-adapter seam (issue #178)
     void persist();
     void persistIfDirty();
     void loadMelodiesCached();

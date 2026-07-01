@@ -401,27 +401,57 @@ void TimerManager_::enterRunning()
     lastPublishMs = millis();
 }
 
+// Finished transition, now routed through the pure engine (issue #178): resolve the
+// environment gates the engine reads, let TimerRuntime::step() decide the ordered
+// effects, then apply them. The state mutation (which the effect set doesn't cover)
+// stays here; the effects run after it so the publishes carry Finished/0 as before.
 void TimerManager_::enterFinished()
 {
+    TimerRuntime::Inputs in;
+    in.navigationFree = !GAME_ACTIVE && !BLOCK_NAVIGATION && !MenuManager.inMenu;
+    in.matrixOff      = MATRIX_OFF;
+    in.brightness     = BRIGHTNESS;
+    in.playEndTone    = SOUND_ACTIVE && buzzerMode != BuzzerMode::Off && endRtttl.length() > 0;
+
+    std::vector<TimerRuntime::Effect> effects =
+        TimerRuntime::step({TimerState::Running, 0}, millis(), in);
+
     state = TimerState::Finished;
     remainingSec = 0;
     enteredFinishedMs = millis();
     lastRealertMs = enteredFinishedMs;
-    publishState();
-    publishRemaining();
 
-    if (!GAME_ACTIVE && !BLOCK_NAVIGATION && !MenuManager.inMenu)
+    for (const TimerRuntime::Effect &e : effects) applyEffect(e);
+}
+
+// Executes one effect against the hardware managers / wire seam. The full effect
+// vocabulary is handled so the later slices can lean on it; the Finished path emits
+// only a subset (issue #178).
+void TimerManager_::applyEffect(const TimerRuntime::Effect &e)
+{
+    switch (e.kind)
+    {
+    case TimerRuntime::EffectKind::PublishState:
+        publishState();
+        break;
+    case TimerRuntime::EffectKind::PublishRemaining:
+        publishRemaining();
+        break;
+    case TimerRuntime::EffectKind::SwitchToTimerApp:
     {
         String j = "{\"name\":\"Timer\",\"fast\":true}";
         DisplayManager.switchToApp(j.c_str());
+        break;
     }
-    if (MATRIX_OFF)
-    {
-        DisplayManager.setBrightness(BRIGHTNESS);
-    }
-    if (SOUND_ACTIVE && buzzerMode != BuzzerMode::Off)
-    {
-        if (endRtttl.length() > 0) PeripheryManager.playRTTTLString(endRtttl);
+    case TimerRuntime::EffectKind::SetBrightness:
+        DisplayManager.setBrightness(e.brightness);
+        break;
+    case TimerRuntime::EffectKind::PlayTone:
+        PeripheryManager.playRTTTLString(e.tone == TimerRuntime::Tone::End ? endRtttl : tickRtttl);
+        break;
+    case TimerRuntime::EffectKind::StopSound:
+        PeripheryManager.stopSound();
+        break;
     }
 }
 
