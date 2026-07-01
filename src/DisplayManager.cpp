@@ -24,8 +24,6 @@
 #include "Games/GameManager.h"
 #include "TimerManager.h"
 
-static std::vector<Notification> deferredNotifications;
-
 unsigned long lastArtnetStatusTime = 0;
 const int numberOfChannels = 256 * 3;
 // Artnet settings
@@ -1399,16 +1397,6 @@ void DisplayManager_::selectButton()
 
 void DisplayManager_::selectButtonLong()
 {
-}
-
-void DisplayManager_::drainDeferredNotifications()
-{
-  for (auto &n : deferredNotifications)
-  {
-    n.startime = millis();
-    notifications.push_back(n);
-  }
-  deferredNotifications.clear();
 }
 
 void DisplayManager_::dismissNotify()

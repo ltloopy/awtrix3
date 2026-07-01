@@ -615,12 +615,10 @@ void MenuManager_::selectButtonLong()
             TimerNavOutcome o = timerNav.back();
             if (o == TimerNavOutcome::CommitDuration)
             {
-                // The normal set-duration commit path (mirrors the old config exit):
-                // apply and drain deferred notifications. A bare duration edit
+                // The normal set-duration commit path. A bare duration edit
                 // propagates NOTHING (#126): duration rides only with a start, so an
                 // on-device length edit no longer moves a follower's displayed time.
                 TimerManager.setDuration(timerDurationEditor.exit());
-                DisplayManager.drainDeferredNotifications();
                 return;                 // stay in the TIMER menu, list focus
             }
             if (o == TimerNavOutcome::BackToList)
