@@ -55,10 +55,16 @@ void TimerManager_::loadMelodiesCached()
 // captured directly. Restore writes members directly (no setter), so it triggers no
 // persist/publish side effects — carriers reported saved values throughout.
 // The single home of the member-half field list: read live -> value.
+// The NVS string key for each state's icon slot, indexed by TimerState. Shared by
+// the load (setup) and save (persist) loops so the two cannot drift apart.
+static const char *const kIconNvsKeys[kTimerStateCount] = {
+    "ICON_IDLE", "ICON_RUN", "ICON_PAUSE", "ICON_FIN"};
+
 TimerMemberConfig TimerManager_::snapshotMemberConfig() const
 {
-    return TimerMemberConfig{buzzerMode, finishedMode,
-                             iconIdle, iconRunning, iconPaused, iconFinished};
+    TimerMemberConfig c{buzzerMode, finishedMode};
+    for (size_t i = 0; i < kTimerStateCount; ++i) c.iconByState[i] = iconByState[i];
+    return c;
 }
 
 // ...and value -> live, RAW: no persist, no publish, no broadcast. The override revert
@@ -67,10 +73,7 @@ void TimerManager_::restoreMemberConfig(const TimerMemberConfig &c)
 {
     buzzerMode   = c.buzzer;
     finishedMode = c.finished;
-    iconIdle     = c.iconIdle;
-    iconRunning  = c.iconRunning;
-    iconPaused   = c.iconPaused;
-    iconFinished = c.iconFinished;
+    for (size_t i = 0; i < kTimerStateCount; ++i) iconByState[i] = c.iconByState[i];
 }
 
 void TimerManager_::captureSnapshot()
@@ -133,16 +136,15 @@ void TimerManager_::setup()
     durationSec    = timerPrefs.getUInt("DUR", 300);
     buzzerMode     = (BuzzerMode)timerPrefs.getUChar("BUZ", (uint8_t)BuzzerMode::End);
     finishedMode   = (FinishedMode)timerPrefs.getUChar("FIN", (uint8_t)FinishedMode::AutoClear);
-    iconIdle       = timerPrefs.getString("ICON_IDLE",  "");
-    iconRunning    = timerPrefs.getString("ICON_RUN",   "");
-    iconPaused     = timerPrefs.getString("ICON_PAUSE", "");
-    iconFinished   = timerPrefs.getString("ICON_FIN",   "");
+    for (size_t i = 0; i < kTimerStateCount; ++i)
+        iconByState[i] = timerPrefs.getString(kIconNvsKeys[i], "");
     timerPrefs.end();
 
-    if (TIMER_ICON_IDLE.length()     > 0) iconIdle     = TIMER_ICON_IDLE;
-    if (TIMER_ICON_RUNNING.length()  > 0) iconRunning  = TIMER_ICON_RUNNING;
-    if (TIMER_ICON_PAUSED.length()   > 0) iconPaused   = TIMER_ICON_PAUSED;
-    if (TIMER_ICON_FINISHED.length() > 0) iconFinished = TIMER_ICON_FINISHED;
+    // dev.json per-state overrides (unchanged keys), indexed by TimerState.
+    const String *const iconOverrides[kTimerStateCount] = {
+        &TIMER_ICON_IDLE, &TIMER_ICON_RUNNING, &TIMER_ICON_PAUSED, &TIMER_ICON_FINISHED};
+    for (size_t i = 0; i < kTimerStateCount; ++i)
+        if (iconOverrides[i]->length() > 0) iconByState[i] = *iconOverrides[i];
 
     if (durationSec < 1) durationSec = 1;
     if (TIMER_MAX_DURATION > 0 && durationSec > TIMER_MAX_DURATION) durationSec = TIMER_MAX_DURATION;
@@ -171,10 +173,8 @@ void TimerManager_::persist()
     timerPrefs.putUInt("DUR", durationSec);
     timerPrefs.putUChar("BUZ", (uint8_t)buzzerMode);
     timerPrefs.putUChar("FIN", (uint8_t)finishedMode);
-    timerPrefs.putString("ICON_IDLE",  iconIdle);
-    timerPrefs.putString("ICON_RUN",   iconRunning);
-    timerPrefs.putString("ICON_PAUSE", iconPaused);
-    timerPrefs.putString("ICON_FIN",   iconFinished);
+    for (size_t i = 0; i < kTimerStateCount; ++i)
+        timerPrefs.putString(kIconNvsKeys[i], iconByState[i]);
     timerPrefs.end();
 }
 
@@ -201,60 +201,19 @@ String TimerManager_::validateIconName(const String &name)
 
 const String &TimerManager_::getIconForState(TimerState s) const
 {
-    switch (s)
-    {
-        case TimerState::Running:
-            if (iconRunning.length()  > 0) return iconRunning;
-            break;
-        case TimerState::Paused:
-            if (iconPaused.length()   > 0) return iconPaused;
-            break;
-        case TimerState::Finished:
-            if (iconFinished.length() > 0) return iconFinished;
-            break;
-        case TimerState::Idle:
-        default:
-            break;
-    }
-    return iconIdle;
+    // Running/Paused/Finished fall back to Idle when their own slot is empty.
+    const String &own = iconByState[(size_t)s];
+    if (s != TimerState::Idle && own.length() == 0) return iconByState[(size_t)TimerState::Idle];
+    return own;
 }
 
-void TimerManager_::setIconIdle(const String &name, bool publish)
+void TimerManager_::setIcon(TimerState s, const String &name, bool publish)
 {
     String n = validateIconName(name);
-    if (name.length() > 0 && n.length() == 0) return;
-    if (iconIdle == n) return;
-    iconIdle = n;
-    persistIfDirty();
-    if (publish) publishIcons();
-}
-
-void TimerManager_::setIconRunning(const String &name, bool publish)
-{
-    String n = validateIconName(name);
-    if (name.length() > 0 && n.length() == 0) return;
-    if (iconRunning == n) return;
-    iconRunning = n;
-    persistIfDirty();
-    if (publish) publishIcons();
-}
-
-void TimerManager_::setIconPaused(const String &name, bool publish)
-{
-    String n = validateIconName(name);
-    if (name.length() > 0 && n.length() == 0) return;
-    if (iconPaused == n) return;
-    iconPaused = n;
-    persistIfDirty();
-    if (publish) publishIcons();
-}
-
-void TimerManager_::setIconFinished(const String &name, bool publish)
-{
-    String n = validateIconName(name);
-    if (name.length() > 0 && n.length() == 0) return;
-    if (iconFinished == n) return;
-    iconFinished = n;
+    if (name.length() > 0 && n.length() == 0) return;   // reject-guard: bad non-empty name is ignored
+    String &slot = iconByState[(size_t)s];
+    if (slot == n) return;
+    slot = n;
     persistIfDirty();
     if (publish) publishIcons();
 }

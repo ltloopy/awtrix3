@@ -27,11 +27,15 @@ void saveSettings();
 // Deliberately excludes durationSec (run-state) and the resolved melody RAM
 // (endRtttl/tickRtttl -- the saved melody NAME is a table key); those revert with the
 // override but are not config the observation carriers project as "saved". See ADR-0024.
+// Number of TimerState values (Idle/Running/Paused/Finished) — the width of the
+// state-indexed icon array. TimerState has no COUNT member; this is its stand-in.
+static constexpr size_t kTimerStateCount = 4;
+
 struct TimerMemberConfig
 {
     BuzzerMode   buzzer   = BuzzerMode::End;
     FinishedMode finished = FinishedMode::AutoClear;
-    String       iconIdle, iconRunning, iconPaused, iconFinished;
+    String       iconByState[kTimerStateCount];   // indexed by TimerState
 };
 
 class TimerManager_
@@ -45,10 +49,7 @@ private:
     uint32_t durationSec = 300;
     uint32_t remainingSec = 300;
 
-    String iconIdle;
-    String iconRunning;
-    String iconPaused;
-    String iconFinished;
+    String iconByState[kTimerStateCount];   // indexed by TimerState (Idle/Running/Paused/Finished)
 
     String endRtttl;
     String tickRtttl;
@@ -252,10 +253,14 @@ public:
     static bool     isValidIconName(const String &name);
     static bool     isValidAction(const String &s);  // forwards to timerIsValidAction (#142)
 
-    void setIconIdle    (const String &name, bool publish = true);
-    void setIconRunning (const String &name, bool publish = true);
-    void setIconPaused  (const String &name, bool publish = true);
-    void setIconFinished(const String &name, bool publish = true);
+    // The one shared icon setter: validate/reject/equality-skip/assign/persist/publish
+    // for one state's slot. The four named setters below are thin delegators over it.
+    void setIcon(TimerState s, const String &name, bool publish = true);
+
+    void setIconIdle    (const String &name, bool publish = true) { setIcon(TimerState::Idle,     name, publish); }
+    void setIconRunning (const String &name, bool publish = true) { setIcon(TimerState::Running,  name, publish); }
+    void setIconPaused  (const String &name, bool publish = true) { setIcon(TimerState::Paused,   name, publish); }
+    void setIconFinished(const String &name, bool publish = true) { setIcon(TimerState::Finished, name, publish); }
 
     void publishIcons();
 
@@ -358,10 +363,10 @@ public:
     BuzzerMode   getBuzzerMode()   const { return buzzerMode; }
     FinishedMode getFinishedMode() const { return finishedMode; }
 
-    const String &getIconIdle()     const { return iconIdle; }
-    const String &getIconRunning()  const { return iconRunning; }
-    const String &getIconPaused()   const { return iconPaused; }
-    const String &getIconFinished() const { return iconFinished; }
+    const String &getIconIdle()     const { return iconByState[(size_t)TimerState::Idle]; }
+    const String &getIconRunning()  const { return iconByState[(size_t)TimerState::Running]; }
+    const String &getIconPaused()   const { return iconByState[(size_t)TimerState::Paused]; }
+    const String &getIconFinished() const { return iconByState[(size_t)TimerState::Finished]; }
     const String &getIconForState(TimerState s) const;
 
     const char *getStateString() const;
