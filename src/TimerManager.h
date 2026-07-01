@@ -143,10 +143,22 @@ private:
         TimerMemberConfig effMember;   // the effective (one-shot) member half, restored on scope exit
     };
 
-    // Which config the snapshot reports: Saved opens a SavedConfigScope so an active
+    // Which config a serializer reports: Saved opens a SavedConfigScope so an active
     // one-shot override is masked (broadcastConfig / ADR-0006); Effective takes live
     // storage as-is so a leader's own one-shot run mirrors to followers (ADR-0018 §4).
     enum class View { Saved, Effective };
+
+    // The one seam every config-honesty serializer names its view through: runs
+    // `serialize` with live storage swapped to `view` (View::Saved opens a
+    // SavedConfigScope masking the one-shot override; View::Effective is a no-op).
+    // Callers (GET mirror, HA bags, propagated snapshot) must name a View to compile,
+    // so no path silently omits the scope (ADR-0015 / ADR-0017).
+    template <typename Serialize>
+    void withConfigView(View view, Serialize &&serialize) const
+    {
+        SavedConfigScope saved(*this, view == View::Saved);
+        serialize();
+    }
     void buildConfigSnapshot(JsonDocument &doc, View view) const;   // config keys only; no action/duration/sync_*
     void addSyncEnvelope(JsonObject &sync);              // forwards to SyncEnvelope::build (injects _syncSeq)
 

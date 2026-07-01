@@ -322,12 +322,9 @@ String TimerManager_::getStateJson() const
     // POST. Built in a temp doc by the pure table-walking projection, then
     // deep-copied in -- duration stays top-level only (run-state, not config).
     DynamicJsonDocument cfg(kTimerCmdJsonSize);
-    {
-        // During a one-shot override the `config` mirror reports the SAVED config,
-        // while the top-level run-state above stays effective (issue #101 / ADR-0015).
-        SavedConfigScope saved(*this);
-        timerBuildFullConfig(cfg);
-    }
+    // During a one-shot override the `config` mirror reports the SAVED config, while
+    // the top-level run-state above stays effective (issue #101 / ADR-0015).
+    withConfigView(View::Saved, [&] { timerBuildFullConfig(cfg); });
     doc["config"] = cfg.as<JsonObject>();
 
     String out;
@@ -862,13 +859,10 @@ void TimerManager_::publishAttributeGroup(TimerHaEntity carrier)
     // 512: the state sensor's bag is the largest (eight config-view keys incl.
     // two strings), which overflows 256 on a 64-bit host (issue #59).
     DynamicJsonDocument doc(512);
-    {
-        // A republish (e.g. on reconnect) during a one-shot override serializes the
-        // SAVED config, so HA attribute bags never show transient one-off values
-        // (issue #101 / ADR-0014).
-        SavedConfigScope saved(*this);
-        timerBuildAttributeGroup(carrier, doc);
-    }
+    // A republish (e.g. on reconnect) during a one-shot override serializes the SAVED
+    // config, so HA attribute bags never show transient one-off values (issue #101 /
+    // ADR-0014).
+    withConfigView(View::Saved, [&] { timerBuildAttributeGroup(carrier, doc); });
     if (doc.as<JsonObjectConst>().size() == 0) return;
     String payload;
     serializeJson(doc, payload);
@@ -951,15 +945,16 @@ void TimerManager_::buildConfigSnapshot(JsonDocument &doc, View view) const
     // rows and TIMER_MEMBER_CONFIG_DESCS (the member-backed half, B1, ADR-0007/0009).
     // Each table also feeds the parseCommand broadcast trigger, so the snapshot can't
     // drift from what fires a broadcast.
-    // View::Saved opens a SavedConfigScope so an active one-shot override is masked and
-    // the snapshot reports the SAVED config — a follower never receives transient one-off
-    // values it has no notion of reverting (issue #101 / ADR-0006; broadcastConfig is
-    // itself suppressed during an override, issue #100, so this is also defensive).
-    // View::Effective takes live storage as-is so a leader's own one-shot run mirrors to
-    // followers — the snapshot reports what is actually running (ADR-0018 §4).
-    SavedConfigScope saved(*this, view == View::Saved);
-    timerSettingsBuildSnapshot(doc);
-    timerMemberConfigBuildSnapshot(doc);
+    // View::Saved masks an active one-shot override so the snapshot reports the SAVED
+    // config — a follower never receives transient one-off values it has no notion of
+    // reverting (issue #101 / ADR-0006; broadcastConfig is itself suppressed during an
+    // override, issue #100, so this is also defensive). View::Effective takes live
+    // storage as-is so a leader's own one-shot run mirrors to followers — the snapshot
+    // reports what is actually running (ADR-0018 §4).
+    withConfigView(view, [&] {
+        timerSettingsBuildSnapshot(doc);
+        timerMemberConfigBuildSnapshot(doc);
+    });
 }
 
 void TimerManager_::broadcastRunState(const char *action)
