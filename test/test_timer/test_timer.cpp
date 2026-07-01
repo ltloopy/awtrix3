@@ -1339,6 +1339,29 @@ void test_U42_parseCommand_multi_key_validation_ordering(void) {
 }
 
 // ============================================================================
+// U62 (#188, ADR-0001 addendum) — one command that raises max_duration AND sets
+// duration above the PREVIOUS ceiling in the same payload keeps the accepted
+// duration. Unlike U42 (which pokes TIMER_MAX_DURATION directly), this drives the
+// real parseCommand apply path against the fixture's live default ceiling (86400):
+// the table row (max_duration=100000) must land BEFORE setDuration() re-clamps
+// against the global, or duration=90000 would be silently clamped down to 86400.
+// Fails if the table-before-setDuration apply order is ever reversed.
+// ============================================================================
+void test_U62_raise_ceiling_and_duration_in_one_command_retained(void) {
+    SHOW_TIMER = true;
+    TEST_ASSERT_EQUAL_UINT32(86400, TIMER_MAX_DURATION);   // fixture default ceiling
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
+                      static_cast<int>(TimerManager.parseCommand(
+                          "{\"max_duration\":100000,\"duration\":90000}")));
+
+    TEST_ASSERT_EQUAL_UINT32(100000, TIMER_MAX_DURATION);
+    TEST_ASSERT_EQUAL_UINT32(90000,  TimerManager.getDuration());   // retained, not clamped to 86400
+
+    TIMER_MAX_DURATION = 86400;   // reset for downstream tests
+}
+
+// ============================================================================
 // U43 / U50 — MIGRATED to native_validate (#144): the STRICT-bool reject
 // enumeration for bar_enabled and icon_enabled (integer 0/1, float, word-strings,
 // null, object, array all rejected; only genuine JSON booleans accepted) now runs
@@ -4452,6 +4475,7 @@ int main(int, char **) {
     RUN_TEST(test_U39_parseCommand_behavior_params_accepted_in_range);
     RUN_TEST(test_U41_parseCommand_melody_and_bar);
     RUN_TEST(test_U42_parseCommand_multi_key_validation_ordering);
+    RUN_TEST(test_U62_raise_ceiling_and_duration_in_one_command_retained);
     RUN_TEST(test_U51_setDuration_while_paused_resets_to_idle);
     RUN_TEST(test_U53_tick_runs_runstate_when_not_in_config);
     RUN_TEST(test_U32_descriptor_table_well_formed);
