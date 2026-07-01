@@ -1571,14 +1571,12 @@ void test_U60_ha_registration_off_by_one(void) {
 static TimerSnapshot mgrSnapshot(unsigned long nowMs, bool iconEnabled = true) {
     return TimerSnapshot{
         TimerManager.getState(), TimerManager.getDuration(), TimerManager.getRemaining(),
-        TimerManager.getRunDuration(), TimerManager.isInConfig(), TimerManager.getConfigField(),
-        TimerManager.getConfigHH(), TimerManager.getConfigMM(), TimerManager.getConfigSS(),
-        iconEnabled, nowMs};
+        TimerManager.getRunDuration(), iconEnabled, nowMs};
 }
 
 // D1 — Idle shows the configured duration as compact text, with no bar.
 void test_D1_view_idle_shows_duration_no_bar(void) {
-    const TimerSnapshot s{TimerState::Idle, 300, 0, 0, false, 0, 0, 0, 0, true, 0};
+    const TimerSnapshot s{TimerState::Idle, 300, 0, 0, true, 0};
     TimerView v = TimerViewModel::compute(s);
     TEST_ASSERT_EQUAL(static_cast<int>(TimerView::Screen::Time), static_cast<int>(v.screen));
     TEST_ASSERT_EQUAL_STRING("5:00", v.text);
@@ -1605,7 +1603,7 @@ void test_D2_view_running_shows_remaining_with_bar(void) {
 // D3 — Finished blinks "0:00" at the 500 ms cadence; no bar. The blink is a pure
 // function of nowMs, so three snapshots differing only in nowMs cover it.
 void test_D3_view_finished_blinks_0_00(void) {
-    const TimerSnapshot base{TimerState::Finished, 5, 0, 5, false, 0, 0, 0, 0, true, 0};
+    const TimerSnapshot base{TimerState::Finished, 5, 0, 5, true, 0};
     TimerSnapshot s_on = base, s_off = base, s_on2 = base;
     s_on.nowMs = 0; s_off.nowMs = 500; s_on2.nowMs = 1000;
 
@@ -1627,7 +1625,7 @@ void test_D3_view_finished_blinks_0_00(void) {
 // iconEnabled), so each case is an explicit Running snapshot.
 void test_D4_view_bar_geometry_right_anchored(void) {
     // Half remaining: 23 * 50/100 = 11 cells, anchored right.
-    const TimerSnapshot s_half{TimerState::Running, 100, 50, 100, false, 0, 0, 0, 0, true, 0};
+    const TimerSnapshot s_half{TimerState::Running, 100, 50, 100, true, 0};
     TimerView half = TimerViewModel::compute(s_half);
     TEST_ASSERT_TRUE(half.showBar);
     TEST_ASSERT_EQUAL_UINT8(11, half.barLen);
@@ -1639,14 +1637,14 @@ void test_D4_view_bar_geometry_right_anchored(void) {
     TEST_ASSERT_EQUAL_UINT8(23, half.barTrackLen);
 
     // Full remaining: full-length bar starting at the bar origin.
-    const TimerSnapshot s_full{TimerState::Running, 100, 100, 100, false, 0, 0, 0, 0, true, 0};
+    const TimerSnapshot s_full{TimerState::Running, 100, 100, 100, true, 0};
     TimerView full = TimerViewModel::compute(s_full);
     TEST_ASSERT_EQUAL_UINT8(23, full.barLen);
     TEST_ASSERT_EQUAL_INT16(9, full.barStartX);
     TEST_ASSERT_EQUAL_INT16(32, full.barStartX + full.barLen);
 
     // Tiny remaining (1s of 100): 23 * 1/100 == 0 cells -> no foreground bar...
-    const TimerSnapshot s_tiny{TimerState::Running, 100, 1, 100, false, 0, 0, 0, 0, true, 0};
+    const TimerSnapshot s_tiny{TimerState::Running, 100, 1, 100, true, 0};
     TimerView tiny = TimerViewModel::compute(s_tiny);
     TEST_ASSERT_FALSE(tiny.showBar);
     // ...but the background trough PERSISTS through the final stretch (ADR-0020).
@@ -1655,37 +1653,16 @@ void test_D4_view_bar_geometry_right_anchored(void) {
     TEST_ASSERT_EQUAL_UINT8(23, tiny.barTrackLen);
 
     // Icon hidden: both the bar and its trough reflow to the full 32px panel (0, 32).
-    const TimerSnapshot s_noicon{TimerState::Running, 100, 50, 100, false, 0, 0, 0, 0, false, 0};
+    const TimerSnapshot s_noicon{TimerState::Running, 100, 50, 100, false, 0};
     TimerView noicon = TimerViewModel::compute(s_noicon);
     TEST_ASSERT_TRUE(noicon.showBarTrack);
     TEST_ASSERT_EQUAL_INT16(0, noicon.barTrackStartX);
     TEST_ASSERT_EQUAL_UINT8(32, noicon.barTrackLen);
 
     // Idle: no bar region active, so no trough either.
-    const TimerSnapshot s_idle{TimerState::Idle, 100, 0, 0, false, 0, 0, 0, 0, true, 0};
+    const TimerSnapshot s_idle{TimerState::Idle, 100, 0, 0, true, 0};
     TimerView idle = TimerViewModel::compute(s_idle);
     TEST_ASSERT_FALSE(idle.showBarTrack);
-}
-
-// D5 — Config screen: HH:MM:SS centered over the full panel, field underline
-// tracks configCycleField, no bar. Drives the manager so the snapshot carries
-// the real config-buffer decomposition (3661 -> 01:01:01) and field cursor.
-void test_D5_view_config_screen(void) {
-    TimerManager.setDuration(3661);     // 1:01:01
-    TimerManager.enterConfigMode();
-    TimerView v = TimerViewModel::compute(mgrSnapshot(0));
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerView::Screen::Config), static_cast<int>(v.screen));
-    TEST_ASSERT_EQUAL_STRING("01:01:01", v.text);
-    TEST_ASSERT_TRUE(v.showText);
-    TEST_ASSERT_TRUE(v.showUnderline);
-    TEST_ASSERT_EQUAL_UINT8(0, v.underlineField);   // HH highlighted first
-    TEST_ASSERT_EQUAL_INT16(0, v.textRegionX0);     // centered over the full 32px panel
-    TEST_ASSERT_EQUAL_INT16(32, v.textRegionW);
-    TEST_ASSERT_FALSE(v.showBar);
-
-    TimerManager.configCycleField();                // HH -> MM
-    TimerView v2 = TimerViewModel::compute(mgrSnapshot(0));
-    TEST_ASSERT_EQUAL_UINT8(1, v2.underlineField);
 }
 
 // D6 — formatTimerDisplay is the compact on-screen format (drops seconds past
@@ -1706,7 +1683,7 @@ void test_D6_formatTimerDisplay_vs_wire_string(void) {
 // Icon off: showIcon false, text region 0..32, bar spans the full 32px panel.
 void test_D7_view_icon_disabled_reflows_text_and_bar(void) {
     // Running, full remaining -> full bar. The two cases differ only in iconEnabled.
-    const TimerSnapshot base{TimerState::Running, 100, 100, 100, false, 0, 0, 0, 0, true, 0};
+    const TimerSnapshot base{TimerState::Running, 100, 100, 100, true, 0};
 
     // Icon on (the default).
     TimerSnapshot s_on = base; s_on.iconEnabled = true;
@@ -4581,7 +4558,6 @@ int main(int, char **) {
     RUN_TEST(test_D2_view_running_shows_remaining_with_bar);
     RUN_TEST(test_D3_view_finished_blinks_0_00);
     RUN_TEST(test_D4_view_bar_geometry_right_anchored);
-    RUN_TEST(test_D5_view_config_screen);
     RUN_TEST(test_D6_formatTimerDisplay_vs_wire_string);
     RUN_TEST(test_D7_view_icon_disabled_reflows_text_and_bar);
     RUN_TEST(test_D8_view_duration_edit_while_running_buffers_bar);

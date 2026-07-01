@@ -27,22 +27,6 @@ TimerView TimerViewModel::compute(const TimerSnapshot &s)
 {
     TimerView v = {};
 
-    // Config screen: HH:MM:SS centered over the full panel, with a field underline.
-    if (s.inConfig)
-    {
-        v.screen = TimerView::Screen::Config;
-        const uint32_t cfg = (uint32_t)s.configHH * 3600u +
-                             (uint32_t)s.configMM * 60u + s.configSS;
-        snprintf(v.text, sizeof(v.text), "%s",
-                 timerClock(cfg, ClockStyle::Padded).c_str());
-        v.showText       = true;
-        v.textRegionX0   = 0;
-        v.textRegionW    = kScreenW;
-        v.showUnderline  = true;
-        v.underlineField = s.configField;
-        return v;
-    }
-
     const TimerState ts = s.state;
 
     // Non-config screens draw the icon (unless disabled) and center their text in

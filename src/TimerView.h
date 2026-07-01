@@ -16,11 +16,6 @@ struct TimerSnapshot
     uint32_t      duration;     // configured duration (seconds)
     uint32_t      remaining;    // live remaining (seconds); compute uses it only when !Idle
     uint32_t      runDuration;  // bar-denominator snapshot captured when the run began
-    bool          inConfig;     // on-device config edit in progress
-    uint8_t       configField;  // highlighted field: 0 = HH, 1 = MM, 2 = SS
-    uint8_t       configHH;     // config edit buffer, hours
-    uint8_t       configMM;     // config edit buffer, minutes
-    uint8_t       configSS;     // config edit buffer, seconds
     bool          iconEnabled;  // TIMER_ICON_ENABLED: gates the icon + full-panel reflow
     unsigned long nowMs;        // millis(); drives the 500 ms Finished blink only
 };
