@@ -26,6 +26,25 @@ namespace {
     // live in TIMER_MEMBER_CONFIG_DESCS (TimerSettings.cpp), the config block's second
     // table. Validation, apply, snapshot-emit and the broadcast trigger all loop that
     // one table, so they cannot drift apart.
+
+    // The one home for the wire-refresh first-appearance dedup. Walk `count` rows,
+    // project each to a key via keyOf(i), and invoke fn(key) once per DISTINCT key in
+    // first-appearance order. publishAll{AttributeGroups,Wire} and clearAllAttributeGroups
+    // differ only in the key projected (carrier enum vs publish-hook pointer) and the
+    // per-distinct action, so the O(n^2) dedup rule lives here alone -- a new carrier or
+    // shared hook is picked up by all three paths automatically. Host-compatible.
+    template <typename KeyOf, typename Fn>
+    void forEachDistinct(size_t count, KeyOf keyOf, Fn fn)
+    {
+        for (size_t i = 0; i < count; ++i)
+        {
+            auto key = keyOf(i);
+            bool seen = false;
+            for (size_t j = 0; j < i && !seen; ++j)
+                seen = (keyOf(j) == key);
+            if (!seen) fn(key);
+        }
+    }
 }
 
 static Preferences timerPrefs;
@@ -780,14 +799,9 @@ void TimerManager_::publishAttributeGroup(TimerHaEntity carrier)
 // several rows), mirroring publishAllWire's hook dedupe.
 void TimerManager_::publishAllAttributeGroups()
 {
-    for (size_t i = 0; i < TIMER_ATTR_GROUP_DESC_COUNT; ++i)
-    {
-        TimerHaEntity carrier = TIMER_ATTR_GROUP_DESCS[i].carrier;
-        bool seen = false;
-        for (size_t j = 0; j < i && !seen; ++j)
-            seen = (TIMER_ATTR_GROUP_DESCS[j].carrier == carrier);
-        if (!seen) publishAttributeGroup(carrier);
-    }
+    forEachDistinct(TIMER_ATTR_GROUP_DESC_COUNT,
+        [](size_t i) { return TIMER_ATTR_GROUP_DESCS[i].carrier; },
+        [this](TimerHaEntity carrier) { publishAttributeGroup(carrier); });
 }
 
 // Teardown mirror of publishAllAttributeGroups: empty the retained json_attr_t
@@ -798,38 +812,30 @@ void TimerManager_::publishAllAttributeGroups()
 // existed (nothing was advertised, so nothing to clear).
 void TimerManager_::clearAllAttributeGroups()
 {
-    for (size_t i = 0; i < TIMER_ATTR_GROUP_DESC_COUNT; ++i)
-    {
-        TimerHaEntity carrier = TIMER_ATTR_GROUP_DESCS[i].carrier;
-        bool seen = false;
-        for (size_t j = 0; j < i && !seen; ++j)
-            seen = (TIMER_ATTR_GROUP_DESCS[j].carrier == carrier);
-        if (!seen)
+    forEachDistinct(TIMER_ATTR_GROUP_DESC_COUNT,
+        [](size_t i) { return TIMER_ATTR_GROUP_DESCS[i].carrier; },
+        [](TimerHaEntity carrier) {
             MQTTManager.publishTimerWire(MQTTManager.timerWireAttrTopic(carrier).c_str(), "");
-    }
+        });
 }
 
 // Full wire refresh (issue #41, closing PRD #28). The run-state trio is a fixed
 // set (state/remaining/duration are run-state, not table rows); the config half
 // is DERIVED from TIMER_MEMBER_CONFIG_DESCS, so a row added with a publish hook
 // is republished on connect / discovery-enable without touching this function.
-// Hooks are deduped by pointer — the four icon rows share one aggregate hook,
-// whose JSON must hit the wire exactly once. Order preserved from the retired
-// hand-listed blocks: duration, remaining, state, then table order.
+// Hooks are deduped by pointer (forEachDistinct) — the four icon rows share one
+// aggregate hook, whose JSON must hit the wire exactly once; the null-hook rows
+// (key not individually published) collapse to one distinct null that the guard
+// skips. Order preserved from the retired hand-listed blocks: duration, remaining,
+// state, then table order.
 void TimerManager_::publishAllWire()
 {
     publishDuration();
     publishRemaining();
     publishState();
-    for (size_t i = 0; i < TIMER_MEMBER_CONFIG_DESC_COUNT; ++i)
-    {
-        void (*hook)() = TIMER_MEMBER_CONFIG_DESCS[i].publish;
-        if (!hook) continue;
-        bool fired = false;
-        for (size_t j = 0; j < i && !fired; ++j)
-            fired = (TIMER_MEMBER_CONFIG_DESCS[j].publish == hook);
-        if (!fired) hook();
-    }
+    forEachDistinct(TIMER_MEMBER_CONFIG_DESC_COUNT,
+        [](size_t i) { return TIMER_MEMBER_CONFIG_DESCS[i].publish; },
+        [](void (*hook)()) { if (hook) hook(); });
 }
 
 // ---------------------------------------------------------------------------
