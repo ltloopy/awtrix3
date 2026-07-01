@@ -96,6 +96,15 @@ resets the idle timer exactly as before.
 
 ### Forwarders keep the call sites unchanged
 
+> **Superseded in part by [#154](https://github.com/ltloopy/awtrix3/issues/154).** The forwarders
+> and getters below no longer exist: [#168](https://github.com/ltloopy/awtrix3/issues/168) removed
+> the `enterConfigMode`/`exitConfigMode`/`configCycleField`/`configAdjust` forwarders and the
+> `isInConfig`/`getConfigField`/`getConfigHH/MM/SS` getters from `TimerManager`, and
+> [#167](https://github.com/ltloopy/awtrix3/issues/167) removed the `TimerSnapshot` config fields
+> once the config-screen render path was gone. The `TimerConfigEditor` **class** stays live — now
+> consumed only by the TIMER-menu duration editor ([ADR-0016](0016-timer-menu-drillin-navigation.md)).
+> The extraction decision below is otherwise unchanged.
+
 `TimerManager::enterConfigMode/exitConfigMode/configCycleField/configAdjust` and the
 `isInConfig`/`getConfigField`/`getConfigHH/MM/SS` getters are retained as thin forwarders, so
 `TimerView`, `Apps.cpp`, and `PeripheryManager` are untouched. `TimerSnapshot` (the view's input)
