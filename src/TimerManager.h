@@ -363,10 +363,14 @@ public:
     BuzzerMode   getBuzzerMode()   const { return buzzerMode; }
     FinishedMode getFinishedMode() const { return finishedMode; }
 
-    const String &getIconIdle()     const { return iconByState[(size_t)TimerState::Idle]; }
-    const String &getIconRunning()  const { return iconByState[(size_t)TimerState::Running]; }
-    const String &getIconPaused()   const { return iconByState[(size_t)TimerState::Paused]; }
-    const String &getIconFinished() const { return iconByState[(size_t)TimerState::Finished]; }
+    // The raw per-state slot (no Idle fallback — that lives in getIconForState).
+    // The one indexed read the snapshot/emit hook uses; the four named getters
+    // delegate here, mirroring how setIcon unified the setters (#184/#185).
+    const String &getIcon(TimerState s) const { return iconByState[(size_t)s]; }
+    const String &getIconIdle()     const { return getIcon(TimerState::Idle); }
+    const String &getIconRunning()  const { return getIcon(TimerState::Running); }
+    const String &getIconPaused()   const { return getIcon(TimerState::Paused); }
+    const String &getIconFinished() const { return getIcon(TimerState::Finished); }
     const String &getIconForState(TimerState s) const;
 
     const char *getStateString() const;
