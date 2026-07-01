@@ -18,7 +18,6 @@ namespace {
     // the propagation surface, with headroom for ArduinoJson's larger 64-bit slots
     // (host tests). The HTTP/MQTT control surfaces never approach it.
     constexpr uint16_t kTimerCmdJsonSize     = 2048;
-    constexpr uint32_t kConfigHHMax          = 99UL * 3600UL;
 
     const char *FALLBACK_END_RTTTL  = "timer:d=4,o=5,b=120:c,8p,c,8p,c";
     const char *FALLBACK_TICK_RTTTL = "tick:d=16,o=6,b=200:c";
@@ -149,7 +148,6 @@ void TimerManager_::setup()
     if (TIMER_MAX_DURATION > 0 && durationSec > TIMER_MAX_DURATION) durationSec = TIMER_MAX_DURATION;
     remainingSec = durationSec;
     state = TimerState::Idle;
-    configEditor.exit();   // a (re)boot is never mid-edit; discard any editor state (return unused)
     _suspendPersist = false;
     _dirty = false;        // just loaded from NVS: RAM matches it, nothing pending
 
@@ -392,39 +390,6 @@ bool TimerManager_::isValidAction(const String &s)
     return timerIsValidAction(s);
 }
 
-// Legacy Timer-app config-mode forwarders. The TIMER menu's DURATION leaf replaced
-// this surface (#87), so these have no callers; they remain only so TimerView/
-// Apps.cpp/PeripheryManager keep compiling. The value logic and hold-to-repeat live
-// in TimerConfigEditor (the editor has no auto-apply timeout anymore, #88). Only the
-// run-state mutation (the enter-time 99h clamp, the exit-time setDuration/drain/
-// broadcast) stays here. See docs/adr/0011 (extraction) and docs/adr/0016.
-void TimerManager_::enterConfigMode()
-{
-    if (state != TimerState::Idle) return;
-    if (durationSec > kConfigHHMax) durationSec = kConfigHHMax;   // keep HH two-digit-editable (run-state)
-    configEditor.enter(durationSec);
-}
-
-void TimerManager_::exitConfigMode()
-{
-    if (!configEditor.isActive()) return;
-    setDuration(configEditor.exit());   // commit the edited duration through the unchanged path
-    DisplayManager.drainDeferredNotifications();
-    // A bare duration edit propagates nothing (#126): duration rides only with a start.
-}
-
-void TimerManager_::configCycleField()
-{
-    if (!configEditor.isActive()) return;
-    configEditor.cycleField();
-}
-
-void TimerManager_::configAdjust(int delta)
-{
-    if (!configEditor.isActive()) return;
-    configEditor.adjust(delta);
-}
-
 void TimerManager_::enterRunning()
 {
     state = TimerState::Running;
@@ -545,18 +510,6 @@ void TimerManager_::tick()
 {
     unsigned long now = millis();
 
-    if (configEditor.isActive())
-    {
-        // Legacy Timer-app config mode is no longer entered (the TIMER menu's
-        // DURATION leaf replaced it, #87); this only drives the editor's hold-to-
-        // repeat if it is ever active. There is no auto-apply timeout (#88).
-        EasyButton *bL = PeripheryManager.buttonL;
-        EasyButton *bR = PeripheryManager.buttonR;
-        TimerConfigEditor::ButtonState buttons{ bL && bL->isPressed(), bR && bR->isPressed() };
-        configEditor.tick(now, buttons);
-        return;
-    }
-
     if (state == TimerState::Running)
     {
         uint32_t newRemaining = computeCurrentRemaining();
@@ -646,17 +599,6 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     if (!plan.ok) return TimerCmdResult::BadField;   // first invalid field; nothing applied
 
     // -- Command is known-good: only now disturb device state. --
-    if (configEditor.isActive())
-    {
-        // An accepted inbound command discards an in-progress on-device edit and drains
-        // any notifications deferred during config. A rejected command (above) leaves the
-        // edit untouched. exit() deactivates; the return is intentionally discarded (the
-        // edit is aborted, not committed via setDuration).
-        configEditor.exit();
-        DisplayManager.drainDeferredNotifications();
-        if (DEBUG_MODE) DEBUG_PRINTLN("timer: config aborted by inbound command");
-    }
-
     // One-shot override (issue #100): before applying, snapshot the saved config so
     // returnToIdle() can restore it. Only the first one-shot in a run captures (latest-
     // command-wins, single snapshot); a later one-shot applies on top of the same baseline.

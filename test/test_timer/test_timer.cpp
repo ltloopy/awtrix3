@@ -351,46 +351,9 @@ void test_U13_start_from_finished_stops_sound_and_rearms(void) {
 //   U15 (tight 3600 cap, per-field recompute)        -> test_CE3
 //   U16 (no cap when TIMER_MAX_DURATION == 0)         -> test_CE4
 //   U17 (decrement at 0 wraps to the dynamic cap)     -> test_CE5
-// The TimerManager forwarder roundtrip is still covered end-to-end by U18/U19/
-// U22/U27/U31 below, which exercise enterConfigMode/exitConfigMode + run-state.
+// U18/U19 removed with the TimerManager config-mode surface (#168): the live
+// duration editor (TimerConfigEditor) is covered directly by test_CE2..CE5.
 // ============================================================================
-
-// ============================================================================
-// U18 — Exit-time setDuration backstop never has to clamp (cap held mid-edit)
-// ============================================================================
-void test_U18_config_exit_value_already_within_cap(void) {
-    TIMER_MAX_DURATION = 3600;
-    TimerManager.setDuration(1);
-    TimerManager.enterConfigMode();
-
-    // Drive HH up to its cap given MM=0,SS=1: dynMax = (3600-1)/3600 = 0.
-    TimerManager.configAdjust(+1);
-    TEST_ASSERT_EQUAL_UINT8(0, TimerManager.getConfigHH());
-
-    // Now zero SS, then push HH to 1 (now allowed).
-    TimerManager.configCycleField();  // MM
-    TimerManager.configCycleField();  // SS
-    TimerManager.configAdjust(-1);    // SS 1→0
-    TimerManager.configCycleField();  // HH
-    TimerManager.configAdjust(+1);    // HH 0→1
-    TEST_ASSERT_EQUAL_UINT8(1, TimerManager.getConfigHH());
-
-    TimerManager.exitConfigMode();
-    TEST_ASSERT_FALSE(TimerManager.isInConfig());
-    TEST_ASSERT_EQUAL_UINT32(3600, TimerManager.getDuration());
-}
-
-// ============================================================================
-// U19 (M2) — enterConfigMode clamps durationSec to 99h to keep HH editable
-// ============================================================================
-void test_U19_enterConfig_clamps_duration_at_99h(void) {
-    TIMER_MAX_DURATION = 0;  // disable the upper cap so we can install a huge value
-    TimerManager.setDuration(99UL * 3600UL + 1UL * 3600UL + 30UL);  // 100h00m30s
-    TimerManager.enterConfigMode();
-    TEST_ASSERT_TRUE(TimerManager.isInConfig());
-    TEST_ASSERT_EQUAL_UINT8(99, TimerManager.getConfigHH());
-    TEST_ASSERT_EQUAL_UINT32(99UL * 3600UL, TimerManager.getDuration());
-}
 
 // ============================================================================
 // U20 (H1) — icon name validation: strict whitelist
@@ -900,31 +863,8 @@ void test_IM6_malformed_inline_atomic_reject(void) {
     TEST_ASSERT_EQUAL_STRING("timer_end", TIMER_MELODY_END.c_str());    // melody unchanged
 }
 
-// ============================================================================
-// U22 (M1) — parseCommand while in config: drop partial edit, drain deferred,
-// accept command. The partial edit must NOT be committed to durationSec.
-// ============================================================================
-void test_U22_parseCommand_aborts_config_without_committing_edit(void) {
-    TimerManager.setDuration(300);
-    TimerManager.enterConfigMode();
-    // Move HH up so the partial edit (if committed) would diverge from 300s.
-    TimerManager.configAdjust(+1);  // HH 0 -> 1, total would be 3600 + (300%3600)
-    TEST_ASSERT_TRUE(TimerManager.isInConfig());
-
-    int drain_before = DisplayManager.drain_calls;
-
-    TimerManager.parseCommand("{\"action\":\"start\"}");
-
-    // Config exited.
-    TEST_ASSERT_FALSE(TimerManager.isInConfig());
-    // Deferred notifications drained (M1 invariant).
-    TEST_ASSERT_EQUAL_INT(drain_before + 1, DisplayManager.drain_calls);
-    // The on-device edit was DISCARDED — duration unchanged.
-    TEST_ASSERT_EQUAL_UINT32(300, TimerManager.getDuration());
-    // The command was honored.
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Running),
-                      static_cast<int>(TimerManager.getState()));
-}
+// U22 removed with the TimerManager config-mode surface (#168): parseCommand no
+// longer has an in-progress on-device edit to abort.
 
 // ============================================================================
 // U23 — formatHMS emits a trimmed clock string (hours dropped when zero,
@@ -1031,19 +971,8 @@ void test_U26_parseCommand_duration_string_and_number(void) {
     TEST_ASSERT_EQUAL_UINT32(180, TimerManager.getDuration());
 }
 
-// ============================================================================
-// U27 — config round-trip is unchanged after unifying onto the shared helpers
-// (regression guard: enter decomposes seconds, exit recomposes them).
-// ============================================================================
-void test_U27_config_roundtrip_unchanged(void) {
-    TimerManager.setDuration(3661);  // 1:01:01
-    TimerManager.enterConfigMode();
-    TEST_ASSERT_EQUAL_UINT8(1, TimerManager.getConfigHH());
-    TEST_ASSERT_EQUAL_UINT8(1, TimerManager.getConfigMM());
-    TEST_ASSERT_EQUAL_UINT8(1, TimerManager.getConfigSS());
-    TimerManager.exitConfigMode();
-    TEST_ASSERT_EQUAL_UINT32(3661, TimerManager.getDuration());
-}
+// U27 removed with the TimerManager config-mode surface (#168): the enter/exit
+// seconds<->HMS round-trip now lives entirely in TimerConfigEditor (test_CE2..CE5).
 
 // ============================================================================
 // U28 — isValidDuration: range gate used by the reject-everywhere policy.
@@ -1119,28 +1048,9 @@ void test_U30_parseCommand_atomic_reject(void) {
                       static_cast<int>(TimerManager.getState()));
 }
 
-// ============================================================================
-// U31 — Config-abort is atomic (#11): a rejected command leaves an in-progress
-// on-device edit intact; a valid command aborts config and applies.
-// ============================================================================
-void test_U31_config_abort_only_on_valid_command(void) {
-    SHOW_TIMER = true;
-    TIMER_MAX_DURATION = 86400;
-    TimerManager.setDuration(300);
-    TimerManager.enterConfigMode();
-    TEST_ASSERT_TRUE(TimerManager.isInConfig());
-
-    // Rejected command: config edit untouched.
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::BadField),
-                      static_cast<int>(TimerManager.parseCommand("{\"duration\":\"banana\"}")));
-    TEST_ASSERT_TRUE(TimerManager.isInConfig());
-
-    // Valid command: config aborts and the value applies.
-    TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
-                      static_cast<int>(TimerManager.parseCommand("{\"duration\":\"00:01:00\"}")));
-    TEST_ASSERT_FALSE(TimerManager.isInConfig());
-    TEST_ASSERT_EQUAL_UINT32(60, TimerManager.getDuration());
-}
+// U31 removed with the TimerManager config-mode surface (#168): there is no
+// on-device edit for an inbound command to abort. Atomic-reject of a bad field is
+// still covered by U29/U30.
 
 // ============================================================================
 // U36 — parseCommand accepts the three tuning-knob keys in range and writes
@@ -2398,13 +2308,12 @@ void test_U51_setDuration_while_paused_resets_to_idle(void) {
 }
 
 // ============================================================================
-// U53 — when the editor is NOT active, tick() runs the run-state machine: the
-// config branch never intercepts a Running countdown (issue #23 delegation guard).
+// U53 — tick() runs the run-state machine: with the config branch gone (#168)
+// the run loop reads straight into a Running countdown.
 // ============================================================================
 void test_U53_tick_runs_runstate_when_not_in_config(void) {
     TimerManager.setDuration(10);
     TimerManager.start();
-    TEST_ASSERT_FALSE(TimerManager.isInConfig());
     TEST_ASSERT_EQUAL_UINT32(10, TimerManager.getRemaining());
 
     fixture::advance(4000);
@@ -4502,8 +4411,8 @@ int main(int, char **) {
     RUN_TEST(test_U12_reset_from_finished_stops_sound_and_returns_idle);
     RUN_TEST(test_U13_start_from_finished_stops_sound_and_rearms);
     // U14–U17 retargeted to TimerConfigEditor (test_CE2..CE5); see note above their defs.
-    RUN_TEST(test_U18_config_exit_value_already_within_cap);
-    RUN_TEST(test_U19_enterConfig_clamps_duration_at_99h);
+    // U18/U19 removed with the TimerManager config-mode surface (#168); the live
+    // duration editor is covered directly by test_CE2..CE5.
     RUN_TEST(test_U20_icon_name_validation);
     RUN_TEST(test_U21_parseCommand_batches_persist);
     RUN_TEST(test_U55_parseCommand_rejected_payload_persists_nothing);
@@ -4529,18 +4438,15 @@ int main(int, char **) {
     RUN_TEST(test_IM4_bare_melody_name_still_persists);
     RUN_TEST(test_IM5_inline_never_in_config_mirror);
     RUN_TEST(test_IM6_malformed_inline_atomic_reject);
-    RUN_TEST(test_U22_parseCommand_aborts_config_without_committing_edit);
     RUN_TEST(test_U23_formatHMS_trimmed);
     RUN_TEST(test_U24_parseHMS_accepts);
     RUN_TEST(test_U25_parseHMS_rejects);
     RUN_TEST(test_timerParseHMS_direct);
     RUN_TEST(test_timerIsValidAction_direct);
     RUN_TEST(test_U26_parseCommand_duration_string_and_number);
-    RUN_TEST(test_U27_config_roundtrip_unchanged);
     RUN_TEST(test_U28_isValidDuration);
     RUN_TEST(test_U29_parseCommand_strict_results);
     RUN_TEST(test_U30_parseCommand_atomic_reject);
-    RUN_TEST(test_U31_config_abort_only_on_valid_command);
     RUN_TEST(test_U36_parseCommand_tuning_keys_accepted_in_range);
     RUN_TEST(test_U38_parseCommand_tuning_change_persists_via_saveSettings);
     RUN_TEST(test_U39_parseCommand_behavior_params_accepted_in_range);
