@@ -390,15 +390,63 @@ bool TimerManager_::isValidAction(const String &s)
     return timerIsValidAction(s);
 }
 
-void TimerManager_::enterRunning()
+// Apply the run-state bookkeeping a returned Transition names (issue #180). The
+// pure engine decides the phase change; this owns the state mutation — including
+// enterRunning's runStart* capture and the ADR-0024 override restore behind
+// ToIdle — so the override store stays in the singleton (PRD #28 US7). Runs
+// BEFORE the effects, so the publishes carry the new phase/remaining.
+void TimerManager_::applyTransition(const TimerRuntime::Result &r, unsigned long now,
+                                    const TimerRuntime::Inputs &in)
 {
-    state = TimerState::Running;
-    runStartMs = millis();
-    runStartRemainingSec = remainingSec;
-    runDurationSec = durationSec;   // snapshot so a mid-run duration edit doesn't snap the progress bar
-    publishState();
-    publishRemaining();
-    lastPublishMs = millis();
+    switch (r.transition)
+    {
+    case TimerRuntime::Transition::ToRunning:
+        // enterRunning: a fresh start (from Idle/Finished) loads the full duration;
+        // a resume (from Paused) keeps the frozen remaining. `state` is still the
+        // prior phase here, so it decides which.
+        if (state != TimerState::Paused) remainingSec = in.durationSec;
+        state = TimerState::Running;
+        runStartMs = now;
+        runStartRemainingSec = remainingSec;
+        runDurationSec = in.durationSec;   // progress-bar denominator (buffers a mid-run duration edit)
+        lastPublishMs = now;
+        break;
+    case TimerRuntime::Transition::ToPaused:
+        remainingSec = in.newRemaining;    // freeze the wall-clock remaining
+        state = TimerState::Paused;
+        break;
+    case TimerRuntime::Transition::ToFinished:
+        state = TimerState::Finished;
+        remainingSec = 0;
+        enteredFinishedMs = now;
+        lastRealertMs = now;
+        break;
+    case TimerRuntime::Transition::ToIdle:
+        returnToIdle();                    // one-shot: restore saved config (ADR-0024 store stays here)
+        state = TimerState::Idle;
+        remainingSec = in.durationSec;
+        break;
+    case TimerRuntime::Transition::IdleReload:
+        remainingSec = in.durationSec;     // duration edited while Idle; phase stays Idle
+        break;
+    case TimerRuntime::Transition::None:
+        break;
+    }
+}
+
+// Thin adapter for the input-driven lifecycle verbs (issue #180): resolve the
+// inputs, let TimerRuntime::step() decide the transition + ordered effects, apply
+// the run-state bookkeeping, then execute the effects. The same shape tick() uses,
+// so start/pause/reset/setDuration and the countdown step share one seam.
+void TimerManager_::runCommand(TimerRuntime::Command cmd)
+{
+    unsigned long now = millis();
+    TimerRuntime::Inputs in = buildInputs();
+    in.command = cmd;
+    TimerRuntime::State st{state, remainingSec, lastPublishMs, enteredFinishedMs, lastRealertMs};
+    TimerRuntime::Result r = TimerRuntime::step(st, now, in);
+    applyTransition(r, now, in);
+    for (const TimerRuntime::Effect &e : r.effects) applyEffect(e);
 }
 
 // Resolve the environment gates + config the pure engine reads into an Inputs
@@ -408,6 +456,7 @@ void TimerManager_::enterRunning()
 TimerRuntime::Inputs TimerManager_::buildInputs() const
 {
     TimerRuntime::Inputs in;
+    in.durationSec      = durationSec;
     in.newRemaining     = computeCurrentRemaining();
     in.countdownArmed   = SOUND_ACTIVE && buzzerMode == BuzzerMode::Countdown && tickRtttl.length() > 0;
     in.isPlaying        = PeripheryManager.isPlaying();
@@ -456,65 +505,24 @@ void TimerManager_::applyEffect(const TimerRuntime::Effect &e)
     }
 }
 
-void TimerManager_::start()
-{
-    if (state == TimerState::Running) return;
-    if (state == TimerState::Finished)
-    {
-        PeripheryManager.stopSound();
-        remainingSec = durationSec;
-    }
-    else if (state == TimerState::Idle)
-    {
-        remainingSec = durationSec;
-    }
-    enterRunning();
-}
+void TimerManager_::start() { runCommand(TimerRuntime::Command::Start); }
 
-void TimerManager_::pause()
-{
-    if (state == TimerState::Running)
-    {
-        remainingSec = computeCurrentRemaining();
-        state = TimerState::Paused;
-        publishState();
-        publishRemaining();
-    }
-    else if (state == TimerState::Paused)
-    {
-        enterRunning();
-    }
-}
+void TimerManager_::pause() { runCommand(TimerRuntime::Command::Pause); }
 
-void TimerManager_::reset()
-{
-    PeripheryManager.stopSound();
-    returnToIdle();                 // one-shot: restore saved config before deriving remaining (issue #100)
-    state = TimerState::Idle;
-    remainingSec = durationSec;
-    publishState();
-    publishRemaining();
-    if (MATRIX_OFF)
-    {
-        DisplayManager.setBrightness(0);
-    }
-}
+void TimerManager_::reset() { runCommand(TimerRuntime::Command::Reset); }
 
 void TimerManager_::setDuration(uint32_t seconds)
 {
+    // Clamp + no-op guard stay in the adapter (input validation, not a transition);
+    // durationSec must be committed before runCommand so buildInputs() feeds the
+    // engine the NEW duration (the Idle reload / paused-edit reset load it into
+    // remaining). The engine decides the phase transition (issue #180); the duration
+    // persist + republish are unconditional adapter concerns.
     if (seconds < 1) seconds = 1;
     if (TIMER_MAX_DURATION > 0 && seconds > TIMER_MAX_DURATION) seconds = TIMER_MAX_DURATION;
     if (durationSec == seconds) return;
     durationSec = seconds;
-    if (state == TimerState::Idle)
-    {
-        remainingSec = durationSec;
-        publishRemaining();
-    }
-    else if (state == TimerState::Paused)
-    {
-        reset();   // editing duration while paused resets to Idle with the new duration
-    }
+    runCommand(TimerRuntime::Command::SetDuration);   // Idle: reload remaining; Paused: reset to Idle (US6)
     persistIfDirty();
     publishDuration();
 }
@@ -552,28 +560,22 @@ void TimerManager_::tick()
     TimerRuntime::State  st{state, remainingSec, lastPublishMs, enteredFinishedMs, lastRealertMs};
     TimerRuntime::Result r = TimerRuntime::step(st, now, in);
 
+    // Tick-only bookkeeping the transition switch does not own: the Running branch
+    // always advances remaining to the freshly-computed value and re-anchors the
+    // publish throttle; the Finished branch advances the re-alert anchor. The phase
+    // change itself (ToFinished / auto-clear ToIdle) is applied by applyTransition,
+    // the same seam start/pause/reset/setDuration use (issue #180).
     if (state == TimerState::Running)
     {
         remainingSec = in.newRemaining;
         if (r.publishFired) lastPublishMs = now;
-        if (r.transition == TimerRuntime::Transition::ToFinished)
-        {
-            state = TimerState::Finished;
-            remainingSec = 0;
-            enteredFinishedMs = now;
-            lastRealertMs = now;
-        }
     }
-    else   // Finished
+    else if (r.realertFired)   // Finished
     {
-        if (r.transition == TimerRuntime::Transition::ToIdle)
-        {
-            returnToIdle();             // one-shot: restore saved config (shared seam, issue #100)
-            state = TimerState::Idle;
-            remainingSec = durationSec;
-        }
-        if (r.realertFired) lastRealertMs = now;
+        lastRealertMs = now;
     }
+
+    applyTransition(r, now, in);
 
     for (const TimerRuntime::Effect &e : r.effects) applyEffect(e);
 }

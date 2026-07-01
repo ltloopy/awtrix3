@@ -27,8 +27,86 @@ namespace TimerRuntime
         }
     }
 
+    // The reset bundle, shared by an explicit reset and a paused-duration edit:
+    // stop any sound, republish the (now Idle) run-state, and — when the panel is
+    // dark — drop brightness to 0. Ported in order from the old TimerManager::reset.
+    static void appendReset(std::vector<Effect> &fx, const Inputs &in)
+    {
+        fx.push_back({EffectKind::StopSound});
+        fx.push_back({EffectKind::PublishState});
+        fx.push_back({EffectKind::PublishRemaining});
+        if (in.matrixOff)
+            fx.push_back({EffectKind::SetBrightness});   // brightness 0
+    }
+
+    // The input-driven lifecycle transitions (issue #180): start/pause/reset/
+    // setDuration decided as pure phase transitions over the same effect seam. The
+    // adapter owns the run-state bookkeeping each Transition names (enterRunning's
+    // runStart* capture, the ADR-0024 override restore behind ToIdle); here we only
+    // decide the phase change and the ordered effects.
+    static Result stepCommand(const State &s, const Inputs &in)
+    {
+        Result r;
+        switch (in.command)
+        {
+        case Command::Start:
+            if (s.phase == TimerState::Running) break;   // already running: no-op
+            if (s.phase == TimerState::Finished)
+                r.effects.push_back({EffectKind::StopSound});
+            r.effects.push_back({EffectKind::PublishState});
+            r.effects.push_back({EffectKind::PublishRemaining});
+            r.transition = Transition::ToRunning;
+            break;
+
+        case Command::Pause:
+            if (s.phase == TimerState::Running)
+            {
+                r.effects.push_back({EffectKind::PublishState});
+                r.effects.push_back({EffectKind::PublishRemaining});
+                r.transition = Transition::ToPaused;
+            }
+            else if (s.phase == TimerState::Paused)
+            {
+                // A second press resumes: same publishes as enterRunning.
+                r.effects.push_back({EffectKind::PublishState});
+                r.effects.push_back({EffectKind::PublishRemaining});
+                r.transition = Transition::ToRunning;
+            }
+            break;
+
+        case Command::Reset:
+            appendReset(r.effects, in);
+            r.transition = Transition::ToIdle;
+            break;
+
+        case Command::SetDuration:
+            if (s.phase == TimerState::Idle)
+            {
+                r.effects.push_back({EffectKind::PublishRemaining});
+                r.transition = Transition::IdleReload;
+            }
+            else if (s.phase == TimerState::Paused)
+            {
+                // US6: editing the duration while Paused resets cleanly to Idle
+                // with the new duration — the reset bundle, then remaining reloads.
+                appendReset(r.effects, in);
+                r.transition = Transition::ToIdle;
+            }
+            // Running / Finished: duration changes silently (the adapter still
+            // persists + republishes it); no run-state transition.
+            break;
+
+        case Command::Tick:
+            break;   // unreachable: step() dispatches Tick to the countdown path
+        }
+        return r;
+    }
+
     Result step(const State &state, unsigned long nowMs, const Inputs &in)
     {
+        if (in.command != Command::Tick)
+            return stepCommand(state, in);
+
         Result r;
 
         if (state.phase == TimerState::Finished)

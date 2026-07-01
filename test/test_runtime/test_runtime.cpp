@@ -12,6 +12,7 @@
 
 #include "../../src/TimerRuntime.h"
 
+using TimerRuntime::Command;
 using TimerRuntime::Effect;
 using TimerRuntime::EffectKind;
 using TimerRuntime::Inputs;
@@ -196,6 +197,190 @@ void test_D2_realert_skips_tone_while_playing(void) {
     TEST_ASSERT_EQUAL_UINT(0, r.effects.size());
 }
 
+// --- Input-driven lifecycle transitions (issue #180) ---------------------------
+//
+// The same public verbs TimerManager exposes, decided here: start/pause/reset/
+// setDuration. Each asserts the returned Transition + the ordered publish/stop/
+// brightness effects, exactly as the tick tests do — no singleton, no hardware.
+
+// start from Idle: arm the run. enterRunning's two publishes, ToRunning (the
+// adapter loads remaining = durationSec because the prior phase is not Paused).
+void test_S1_start_from_idle(void) {
+    Inputs in;
+    in.command = Command::Start;
+    in.durationSec = 300;
+
+    Result r = TimerRuntime::step(State{TimerState::Idle, 300}, 1000, in);
+
+    TEST_ASSERT_EQUAL(Transition::ToRunning, r.transition);
+    TEST_ASSERT_EQUAL_UINT(2, r.effects.size());
+    TEST_ASSERT_EQUAL(EffectKind::PublishState, r.effects[0].kind);
+    TEST_ASSERT_EQUAL(EffectKind::PublishRemaining, r.effects[1].kind);
+}
+
+// start from Finished stops the end tone FIRST, then arms the run.
+void test_S2_start_from_finished_stops_sound(void) {
+    Inputs in;
+    in.command = Command::Start;
+    in.durationSec = 300;
+
+    Result r = TimerRuntime::step(State{TimerState::Finished, 0}, 1000, in);
+
+    TEST_ASSERT_EQUAL(Transition::ToRunning, r.transition);
+    TEST_ASSERT_EQUAL_UINT(3, r.effects.size());
+    TEST_ASSERT_EQUAL(EffectKind::StopSound, r.effects[0].kind);
+    TEST_ASSERT_EQUAL(EffectKind::PublishState, r.effects[1].kind);
+    TEST_ASSERT_EQUAL(EffectKind::PublishRemaining, r.effects[2].kind);
+}
+
+// start from Paused resumes: ToRunning with no StopSound (the adapter keeps the
+// frozen remaining because the prior phase IS Paused).
+void test_S3_start_from_paused_resumes(void) {
+    Inputs in;
+    in.command = Command::Start;
+    in.durationSec = 300;
+
+    Result r = TimerRuntime::step(State{TimerState::Paused, 240}, 1000, in);
+
+    TEST_ASSERT_EQUAL(Transition::ToRunning, r.transition);
+    TEST_ASSERT_EQUAL_UINT(2, r.effects.size());
+    TEST_ASSERT_EQUAL(EffectKind::PublishState, r.effects[0].kind);
+    TEST_ASSERT_EQUAL(EffectKind::PublishRemaining, r.effects[1].kind);
+}
+
+// start while already Running is a no-op — no transition, no effects.
+void test_S4_start_while_running_noop(void) {
+    Inputs in;
+    in.command = Command::Start;
+    in.durationSec = 300;
+
+    Result r = TimerRuntime::step(State{TimerState::Running, 120}, 1000, in);
+
+    TEST_ASSERT_EQUAL(Transition::None, r.transition);
+    TEST_ASSERT_EQUAL_UINT(0, r.effects.size());
+}
+
+// pause from Running freezes to Paused, republishing the frozen run-state.
+void test_P1_pause_from_running(void) {
+    Inputs in;
+    in.command = Command::Pause;
+    in.newRemaining = 174;
+
+    Result r = TimerRuntime::step(State{TimerState::Running, 175}, 1000, in);
+
+    TEST_ASSERT_EQUAL(Transition::ToPaused, r.transition);
+    TEST_ASSERT_EQUAL_UINT(2, r.effects.size());
+    TEST_ASSERT_EQUAL(EffectKind::PublishState, r.effects[0].kind);
+    TEST_ASSERT_EQUAL(EffectKind::PublishRemaining, r.effects[1].kind);
+}
+
+// pause while Paused resumes the run (ToRunning), same publishes as a start.
+void test_P2_pause_while_paused_resumes(void) {
+    Inputs in;
+    in.command = Command::Pause;
+
+    Result r = TimerRuntime::step(State{TimerState::Paused, 174}, 1000, in);
+
+    TEST_ASSERT_EQUAL(Transition::ToRunning, r.transition);
+    TEST_ASSERT_EQUAL_UINT(2, r.effects.size());
+    TEST_ASSERT_EQUAL(EffectKind::PublishState, r.effects[0].kind);
+    TEST_ASSERT_EQUAL(EffectKind::PublishRemaining, r.effects[1].kind);
+}
+
+// pause from Idle or Finished is a no-op.
+void test_P3_pause_from_idle_or_finished_noop(void) {
+    Inputs in;
+    in.command = Command::Pause;
+
+    Result idle = TimerRuntime::step(State{TimerState::Idle, 300}, 1000, in);
+    TEST_ASSERT_EQUAL(Transition::None, idle.transition);
+    TEST_ASSERT_EQUAL_UINT(0, idle.effects.size());
+
+    Result fin = TimerRuntime::step(State{TimerState::Finished, 0}, 1000, in);
+    TEST_ASSERT_EQUAL(Transition::None, fin.transition);
+    TEST_ASSERT_EQUAL_UINT(0, fin.effects.size());
+}
+
+// reset from any phase returns to Idle: stop sound, republish, and (matrix dark)
+// drop brightness to 0. Asserted from Running with the matrix off.
+void test_X1_reset_stops_and_dims(void) {
+    Inputs in;
+    in.command = Command::Reset;
+    in.durationSec = 300;
+    in.matrixOff = true;
+
+    Result r = TimerRuntime::step(State{TimerState::Running, 120}, 1000, in);
+
+    TEST_ASSERT_EQUAL(Transition::ToIdle, r.transition);
+    TEST_ASSERT_EQUAL_UINT(4, r.effects.size());
+    TEST_ASSERT_EQUAL(EffectKind::StopSound, r.effects[0].kind);
+    TEST_ASSERT_EQUAL(EffectKind::PublishState, r.effects[1].kind);
+    TEST_ASSERT_EQUAL(EffectKind::PublishRemaining, r.effects[2].kind);
+    TEST_ASSERT_EQUAL(EffectKind::SetBrightness, r.effects[3].kind);
+    TEST_ASSERT_EQUAL_UINT(0, r.effects[3].brightness);
+}
+
+// reset with the matrix on omits the brightness effect.
+void test_X2_reset_matrix_on_no_brightness(void) {
+    Inputs in;
+    in.command = Command::Reset;
+    in.durationSec = 300;
+    in.matrixOff = false;
+
+    Result r = TimerRuntime::step(State{TimerState::Finished, 0}, 1000, in);
+
+    TEST_ASSERT_EQUAL(Transition::ToIdle, r.transition);
+    TEST_ASSERT_EQUAL_UINT(3, r.effects.size());
+    TEST_ASSERT_EQUAL(EffectKind::StopSound, r.effects[0].kind);
+}
+
+// setDuration while Idle reloads remaining to the new duration and republishes it,
+// staying Idle (IdleReload — no phase change).
+void test_X3_setduration_idle_reloads_remaining(void) {
+    Inputs in;
+    in.command = Command::SetDuration;
+    in.durationSec = 600;
+
+    Result r = TimerRuntime::step(State{TimerState::Idle, 300}, 1000, in);
+
+    TEST_ASSERT_EQUAL(Transition::IdleReload, r.transition);
+    TEST_ASSERT_EQUAL_UINT(1, r.effects.size());
+    TEST_ASSERT_EQUAL(EffectKind::PublishRemaining, r.effects[0].kind);
+}
+
+// US6: editing the duration while Paused resets cleanly to Idle with the new
+// duration — the reset bundle + ToIdle, identical to an explicit reset.
+void test_X4_setduration_paused_resets_to_idle(void) {
+    Inputs in;
+    in.command = Command::SetDuration;
+    in.durationSec = 600;
+    in.matrixOff = false;
+
+    Result r = TimerRuntime::step(State{TimerState::Paused, 240}, 1000, in);
+
+    TEST_ASSERT_EQUAL(Transition::ToIdle, r.transition);
+    TEST_ASSERT_EQUAL_UINT(3, r.effects.size());
+    TEST_ASSERT_EQUAL(EffectKind::StopSound, r.effects[0].kind);
+    TEST_ASSERT_EQUAL(EffectKind::PublishState, r.effects[1].kind);
+    TEST_ASSERT_EQUAL(EffectKind::PublishRemaining, r.effects[2].kind);
+}
+
+// setDuration while Running or Finished changes no run-state: no transition, no
+// run-state effects (the adapter still persists + republishes the duration).
+void test_X5_setduration_running_or_finished_no_transition(void) {
+    Inputs in;
+    in.command = Command::SetDuration;
+    in.durationSec = 600;
+
+    Result run = TimerRuntime::step(State{TimerState::Running, 120}, 1000, in);
+    TEST_ASSERT_EQUAL(Transition::None, run.transition);
+    TEST_ASSERT_EQUAL_UINT(0, run.effects.size());
+
+    Result fin = TimerRuntime::step(State{TimerState::Finished, 0}, 1000, in);
+    TEST_ASSERT_EQUAL(Transition::None, fin.transition);
+    TEST_ASSERT_EQUAL_UINT(0, fin.effects.size());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_R1_finished_all_gates_open);
@@ -207,5 +392,17 @@ int main(int, char **) {
     RUN_TEST(test_C2_autoclear_matrix_off_dims);
     RUN_TEST(test_D1_realert_interval_boundary);
     RUN_TEST(test_D2_realert_skips_tone_while_playing);
+    RUN_TEST(test_S1_start_from_idle);
+    RUN_TEST(test_S2_start_from_finished_stops_sound);
+    RUN_TEST(test_S3_start_from_paused_resumes);
+    RUN_TEST(test_S4_start_while_running_noop);
+    RUN_TEST(test_P1_pause_from_running);
+    RUN_TEST(test_P2_pause_while_paused_resumes);
+    RUN_TEST(test_P3_pause_from_idle_or_finished_noop);
+    RUN_TEST(test_X1_reset_stops_and_dims);
+    RUN_TEST(test_X2_reset_matrix_on_no_brightness);
+    RUN_TEST(test_X3_setduration_idle_reloads_remaining);
+    RUN_TEST(test_X4_setduration_paused_resets_to_idle);
+    RUN_TEST(test_X5_setduration_running_or_finished_no_transition);
     return UNITY_END();
 }

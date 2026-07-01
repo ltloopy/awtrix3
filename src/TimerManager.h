@@ -157,8 +157,10 @@ private:
     void addSyncEnvelope(JsonObject &sync);              // forwards to SyncEnvelope::build (injects _syncSeq)
 
     uint32_t computeCurrentRemaining() const;
-    void enterRunning();
     TimerRuntime::Inputs buildInputs() const;           // resolve engine inputs from the environment (issue #179)
+    void runCommand(TimerRuntime::Command cmd);         // start/pause/reset/setDuration adapter: step() + apply (issue #180)
+    void applyTransition(const TimerRuntime::Result &r, unsigned long now,
+                         const TimerRuntime::Inputs &in);   // run-state bookkeeping for a returned Transition
     void applyEffect(const TimerRuntime::Effect &e);    // the effects-adapter seam (issue #178)
     void persist();
     void persistIfDirty();
