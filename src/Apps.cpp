@@ -503,9 +503,7 @@ void TimerApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x,
     // the only place that maps manager state into the display-free view input.
     const TimerSnapshot snap{
         TimerManager.getState(), TimerManager.getDuration(), TimerManager.getRemaining(),
-        TimerManager.getRunDuration(), TimerManager.isInConfig(), TimerManager.getConfigField(),
-        TimerManager.getConfigHH(), TimerManager.getConfigMM(), TimerManager.getConfigSS(),
-        TIMER_ICON_ENABLED, millis()};
+        TimerManager.getRunDuration(), TIMER_ICON_ENABLED, millis()};
     const TimerView view = TimerViewModel::compute(snap);
 
     // Config and Finished pin the app in the rotation while they're on screen.
