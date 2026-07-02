@@ -1,0 +1,56 @@
+#ifndef TimerHaHost_h
+#define TimerHaHost_h
+
+#include <ArduinoHA.h>
+#include "TimerHa.h"
+
+// TimerHaHost owns the Timer's Home Assistant *carrier* lifecycle: the ten HA
+// discovery entities (their pointers and resolved unique ids), their construction
+// and teardown, the dedicated Timer duration text callback, and the Timer branches
+// of the shared ArduinoHA select/switch/button callbacks (reached via tryHandle*).
+// It is a device-bound adapter — it constructs real ArduinoHA objects against the
+// HADevice/HAMqtt globals still owned by MQTTManager (reached via extern) — so it is
+// compiled only on device (excluded from every native env's build_src_filter, exactly
+// like MQTTManager.cpp). The pure builder half lives in TimerHa (topics, descriptors,
+// options, haRegistrationAtCap). See PRD #191 / issue #193 / ADR-0026.
+
+// Option-string sizing for the dynamic Targets select (issue #112). Shared with the
+// debounced republish that — for this slice — still lives in MQTTManager.
+constexpr size_t kSyncTargetPeerCap = 16;
+constexpr size_t kSyncTargetOptsCap = 8 + kSyncTargetPeerCap * 33 + 1; // "Off;All" + ";<id>"...
+
+// Snapshot the current sorted peer ids and build the select's option string into
+// optsOut. Returns the peer count; idsOut holds the ids (whose c_str() backs ptrsOut)
+// so the caller can also map a value<->index against the SAME list. (Defined here;
+// the MQTTManager-resident Targets republish still calls it this slice.)
+size_t buildCurrentSyncTargetsOptions(String *idsOut, const char **ptrsOut, size_t cap,
+                                      char *optsOut, size_t optsLen);
+
+struct TimerHaHost_
+{
+    // Resolve the carrier ids and (when SHOW_TIMER) construct/register the carriers.
+    // Runs at the same point in HA setup as before, so the ArduinoHA registration
+    // order — and therefore the entity-cap drop order — is unchanged.
+    void setup();
+    // Publish the Timer wire artifacts + attribute groups on MQTT (re)connect.
+    void onConnected();
+    // SHOW_TIMER false->true: create carriers if missing, publish discovery + values.
+    void enable();
+    // SHOW_TIMER true->false: prune discovery config and clear the retained attr bags.
+    void remove();
+
+    // Each returns true iff sender is a Timer carrier; when true the host performs the
+    // route-through-timerHaApply + snap-back echo the shared callbacks did before.
+    bool tryHandleSelect(HASelect *sender, int8_t index);
+    bool tryHandleSwitch(bool state, HASwitch *sender);
+    bool tryHandleButton(HAButton *sender);
+
+    // Transitional accessors for the Timer wire seam still resident in MQTTManager
+    // (issue #193): whether the carriers exist, and a carrier's resolved unique id.
+    bool carriersReady() const;
+    const char *entityId(TimerHaEntity slot) const;
+};
+
+extern TimerHaHost_ TimerHaHost;
+
+#endif

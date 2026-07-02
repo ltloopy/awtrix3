@@ -10,6 +10,7 @@
 #include "TimerMenuNav.h"
 #include "TimerConfigEditor.h"
 #include "MQTTManager.h"
+#include "TimerHaHost.h"
 #include <icons.h>
 #include <UpdateManager.h>
 #include "Functions.h"   // getTextWidth (centering the duration leaf + its underline)
@@ -536,9 +537,9 @@ void MenuManager_::selectButton()
             SHOW_TIMER = !SHOW_TIMER;
             TimerManager.onShowTimerChange(prev, SHOW_TIMER);
             if (prev && !SHOW_TIMER)
-                MQTTManager.removeTimerHAEntities();
+                TimerHaHost.remove();
             else if (!prev && SHOW_TIMER)
-                MQTTManager.enableTimerHADiscovery();
+                TimerHaHost.enable();
             break;
         }
         default:

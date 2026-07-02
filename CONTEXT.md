@@ -322,6 +322,39 @@ assuming a key reads the same on every carrier (a multi-carrier key renders in e
 carrier's native representation — e.g. `max_duration` as raw seconds on the state sensor
 but a clock string on the Duration entity).
 
+### Timer HA host
+
+The **impure, device-bound half** of the Timer's Home Assistant surface, paired with the
+pure **Timer HA presence** builders (`TimerHa`: topics, descriptors, options,
+`haRegistrationAtCap`). `TimerHaHost` (`src/TimerHaHost.{h,cpp}`) owns the ten HA
+**carrier** entities' *lifecycle* — the carrier pointers and their resolved discovery ids
+(private state), constructing/registering them (idempotently, at the same HA-setup
+sequence point so the ArduinoHA registration/entity-cap drop order is unchanged), the
+runtime `enable()`/`remove()` on the `SHOW_TIMER` toggle, `onConnected()` republish, the
+dedicated Timer **duration text callback**, and the Timer branches of the shared ArduinoHA
+select/switch/button callbacks. Those shared callbacks still live in `MQTTManager` (they
+keep their non-Timer branches) and delegate the Timer sender via a leading
+`if (TimerHaHost.tryHandle…(…)) return;`; each `tryHandle*` returns whether the sender was
+a Timer carrier and, when so, performs the same route-through-`timerHaApply` +
+snap-back-echo it always did (ADR-0001 / ADR-0014). The host reaches the `HADevice`/`HAMqtt`
+client via the `extern` globals still owned by `MQTTManager` — **no injection** (one
+implementation forever; ADR-0026). It is a **relocation of responsibility, not a redesign**:
+no discovery payload, wire topic, retained value, attribute group, callback outcome, or
+snap-back echo changes; delete it and the ten-carrier lifecycle scatters straight back
+across the general MQTT module (today's pre-extraction state). Being device-bound (it
+`new HAText(...)`s the real client), it is excluded from every `native*` build exactly like
+`MQTTManager.cpp` and ships **no** host-test env — its value is locality and a shrunk
+`MQTTManager`, and it is the seam the Pomodoro host (#119) will reuse. The **Timer wire seam**
+stays in `MQTTManager` and reaches the host's private carrier state through two small
+accessors (`carriersReady()`, `entityId(slot)`).
+
+_Avoid_: reading "the Timer's HA carrier lifecycle" out of `MQTTManager` (it lives in
+`TimerHaHost` now); adding a Timer carrier or callback branch to the general MQTT module
+(it belongs on the host); introducing client injection for the ArduinoHA globals (the host
+reads them via `extern` by design — ADR-0026); expecting a host-test env for `TimerHaHost`
+(there is none — it is device-bound; the regression surface is the existing green suites +
+the `ulanzi`/`native` builds compiling).
+
 ### Propagation surface
 
 A third kind of Timer interface, distinct from both control and observation. The

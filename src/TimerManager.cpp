@@ -775,8 +775,8 @@ void TimerManager_::publishFinishedMode() { timerMemberConfigPublish("finished")
 // A carrier's read-only JSON attribute object (PRD #57 / issue #58): the bag is
 // built table-driven by timerBuildAttributeGroup, serialized, and ridden onto the
 // carrier's json_attr_t topic by the wire seam — the same path every other Timer
-// value takes. HA reads it because createTimerHAEntities opted the carrier select
-// into json attributes (setJsonAttributes), so the discovery config advertises
+// value takes. HA reads it because the TimerHaHost carrier build opted the carrier
+// select into json attributes (setJsonAttributes), so the discovery config advertises
 // this topic. Retained means HA repopulates after a restart for free. A carrier
 // with no mapped rows yields an empty bag and publishes nothing.
 void TimerManager_::publishAttributeGroup(TimerHaEntity carrier)

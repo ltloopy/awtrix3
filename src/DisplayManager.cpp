@@ -5,6 +5,7 @@
 #include "Globals.h"
 #include "PeripheryManager.h"
 #include "MQTTManager.h"
+#include "TimerHaHost.h"
 #include "GifPlayer.h"
 #include <Ticker.h>
 #include "timer.h"
@@ -2257,11 +2258,11 @@ void DisplayManager_::setNewSettings(const char *json)
   TimerManager.onShowTimerChange(prevShowTimer, SHOW_TIMER);
   if (prevShowTimer && !SHOW_TIMER)
   {
-    MQTTManager.removeTimerHAEntities();
+    TimerHaHost.remove();
   }
   else if (!prevShowTimer && SHOW_TIMER)
   {
-    MQTTManager.enableTimerHADiscovery();
+    TimerHaHost.enable();
   }
   if (prevShowTimer != SHOW_TIMER)
   {
