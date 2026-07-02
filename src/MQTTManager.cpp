@@ -11,20 +11,12 @@
 #include "PowerManager.h"
 #include "TimerManager.h"
 #include "TimerHa.h"
+#include "TimerHaHost.h"
 
 const uint16_t PORT = 1883;
 
-namespace {
-    // HA entity registration cap. ArduinoHA's HAMqtt::addDeviceType has an off-by-one
-    // (`_devicesTypesNb + 1 >= _maxDevicesTypesNb`), so the EFFECTIVE capacity is
-    // kMaxHAEntities - 1 (= 39 here). Inventory: 25 base entities (incl. battery on
-    // ulanzi) + 10 Timer entities (TIMER_HA_DESCRIPTOR_COUNT) = 35, leaving 4 spare
-    // slots. Raised from 34 (issue #125): at 34 the effective cap of 33 silently
-    // dropped the two Timer sync-control entities (the last to register). No clean
-    // compile-time guard — the base count is build-flag conditional — so the runtime
-    // guard is the DEBUG_MODE warning in createTimerHAEntities() via haRegistrationAtCap().
-    constexpr uint8_t  kMaxHAEntities  = 40;
-}
+// kMaxHAEntities (the HA entity registration cap) now lives in MQTTManager.h so
+// TimerHaHost's carrier build can share it for the haRegistrationAtCap guard.
 
 WiFiClient espClient;
 HADevice device;
@@ -39,28 +31,14 @@ HASensor *battery = nullptr;
 #endif
 HASensor *temperature, *humidity, *illuminance, *uptime, *strength, *version, *ram, *curApp, *myOwnID, *ipAddr = nullptr;
 HABinarySensor *btnleft, *btnmid, *btnright = nullptr;
-HAText *timerDuration = nullptr;
-HASensorNumber *timerRemaining = nullptr;
-HASensor *timerStateSensor = nullptr;
-HASelect *timerBuzzer = nullptr, *timerFinishedSel = nullptr;
-HAButton *timerStartBtn = nullptr, *timerPauseBtn = nullptr, *timerResetBtn = nullptr;
-// Sync-control entities (issue #110): the writable Follow switch and static
-// Off/All Targets select that make the two sync settings controllable from HA.
-HASwitch *timerSyncFollowSw = nullptr;
-HASelect *timerSyncTargetsSel = nullptr;
+// The ten Timer HA carrier pointers and their resolved id buffers moved to
+// TimerHaHost (issue #193 / PRD #191); the wire seam reaches ids via TimerHaHost.entityId().
 bool connected;
 char matID[40], ind1ID[40], ind2ID[40], ind3ID[40], briID[40], btnAID[40], btnBID[40], btnCID[40], appID[40], tempID[40], humID[40], luxID[40], verID[40], ramID[40], upID[40], sigID[40], btnLID[40], btnMID[40], btnRID[40], transID[40], doUpdateID[40], batID[40], myID[40], sSpeed[40], effectID[40], ipAddrID[40];
-// Each Timer entity's resolved HA discovery unique id ("%s" filled with the MAC),
-// indexed by TimerHaEntity slot (timerHaIds[(size_t)slot]). Filled once in setup()
-// via formatTimerHaEntityId() and read by both createTimerHAEntities() and
-// removeTimerHAEntities() through timerHaId(slot) — never by hand-ordered position,
-// so create and teardown cannot drift. The strings must outlive the entities:
-// ArduinoHA stores the unique-id pointer, not a copy.
-char timerHaIds[TIMER_HA_DESCRIPTOR_COUNT][40];
+// Set by reconcileTimerHAState() when SHOW_TIMER latched off across a reboot; the
+// connect path consumes it to prune the Timer carriers' discovery. (Moves to the
+// host in a later slice along with reconcile; stays here for now — issue #193.)
 bool pendingTimerHADiscoveryCleanup = false;
-
-// The id buffer for a given Timer HA slot. See timerHaIds above.
-static char *timerHaId(TimerHaEntity slot) { return timerHaIds[static_cast<size_t>(slot)]; }
 
 void reconcileTimerHAState()
 {
@@ -75,178 +53,25 @@ void reconcileTimerHAState()
     }
 }
 
-// Forward declarations: the HA command callbacks are defined further down, but
-// createTimerHAEntities() (placed here, next to removeTimerHAEntities) wires them.
+// Forward declarations: the shared HA command callbacks are defined further down;
+// the base entities in setup() wire them, and each now delegates its Timer branch
+// to TimerHaHost via a leading tryHandle* guard.
 void onButtonCommand(HAButton *sender);
 void onSelectCommand(int8_t index, HASelect *sender);
 void onSwitchCommand(bool state, HASwitch *sender);
-void onTimerDurationMessage(const char *message, uint16_t length, HAText *sender);
 
-// --- Dynamic Targets select (#112) -------------------------------------------
-// The Targets select consumes the peer registry: its options are "Off;All" plus
-// each currently-discovered peer id (sorted), rebuilt at runtime. These helpers
-// snapshot the current peer ids and join them through the pure TimerHa builder.
-// kSyncTargetPeerCap matches PeerRegistry's kPeerMax; the worst-case option string
-// is "Off;All" + kPeerMax ids (<=32 chars each, the sync_targets token cap) + seps.
-static const size_t kSyncTargetPeerCap = 16;
-static const size_t kSyncTargetOptsCap = 8 + kSyncTargetPeerCap * 33 + 1; // "Off;All" + ";<id>"...
-
-// Snapshot the current sorted peer ids and build the select's option string into
-// optsOut. Returns the peer count; idsOut holds the ids (whose c_str() backs ptrsOut)
-// so the caller can also map a value<->index against the SAME list.
-static size_t buildCurrentSyncTargetsOptions(String *idsOut, const char **ptrsOut, size_t cap,
-                                             char *optsOut, size_t optsLen)
-{
-    size_t n = TimerManager.peerIds(idsOut, cap);
-    for (size_t i = 0; i < n; ++i) ptrsOut[i] = idsOut[i].c_str();
-    timerSyncTargetsBuildOptions(ptrsOut, n, optsOut, optsLen);
-    return n;
-}
-
-// The options string last published to the select, and the debounce bookkeeping for
-// re-publishing discovery only after registry membership has settled (issue #112).
-static String        syncTargetsOptionsSig;
-static bool          syncTargetsDirty = false;
-static unsigned long syncTargetsDirtySinceMs = 0;
+// --- Dynamic Targets select (#112) republish bridge --------------------------
+// The debounced Targets-select republish (refreshTimerSyncTargetsOptions, below)
+// stays here this slice; the carrier build + option helper + debounce state it
+// shares now live in TimerHaHost. These transitional externs let the republish keep
+// reaching the moved select + seeded debounce state until it, too, moves to the host
+// (issue #193 → follow-up slice, which drops these externs). kSyncTargetPeerCap/
+// kSyncTargetOptsCap + buildCurrentSyncTargetsOptions come from TimerHaHost.h.
+extern HASelect     *timerSyncTargetsSel;
+extern String        syncTargetsOptionsSig;
+extern bool          syncTargetsDirty;
+extern unsigned long syncTargetsDirtySinceMs;
 static const unsigned long kSyncTargetsRepublishDebounceMs = 3000;
-
-// Creates the Timer HA entity objects (and registers them with HAMqtt via their
-// constructors). Idempotent: the objects persist for the device lifetime, so a second
-// call is a no-op. This must run with the Timer entity id buffers already resolved
-// (setup() fills them in the HA_DISCOVERY block, before SHOW_TIMER is consulted).
-void MQTTManager_::createTimerHAEntities()
-{
-    if (timerDuration) return;
-
-    // Each entity's strings come from the descriptor table; the ArduinoHA
-    // object type and the type-specific wiring (callbacks, initial state)
-    // stay here because they're heterogeneous across HA component types.
-    const TimerHaDescriptor &dDur   = timerHaDescriptor(TimerHaEntity::Duration);
-    const TimerHaDescriptor &dRem   = timerHaDescriptor(TimerHaEntity::Remaining);
-    const TimerHaDescriptor &dState = timerHaDescriptor(TimerHaEntity::State);
-    const TimerHaDescriptor &dBuz   = timerHaDescriptor(TimerHaEntity::Buzzer);
-    const TimerHaDescriptor &dFin   = timerHaDescriptor(TimerHaEntity::Finished);
-    const TimerHaDescriptor &dStart = timerHaDescriptor(TimerHaEntity::Start);
-    const TimerHaDescriptor &dPause = timerHaDescriptor(TimerHaEntity::Pause);
-    const TimerHaDescriptor &dReset = timerHaDescriptor(TimerHaEntity::Reset);
-
-    timerDuration = new HAText(timerHaId(TimerHaEntity::Duration));
-    timerDuration->setIcon(dDur.icon);
-    timerDuration->setName(dDur.name);
-    timerDuration->setRetain(true);
-    timerDuration->onMessage(onTimerDurationMessage);
-    timerDuration->setState(TimerManager_::formatHMS(TimerManager.getDuration()).c_str(), true);
-    // Opt the Duration text entity into JSON attributes (HAText opt-in, issue #67)
-    // so its discovery config advertises json_attr_t; its retained {max_duration}
-    // object — the cap in carrier-native clock form ("24:00:00") — rides the wire
-    // seam to that topic (PRD #66 / issue #68). No TIMER_HA_DESCRIPTORS change.
-    timerDuration->setJsonAttributes(true);
-
-    timerRemaining = new HASensorNumber(timerHaId(TimerHaEntity::Remaining), HASensorNumber::PrecisionP0);
-    timerRemaining->setIcon(dRem.icon);
-    timerRemaining->setName(dRem.name);
-    timerRemaining->setUnitOfMeasurement(dRem.unit);
-    timerRemaining->setDeviceClass(dRem.deviceClass);
-    timerRemaining->setCurrentValue((uint32_t)TimerManager.getRemaining());
-    // Opt the remaining sensor into JSON attributes (HASensorNumber inherits the
-    // opt-in from HASensor): its retained {remaining_publish_interval} object rides
-    // the wire seam to json_attr_t (PRD #57 / issue #59). No descriptor change.
-    timerRemaining->setJsonAttributes(true);
-
-    timerStateSensor = new HASensor(timerHaId(TimerHaEntity::State));
-    timerStateSensor->setIcon(dState.icon);
-    timerStateSensor->setName(dState.name);
-    // Opt the state sensor into JSON attributes so its discovery config advertises
-    // json_attr_t; the retained config-view object (max_duration, bar_color as
-    // "#RRGGBB", sync roles, …) rides the wire seam to that topic (issue #59).
-    timerStateSensor->setJsonAttributes(true);
-
-    timerBuzzer = new HASelect(timerHaId(TimerHaEntity::Buzzer));
-    timerBuzzer->setOptions(dBuz.options);
-    timerBuzzer->onCommand(onSelectCommand);
-    timerBuzzer->setIcon(dBuz.icon);
-    timerBuzzer->setName(dBuz.name);
-    timerBuzzer->setState((uint8_t)TimerManager.getBuzzerMode(), true);
-    // Opt the buzzer select into JSON attributes so its discovery config advertises
-    // json_attr_t; its retained {countdown_seconds, melody_tick, melody_end} object
-    // rides the wire seam to that topic (PRD #57 / issue #58). No descriptor change.
-    timerBuzzer->setJsonAttributes(true);
-
-    timerFinishedSel = new HASelect(timerHaId(TimerHaEntity::Finished));
-    timerFinishedSel->setOptions(dFin.options);
-    timerFinishedSel->onCommand(onSelectCommand);
-    timerFinishedSel->setIcon(dFin.icon);
-    timerFinishedSel->setName(dFin.name);
-    timerFinishedSel->setState((uint8_t)TimerManager.getFinishedMode(), true);
-    // Opt the finished select into JSON attributes so its discovery config
-    // advertises json_attr_t; the retained {"realert_interval":N} then rides the
-    // wire seam to that topic (issue #51 / PRD #17). No TIMER_HA_DESCRIPTORS change.
-    timerFinishedSel->setJsonAttributes(true);
-
-    timerStartBtn = new HAButton(timerHaId(TimerHaEntity::Start));
-    timerStartBtn->setIcon(dStart.icon);
-    timerStartBtn->setName(dStart.name);
-    timerStartBtn->onCommand(onButtonCommand);
-
-    timerPauseBtn = new HAButton(timerHaId(TimerHaEntity::Pause));
-    timerPauseBtn->setIcon(dPause.icon);
-    timerPauseBtn->setName(dPause.name);
-    timerPauseBtn->onCommand(onButtonCommand);
-
-    timerResetBtn = new HAButton(timerHaId(TimerHaEntity::Reset));
-    timerResetBtn->setIcon(dReset.icon);
-    timerResetBtn->setName(dReset.name);
-    timerResetBtn->onCommand(onButtonCommand);
-
-    // Sync-control entities (issue #110). The two sync settings — until now
-    // read-only attributes on the state sensor — become writable here. Both
-    // callbacks route through TimerManager::timerHaApply -> parseCommand, so they
-    // inherit the atomic-reject validation and NVS persistence the rest of the
-    // control surface has. sync_* are local identity (inSnapshot=false) and never
-    // propagate to peers — see ADR-0006/0014.
-    const TimerHaDescriptor &dSyncF = timerHaDescriptor(TimerHaEntity::SyncFollow);
-    const TimerHaDescriptor &dSyncT = timerHaDescriptor(TimerHaEntity::SyncTargets);
-
-    timerSyncFollowSw = new HASwitch(timerHaId(TimerHaEntity::SyncFollow));
-    timerSyncFollowSw->setIcon(dSyncF.icon);
-    timerSyncFollowSw->setName(dSyncF.name);
-    timerSyncFollowSw->onCommand(onSwitchCommand);
-    timerSyncFollowSw->setState(TIMER_SYNC_FOLLOW, true);
-
-    timerSyncTargetsSel = new HASelect(timerHaId(TimerHaEntity::SyncTargets));
-    // Dynamic options (issue #112): "Off;All" plus each currently-discovered peer id,
-    // not the static dSyncT.options table field — the select tracks the peer registry.
-    String        stIds[kSyncTargetPeerCap];
-    const char   *stPtrs[kSyncTargetPeerCap];
-    char          stOpts[kSyncTargetOptsCap];
-    size_t        stN = buildCurrentSyncTargetsOptions(stIds, stPtrs, kSyncTargetPeerCap,
-                                                       stOpts, sizeof(stOpts));
-    timerSyncTargetsSel->setOptions(stOpts);
-    syncTargetsOptionsSig = stOpts;   // seed the republish baseline (no spurious first republish)
-    syncTargetsDirty = false;
-    timerSyncTargetsSel->onCommand(onSelectCommand);
-    timerSyncTargetsSel->setIcon(dSyncT.icon);
-    timerSyncTargetsSel->setName(dSyncT.name);
-    // Reflect the current sync_targets against the CURRENT id list: Off/All, the
-    // matching peer's option, or unknown (-1) for a multi-ID CSV / an id no longer
-    // present — the read-only attribute stays authoritative for the exact value.
-    timerSyncTargetsSel->setState(
-        timerSyncTargetsIndexForValue(TIMER_SYNC_TARGETS.c_str(), stPtrs, stN), true);
-
-    // Issue #125: every `new HAX` above auto-registered with HAMqtt via the
-    // HABaseDeviceType ctor. ArduinoHA drops entities once registration reaches the
-    // effective cap (kMaxHAEntities - 1; see haRegistrationAtCap) — which silently
-    // dropped these two sync-control entities until the cap was raised. Log the count
-    // and warn if we're back at the cap (the runtime guard, since the build-flag-
-    // conditional base count rules out a clean compile-time check).
-    if (DEBUG_MODE)
-    {
-        uint8_t registered = mqtt.getDevicesTypesNb();
-        DEBUG_PRINTF("HA entities registered: %u of %u", registered, kMaxHAEntities);
-        if (haRegistrationAtCap(registered, kMaxHAEntities))
-            DEBUG_PRINTLN(F("WARN: HA entity registration at effective cap; entities may be dropped (raise kMaxHAEntities)"));
-    }
-}
 
 // Re-publish the Targets select's discovery when peer-registry membership changes,
 // debounced so a burst of beacon churn yields one republish (issue #112). No-op when
@@ -284,43 +109,6 @@ void refreshTimerSyncTargetsOptions(unsigned long nowMs)
     syncTargetsDirty = false;
 }
 
-// Brings the Timer HA entities online at runtime when SHOW_TIMER flips false->true.
-// Mirror of removeTimerHAEntities(): creates the entities if missing, then publishes
-// their discovery config (so HA adds them without a full reconnect) and current values.
-void MQTTManager_::enableTimerHADiscovery()
-{
-    if (!HA_DISCOVERY) return;
-    createTimerHAEntities();
-    if (!mqtt.isConnected()) return; // discovery will publish at next connect via onConnectedLogic
-
-    HABaseDeviceType *timerTypes[] = {
-        timerDuration, timerRemaining, timerStateSensor, timerBuzzer,
-        timerFinishedSel, timerStartBtn, timerPauseBtn, timerResetBtn,
-        timerSyncFollowSw, timerSyncTargetsSel};
-    for (HABaseDeviceType *dt : timerTypes)
-        mqtt.publishConfigForDeviceType(dt);
-
-    TimerManager.publishAllWire();   // every wire artifact, derived from the member table (issue #41)
-    TimerManager.publishAllAttributeGroups();   // every carrier's read-only attribute object (PRD #57)
-}
-
-void MQTTManager_::removeTimerHAEntities()
-{
-    const char *deviceUniqueId = device.getUniqueId();
-    if (!deviceUniqueId) return;
-    char topic[160];
-    for (size_t i = 0; i < TIMER_HA_DESCRIPTOR_COUNT; ++i)
-    {
-        const TimerHaDescriptor &d = TIMER_HA_DESCRIPTORS[i];
-        snprintf(topic, sizeof(topic), "%s/%s/%s/%s/config",
-                 HA_PREFIX.c_str(), d.component, deviceUniqueId, timerHaId(d.slot));
-        mqtt.publish(topic, "", true);
-    }
-    // Clear each carrier's retained json_attr_t object too, so pruning the
-    // discovery config does not leave an orphaned attribute payload behind on the
-    // broker (issue #60). Rides the same wire seam the attribute publish does.
-    TimerManager.clearAllAttributeGroups();
-}
 long previousMillis_Stats;
 std::map<String, String> mqttValues;
 std::vector<String> topicsToSubscribe;
@@ -530,6 +318,7 @@ void processMqttMessage(const String &strTopic, const String &payloadCopy)
 
 void onButtonCommand(HAButton *sender)
 {
+    if (TimerHaHost.tryHandleButton(sender)) return;   // Timer carrier: routed by the host
     if (sender == dismiss)
     {
         DisplayManager.dismissNotify();
@@ -549,36 +338,11 @@ void onButtonCommand(HAButton *sender)
             UpdateManager.updateFirmware();
         }
     }
-    else if (sender == timerStartBtn)
-    {
-        // Route through parseCommand (issue #109): start/pause/reset re-enter the
-        // control surface, so HA buttons drive peer clocks (run-state propagation)
-        // the same way the MQTT topic does. parseCommand also owns the
-        // start-from-idle switch-to-Timer-app behaviour, so it isn't duplicated here.
-        TimerManager.timerHaApply(TimerHaEntity::Start, "");
-    }
-    else if (sender == timerPauseBtn)
-    {
-        TimerManager.timerHaApply(TimerHaEntity::Pause, "");
-    }
-    else if (sender == timerResetBtn)
-    {
-        TimerManager.timerHaApply(TimerHaEntity::Reset, "");
-    }
 }
 
 void onSwitchCommand(bool state, HASwitch *sender)
 {
-    if (sender == timerSyncFollowSw)
-    {
-        // Route through parseCommand (issue #110): the Follow switch re-enters the
-        // control surface, so it gets the strict-bool atomic-reject validation and
-        // NVS persistence. sync_follow is local identity and never propagates.
-        TimerManager.timerHaApply(TimerHaEntity::SyncFollow, String(state ? 1 : 0));
-        // Echo the value actually applied back (snap-back if a write were rejected).
-        sender->setState(TIMER_SYNC_FOLLOW);
-        return;
-    }
+    if (TimerHaHost.tryHandleSwitch(state, sender)) return;   // Timer carrier: routed by the host
     AUTO_TRANSITION = state;
     DisplayManager.setAutoTransition(state);
     saveSettings();
@@ -587,6 +351,7 @@ void onSwitchCommand(bool state, HASwitch *sender)
 
 void onSelectCommand(int8_t index, HASelect *sender)
 {
+    if (TimerHaHost.tryHandleSelect(sender, index)) return;   // Timer carrier: routed by the host
     if (sender == BriMode)
     {
         switch (index)
@@ -603,42 +368,6 @@ void onSelectCommand(int8_t index, HASelect *sender)
     else if (sender == transEffect)
     {
         TRANS_EFFECT = index;
-    }
-    else if (sender == timerBuzzer)
-    {
-        // Route through parseCommand (issue #109): the HA select re-enters the
-        // control surface like every other edit, so it gets atomic-reject
-        // validation and the per-enum codec wire spelling — no deep setter here.
-        TimerManager.timerHaApply(TimerHaEntity::Buzzer, String(index));
-        // Echo the canonical live mode back (snap-back to last valid on a reject).
-        sender->setState((int8_t)TimerManager.getBuzzerMode());
-        return;
-    }
-    else if (sender == timerFinishedSel)
-    {
-        TimerManager.timerHaApply(TimerHaEntity::Finished, String(index));
-        sender->setState((int8_t)TimerManager.getFinishedMode());
-        return;
-    }
-    else if (sender == timerSyncTargetsSel)
-    {
-        // Dynamic select (issue #112): resolve the chosen option index through the
-        // CURRENT peer-id list to its sync_targets value (Off -> "", All -> "all", a
-        // peer option -> that id), then route through parseCommand (#110) for the
-        // bespoke validator + NVS persistence. Echo the canonical applied value back
-        // against the same list (Off/All/peer, or unknown for a multi-ID CSV / an id
-        // no longer present — the read-only attribute stays authoritative). sync_targets
-        // never propagates.
-        String      ids[kSyncTargetPeerCap];
-        const char *ptrs[kSyncTargetPeerCap];
-        char        opts[kSyncTargetOptsCap];
-        size_t      n = buildCurrentSyncTargetsOptions(ids, ptrs, kSyncTargetPeerCap,
-                                                       opts, sizeof(opts));
-        char val[40];
-        if (timerSyncTargetsValueForIndex(index, ptrs, n, val, sizeof(val)))
-            TimerManager.timerHaApply(TimerHaEntity::SyncTargets, val);
-        sender->setState(timerSyncTargetsIndexForValue(TIMER_SYNC_TARGETS.c_str(), ptrs, n));
-        return;
     }
     saveSettings();
     sender->setState(index);
@@ -698,22 +427,8 @@ void onBrightnessCommand(uint8_t brightness, HALight *sender)
     DisplayManager.setBrightness(brightness);
 }
 
-void onTimerDurationMessage(const char *message, uint16_t length, HAText *sender)
-{
-    String in;
-    in.reserve(length);
-    for (uint16_t i = 0; i < length; i++) in += message[i];
-    in.trim();
-
-    // Route the raw HH:MM:SS text through parseCommand (issue #109): it owns the
-    // parse/validate (parseHMS + range, reject-not-clamp) — the HA layer no longer
-    // duplicates that logic. A rejected input applies nothing (atomic-reject).
-    TimerManager.timerHaApply(TimerHaEntity::Duration, in);
-
-    // Echo the canonical value back so rejected input snaps the field to the
-    // previous valid time rather than leaving the bad text displayed.
-    sender->setState(TimerManager_::formatHMS(TimerManager.getDuration()).c_str(), true);
-}
+// onTimerDurationMessage moved to TimerHaHost (issue #193): the dedicated Timer
+// duration text callback is registered on the Duration carrier by the host.
 
 void onNumberCommand(HANumeric number, HANumber *sender)
 {
@@ -819,17 +534,13 @@ void onMqttConnected()
     {
         if (pendingTimerHADiscoveryCleanup)
         {
-            MQTTManager.removeTimerHAEntities();
+            TimerHaHost.remove();
             pendingTimerHADiscoveryCleanup = false;
         }
         myOwnID->setValue(MQTT_PREFIX.c_str());
         version->setValue(VERSION);
 
-        if (SHOW_TIMER)
-        {
-            TimerManager.publishAllWire();   // every wire artifact, derived from the member table (issue #41)
-            TimerManager.publishAllAttributeGroups();   // every carrier's read-only attribute object (PRD #57)
-        }
+        TimerHaHost.onConnected();   // Timer wire + attribute groups when SHOW_TIMER (issue #193)
     }
 
     MQTTManager.publish("stats/effects", DisplayManager.getEffectNames().c_str());
@@ -1136,15 +847,11 @@ void MQTTManager_::setup()
         ipAddr->setName(HAipAddrName);
         ipAddr->setIcon(HAipAddrIcon);
 
-        // Resolve every Timer entity's unique id from the Timer HA Presence table
-        // into the slot-keyed timerHaIds buffers (also read by teardown), each
-        // through the one formatTimerHaEntityId() helper so create and teardown
-        // agree per slot. Row i describes slot i (pinned by test_U32).
-        for (size_t i = 0; i < TIMER_HA_DESCRIPTOR_COUNT; ++i)
-            formatTimerHaEntityId(TIMER_HA_DESCRIPTORS[i], macStr, timerHaIds[i], sizeof(timerHaIds[i]));
-
-        if (SHOW_TIMER)
-            createTimerHAEntities();
+        // Resolve the Timer carrier ids and (when SHOW_TIMER) construct/register the
+        // carriers — at the same sequence point as before (after the device's own
+        // entities register), so the ArduinoHA registration/entity-cap drop order is
+        // unchanged. The carrier lifecycle now lives in TimerHaHost (issue #193).
+        TimerHaHost.setup();
     }
     else
     {
@@ -1171,26 +878,27 @@ void MQTTManager_::tick()
 
 // The Timer wire seam (issue #31): publishes the exact (topic, payload) the
 // caller hands over — retained, like the HASensor::setValue path it replaces.
-// Gated on the Timer HA entities existing (timerDuration is the creation
-// sentinel, see createTimerHAEntities), which preserves the per-entity
+// Gated on the Timer HA carriers existing (TimerHaHost.carriersReady() mirrors the
+// old timerDuration creation-sentinel check), which preserves the per-entity
 // null-check behaviour of the retired one-liner publish methods; mqtt.publish
 // itself no-ops while disconnected, as beginPublish did before.
 void MQTTManager_::publishTimerWire(const char *topic, const char *payload)
 {
-    if (!timerDuration) return;
+    if (!TimerHaHost.carriersReady()) return;
     mqtt.publish(topic, payload, true);
 }
 
 // Canonical full data topic for a Timer HA entity slot, from the same inputs
 // ArduinoHA's HASerializer::generateDataTopic uses: the data prefix installed
 // in setup() (MQTT_PREFIX), the device unique id, and the entity id buffer
-// resolved through formatTimerHaEntityId. Byte-identity is pinned by test W1.
+// resolved through formatTimerHaEntityId (owned by TimerHaHost, read via
+// entityId()). Byte-identity is pinned by test W1.
 String MQTTManager_::timerWireTopic(TimerHaEntity slot)
 {
     const char *deviceUniqueId = device.getUniqueId();
     if (!deviceUniqueId) return String();
     char topic[160];
-    formatTimerHaDataTopic(MQTT_PREFIX.c_str(), deviceUniqueId, timerHaId(slot), topic, sizeof(topic));
+    formatTimerHaDataTopic(MQTT_PREFIX.c_str(), deviceUniqueId, TimerHaHost.entityId(slot), topic, sizeof(topic));
     return String(topic);
 }
 
@@ -1204,7 +912,7 @@ String MQTTManager_::timerWireAttrTopic(TimerHaEntity slot)
     if (!deviceUniqueId) return String();
     char topic[160];
     formatTimerHaAttrTopic(MQTT_PREFIX.c_str(), deviceUniqueId,
-                           timerHaId(slot), topic, sizeof(topic));
+                           TimerHaHost.entityId(slot), topic, sizeof(topic));
     return String(topic);
 }
 
