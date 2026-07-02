@@ -21,7 +21,13 @@ struct TimerHaHost_
     // order — and therefore the entity-cap drop order — is unchanged.
     void setup();
     // Publish the Timer wire artifacts + attribute groups on MQTT (re)connect.
+    // Also consumes the pending discovery-cleanup latch reconcile() set (see below).
     void onConnected();
+    // Reconcile the SHOW_TIMER setting against its persisted last-seen value at boot,
+    // before MQTT connects: if the timer was toggled off while powered down, latch a
+    // one-shot discovery cleanup that onConnected() flushes once MQTT is up. Persists
+    // the new last-seen value when it changed. Called from the device loop.
+    void reconcile();
     // SHOW_TIMER false->true: create carriers if missing, publish discovery + values.
     void enable();
     // SHOW_TIMER true->false: prune discovery config and clear the retained attr bags.

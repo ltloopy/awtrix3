@@ -65,6 +65,15 @@ static size_t buildCurrentSyncTargetsOptions(String *idsOut, const char **ptrsOu
     return n;
 }
 
+// --- SHOW_TIMER reconcile bookkeeping (private to the host) ------------------
+// Set by reconcile() when SHOW_TIMER latched off across a reboot; onConnected()
+// consumes it once MQTT is up to prune the Timer carriers' discovery. Private host
+// state — nothing outside the host touches it (issue #195). SHOW_TIMER_HA_PREV, by
+// contrast, is a persisted (NVS-backed) shared global the settings-apply path writes
+// independently, so it stays a Globals-owned flag reconcile() reads/writes via extern
+// — exactly like SHOW_TIMER itself. See ADR-0026.
+static bool pendingTimerHADiscoveryCleanup = false;
+
 // The dedicated Timer duration text callback (registered on the Duration carrier).
 static void onTimerDurationMessage(const char *message, uint16_t length, HAText *sender)
 {
@@ -241,10 +250,37 @@ void TimerHaHost_::setup()
 
 void TimerHaHost_::onConnected()
 {
+    // Flush the one-shot cleanup reconcile() latched: if SHOW_TIMER went off across a
+    // reboot, prune the Timer carriers' retained discovery now that MQTT is up. When
+    // set, SHOW_TIMER is false, so the publish block below is skipped this connect.
+    if (pendingTimerHADiscoveryCleanup)
+    {
+        remove();
+        pendingTimerHADiscoveryCleanup = false;
+    }
     if (SHOW_TIMER)
     {
         TimerManager.publishAllWire();   // every wire artifact, derived from the member table (issue #41)
         TimerManager.publishAllAttributeGroups();   // every carrier's read-only attribute object (PRD #57)
+    }
+}
+
+// Reconcile SHOW_TIMER against its persisted last-seen value at boot (before MQTT
+// connects). This is the host equivalent of the free reconcileTimerHAState() that
+// lived in MQTTManager (issue #195): if the timer was toggled off while powered down,
+// latch the one-shot discovery cleanup onConnected() flushes; and persist the new
+// last-seen value whenever it changed. SHOW_TIMER_HA_PREV stays a shared persisted
+// global (settings-apply writes it too), reached via extern — see ADR-0026.
+void TimerHaHost_::reconcile()
+{
+    if (SHOW_TIMER_HA_PREV && !SHOW_TIMER)
+    {
+        pendingTimerHADiscoveryCleanup = true;
+    }
+    if (SHOW_TIMER_HA_PREV != SHOW_TIMER)
+    {
+        SHOW_TIMER_HA_PREV = SHOW_TIMER;
+        saveSettings();
     }
 }
 

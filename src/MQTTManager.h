@@ -51,8 +51,6 @@ public:
     String timerIconsTopic();
 };
 
-void reconcileTimerHAState();
-
 extern MQTTManager_ &MQTTManager;
 
 #endif
