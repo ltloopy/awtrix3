@@ -19,10 +19,7 @@ extern void onSelectCommand(int8_t index, HASelect *sender);
 extern void onSwitchCommand(bool state, HASwitch *sender);
 
 // --- Carrier state (private to the host) -------------------------------------
-// The ten HA carrier entity pointers. Nine are file-local; timerSyncTargetsSel has
-// external linkage as a *transitional* bridge (issue #193): the debounced Targets
-// republish still lives in MQTTManager this slice and reaches the select through it.
-// The next slice absorbs that republish here and makes the pointer file-local too.
+// The ten HA carrier entity pointers, all file-local.
 static HAText *timerDuration = nullptr;
 static HASensorNumber *timerRemaining = nullptr;
 static HASensor *timerStateSensor = nullptr;
@@ -31,7 +28,7 @@ static HAButton *timerStartBtn = nullptr, *timerPauseBtn = nullptr, *timerResetB
 // Sync-control entities (issue #110): the writable Follow switch and dynamic
 // Off/All Targets select that make the two sync settings controllable from HA.
 static HASwitch *timerSyncFollowSw = nullptr;
-HASelect *timerSyncTargetsSel = nullptr;
+static HASelect *timerSyncTargetsSel = nullptr;
 
 // Each Timer entity's resolved HA discovery unique id ("%s" filled with the MAC),
 // indexed by TimerHaEntity slot (timerHaIds[(size_t)slot]). Filled once in setup()
@@ -44,21 +41,23 @@ static char timerHaIds[TIMER_HA_DESCRIPTOR_COUNT][40];
 // The id buffer for a given Timer HA slot. See timerHaIds above.
 static char *timerHaId(TimerHaEntity slot) { return timerHaIds[static_cast<size_t>(slot)]; }
 
-// --- Dynamic Targets select (#112) debounce state ----------------------------
+// --- Dynamic Targets select (#112) debounce state (private to the host) ------
+// Option-string sizing for the dynamic Targets select.
+constexpr size_t kSyncTargetPeerCap = 16;
+constexpr size_t kSyncTargetOptsCap = 8 + kSyncTargetPeerCap * 33 + 1; // "Off;All" + ";<id>"...
 // The options string last published to the select, plus the dirty bookkeeping the
-// MQTTManager-resident republish debounces on. External linkage this slice (a
-// transitional bridge, like timerSyncTargetsSel): createCarriers() seeds them here,
-// MQTTManager's refreshTimerSyncTargetsOptions consumes them. They become private
-// host state once that republish moves here in the follow-up slice.
-String        syncTargetsOptionsSig;
-bool          syncTargetsDirty = false;
-unsigned long syncTargetsDirtySinceMs = 0;
+// republish (refreshTargets) debounces on. createCarriers() seeds them; refreshTargets
+// consumes them.
+static String        syncTargetsOptionsSig;
+static bool          syncTargetsDirty = false;
+static unsigned long syncTargetsDirtySinceMs = 0;
+static const unsigned long kSyncTargetsRepublishDebounceMs = 3000;
 
 // Snapshot the current sorted peer ids and build the select's option string into
 // optsOut. Returns the peer count; idsOut holds the ids (whose c_str() backs ptrsOut)
 // so the caller can also map a value<->index against the SAME list.
-size_t buildCurrentSyncTargetsOptions(String *idsOut, const char **ptrsOut, size_t cap,
-                                      char *optsOut, size_t optsLen)
+static size_t buildCurrentSyncTargetsOptions(String *idsOut, const char **ptrsOut, size_t cap,
+                                             char *optsOut, size_t optsLen)
 {
     size_t n = TimerManager.peerIds(idsOut, cap);
     for (size_t i = 0; i < n; ++i) ptrsOut[i] = idsOut[i].c_str();
@@ -285,6 +284,42 @@ void TimerHaHost_::remove()
     // discovery config does not leave an orphaned attribute payload behind on the
     // broker (issue #60). Rides the same wire seam the attribute publish does.
     TimerManager.clearAllAttributeGroups();
+}
+
+// Re-publish the Targets select's discovery when peer-registry membership changes,
+// debounced so a burst of beacon churn yields one republish (issue #112). No-op when
+// the timer HA entities are absent or MQTT is down (discovery re-publishes at the next
+// connect). On a settled change it rebuilds the options, re-publishes the discovery
+// config so Home Assistant sees the new list, and re-applies the selected state.
+void TimerHaHost_::refreshTargets(unsigned long nowMs)
+{
+    if (timerSyncTargetsSel == nullptr) return;
+    if (!mqtt.isConnected()) return;
+
+    String      ids[kSyncTargetPeerCap];
+    const char *ptrs[kSyncTargetPeerCap];
+    char        opts[kSyncTargetOptsCap];
+    size_t      n = buildCurrentSyncTargetsOptions(ids, ptrs, kSyncTargetPeerCap,
+                                                   opts, sizeof(opts));
+
+    if (syncTargetsOptionsSig == opts) { syncTargetsDirty = false; return; }  // unchanged
+
+    if (!syncTargetsDirty)   // first sighting of the change: start the debounce window
+    {
+        syncTargetsDirty = true;
+        syncTargetsDirtySinceMs = nowMs;
+        return;
+    }
+    if ((nowMs - syncTargetsDirtySinceMs) < kSyncTargetsRepublishDebounceMs) return;
+
+    timerSyncTargetsSel->resetOptions();
+    timerSyncTargetsSel->setOptions(opts);
+    mqtt.publishConfigForDeviceType(timerSyncTargetsSel);
+    timerSyncTargetsSel->setState(
+        timerSyncTargetsIndexForValue(TIMER_SYNC_TARGETS.c_str(), ptrs, n), true);
+
+    syncTargetsOptionsSig = opts;
+    syncTargetsDirty = false;
 }
 
 bool TimerHaHost_::tryHandleButton(HAButton *sender)

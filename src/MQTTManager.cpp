@@ -60,55 +60,6 @@ void onButtonCommand(HAButton *sender);
 void onSelectCommand(int8_t index, HASelect *sender);
 void onSwitchCommand(bool state, HASwitch *sender);
 
-// --- Dynamic Targets select (#112) republish bridge --------------------------
-// The debounced Targets-select republish (refreshTimerSyncTargetsOptions, below)
-// stays here this slice; the carrier build + option helper + debounce state it
-// shares now live in TimerHaHost. These transitional externs let the republish keep
-// reaching the moved select + seeded debounce state until it, too, moves to the host
-// (issue #193 → follow-up slice, which drops these externs). kSyncTargetPeerCap/
-// kSyncTargetOptsCap + buildCurrentSyncTargetsOptions come from TimerHaHost.h.
-extern HASelect     *timerSyncTargetsSel;
-extern String        syncTargetsOptionsSig;
-extern bool          syncTargetsDirty;
-extern unsigned long syncTargetsDirtySinceMs;
-static const unsigned long kSyncTargetsRepublishDebounceMs = 3000;
-
-// Re-publish the Targets select's discovery when peer-registry membership changes,
-// debounced so a burst of beacon churn yields one republish (issue #112). No-op when
-// the timer HA entities are absent or MQTT is down (discovery re-publishes at the next
-// connect). On a settled change it rebuilds the options, re-publishes the discovery
-// config so Home Assistant sees the new list, and re-applies the selected state.
-void refreshTimerSyncTargetsOptions(unsigned long nowMs)
-{
-    if (timerSyncTargetsSel == nullptr) return;
-    if (!mqtt.isConnected()) return;
-
-    String      ids[kSyncTargetPeerCap];
-    const char *ptrs[kSyncTargetPeerCap];
-    char        opts[kSyncTargetOptsCap];
-    size_t      n = buildCurrentSyncTargetsOptions(ids, ptrs, kSyncTargetPeerCap,
-                                                   opts, sizeof(opts));
-
-    if (syncTargetsOptionsSig == opts) { syncTargetsDirty = false; return; }  // unchanged
-
-    if (!syncTargetsDirty)   // first sighting of the change: start the debounce window
-    {
-        syncTargetsDirty = true;
-        syncTargetsDirtySinceMs = nowMs;
-        return;
-    }
-    if ((nowMs - syncTargetsDirtySinceMs) < kSyncTargetsRepublishDebounceMs) return;
-
-    timerSyncTargetsSel->resetOptions();
-    timerSyncTargetsSel->setOptions(opts);
-    mqtt.publishConfigForDeviceType(timerSyncTargetsSel);
-    timerSyncTargetsSel->setState(
-        timerSyncTargetsIndexForValue(TIMER_SYNC_TARGETS.c_str(), ptrs, n), true);
-
-    syncTargetsOptionsSig = opts;
-    syncTargetsDirty = false;
-}
-
 long previousMillis_Stats;
 std::map<String, String> mqttValues;
 std::vector<String> topicsToSubscribe;

@@ -35,6 +35,7 @@
 #include "DisplayManager.h"
 #include "PeripheryManager.h"
 #include "MQTTManager.h"
+#include "TimerHaHost.h"
 #include "ServerManager.h"
 #include "Globals.h"
 #include "UpdateManager.h"
@@ -128,6 +129,6 @@ void loop()
   if (ServerManager.isConnected)
   {
     MQTTManager.tick();
-    refreshTimerSyncTargetsOptions(millis());   // dynamic HA Targets select republish (#112)
+    TimerHaHost.refreshTargets(millis());   // dynamic HA Targets select republish (#112)
   }
 }

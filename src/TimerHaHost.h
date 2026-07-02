@@ -14,18 +14,6 @@
 // like MQTTManager.cpp). The pure builder half lives in TimerHa (topics, descriptors,
 // options, haRegistrationAtCap). See PRD #191 / issue #193 / ADR-0026.
 
-// Option-string sizing for the dynamic Targets select (issue #112). Shared with the
-// debounced republish that — for this slice — still lives in MQTTManager.
-constexpr size_t kSyncTargetPeerCap = 16;
-constexpr size_t kSyncTargetOptsCap = 8 + kSyncTargetPeerCap * 33 + 1; // "Off;All" + ";<id>"...
-
-// Snapshot the current sorted peer ids and build the select's option string into
-// optsOut. Returns the peer count; idsOut holds the ids (whose c_str() backs ptrsOut)
-// so the caller can also map a value<->index against the SAME list. (Defined here;
-// the MQTTManager-resident Targets republish still calls it this slice.)
-size_t buildCurrentSyncTargetsOptions(String *idsOut, const char **ptrsOut, size_t cap,
-                                      char *optsOut, size_t optsLen);
-
 struct TimerHaHost_
 {
     // Resolve the carrier ids and (when SHOW_TIMER) construct/register the carriers.
@@ -38,6 +26,11 @@ struct TimerHaHost_
     void enable();
     // SHOW_TIMER true->false: prune discovery config and clear the retained attr bags.
     void remove();
+
+    // Re-publish the dynamic Targets select's discovery when peer-registry membership
+    // changes, debounced (issue #112). Called every device loop; a no-op when the
+    // carriers are absent or MQTT is down. See the debounce state in TimerHaHost.cpp.
+    void refreshTargets(unsigned long nowMs);
 
     // Each returns true iff sender is a Timer carrier; when true the host performs the
     // route-through-timerHaApply + snap-back echo the shared callbacks did before.
