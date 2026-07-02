@@ -331,14 +331,19 @@ pure **Timer HA presence** builders (`TimerHa`: topics, descriptors, options,
 (private state), constructing/registering them (idempotently, at the same HA-setup
 sequence point so the ArduinoHA registration/entity-cap drop order is unchanged), the
 runtime `enable()`/`remove()` on the `SHOW_TIMER` toggle, `onConnected()` republish, the
-dedicated Timer **duration text callback**, and the Timer branches of the shared ArduinoHA
-select/switch/button callbacks. Those shared callbacks still live in `MQTTManager` (they
+boot-time `reconcile()` (SHOW_TIMER-vs-persisted-`SHOW_TIMER_HA_PREV`, latching a
+**private** one-shot discovery cleanup that `onConnected()` flushes when the timer was
+toggled off across a reboot — issue #195), the dedicated Timer **duration text callback**,
+and the Timer branches of the shared ArduinoHA select/switch/button callbacks. Those shared callbacks still live in `MQTTManager` (they
 keep their non-Timer branches) and delegate the Timer sender via a leading
 `if (TimerHaHost.tryHandle…(…)) return;`; each `tryHandle*` returns whether the sender was
 a Timer carrier and, when so, performs the same route-through-`timerHaApply` +
 snap-back-echo it always did (ADR-0001 / ADR-0014). The host reaches the `HADevice`/`HAMqtt`
 client via the `extern` globals still owned by `MQTTManager` — **no injection** (one
-implementation forever; ADR-0026). It is a **relocation of responsibility, not a redesign**:
+implementation forever; ADR-0026). `reconcile()` likewise reaches `SHOW_TIMER_HA_PREV`
+via `extern`: it stays a **Globals-owned persisted (NVS-backed) flag**, not host-private,
+because the settings-apply path writes it independently of reconcile — just like
+`SHOW_TIMER` itself. After issue #195 `MQTTManager` holds **zero** Timer-HA-specific state. It is a **relocation of responsibility, not a redesign**:
 no discovery payload, wire topic, retained value, attribute group, callback outcome, or
 snap-back echo changes; delete it and the ten-carrier lifecycle scatters straight back
 across the general MQTT module (today's pre-extraction state). Being device-bound (it

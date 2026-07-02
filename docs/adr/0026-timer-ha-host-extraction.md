@@ -42,7 +42,8 @@ callbacks. It pairs with the pure `TimerHa` builder half (topics, descriptors, o
 
 ```cpp
 void setup();        // resolve carrier ids + (when SHOW_TIMER) construct/register
-void onConnected();  // publish Timer wire + attribute groups on (re)connect
+void onConnected();  // publish Timer wire + attr groups; flush pending cleanup (#195)
+void reconcile();    // boot-time SHOW_TIMER-vs-persisted reconcile + cleanup latch (#195)
 void enable();       // SHOW_TIMER false->true: create if missing + publish
 void remove();       // SHOW_TIMER true->false: prune discovery + clear attr bags
 bool tryHandleSelect(HASelect*, int8_t);   // true iff a Timer carrier -> host handles it
@@ -78,16 +79,20 @@ suites staying green (the pure collaborators the host orchestrates — `TimerHa`
 `timerHaApply`, the codecs, the Targets value↔index mapping — are already covered) plus
 the `ulanzi`/`native` builds compiling.
 
-### A transitional bridge, not the whole PRD
+### A transitional bridge, closed across the PRD
 
-This is the first slice of PRD #191. The debounced dynamic Targets-select republish
-(`refreshTimerSyncTargetsOptions`), the `SHOW_TIMER` reconcile bookkeeping, and the
-connect-path pending-cleanup consumption stay in `MQTTManager` this slice. Because the
-Targets republish and the carrier build share the select pointer + three debounce
-variables, those move to `TimerHaHost` and are exposed with external linkage so the
-still-resident republish can reach them; the next slice absorbs the republish and drops
-the bridge. The wire seam (`publishTimerWire`/`timerWireTopic`/`timerWireAttrTopic`) stays
-in `MQTTManager` and reaches the moved carrier state through two small accessors
+This ADR's decision was the first slice of PRD #191; the bridge it opened is now
+closed. The later slices absorbed the pieces this slice left in `MQTTManager`: the
+debounced dynamic Targets-select republish became `TimerHaHost.refreshTargets()`
+(issue #194, dropping the external-linkage exposure of the select pointer + debounce
+variables), and the `SHOW_TIMER` reconcile bookkeeping became `TimerHaHost.reconcile()`
+with its connect-path pending-cleanup latch folded into `onConnected()` as **private**
+host state (issue #195). After #195, `MQTTManager` holds **zero** Timer-HA-specific
+state. `SHOW_TIMER_HA_PREV` deliberately stays a Globals-owned persisted (NVS-backed)
+flag reached via `extern` — the settings-apply path writes it independently of
+reconcile, so it is a shared global exactly like `SHOW_TIMER`, not host-private. The
+wire seam (`publishTimerWire`/`timerWireTopic`/`timerWireAttrTopic`) stays in
+`MQTTManager` and reaches the host's private carrier state through two small accessors
 (`carriersReady()`, `entityId(slot)`).
 
 ## Consequences

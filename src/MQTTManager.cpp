@@ -35,23 +35,8 @@ HABinarySensor *btnleft, *btnmid, *btnright = nullptr;
 // TimerHaHost (issue #193 / PRD #191); the wire seam reaches ids via TimerHaHost.entityId().
 bool connected;
 char matID[40], ind1ID[40], ind2ID[40], ind3ID[40], briID[40], btnAID[40], btnBID[40], btnCID[40], appID[40], tempID[40], humID[40], luxID[40], verID[40], ramID[40], upID[40], sigID[40], btnLID[40], btnMID[40], btnRID[40], transID[40], doUpdateID[40], batID[40], myID[40], sSpeed[40], effectID[40], ipAddrID[40];
-// Set by reconcileTimerHAState() when SHOW_TIMER latched off across a reboot; the
-// connect path consumes it to prune the Timer carriers' discovery. (Moves to the
-// host in a later slice along with reconcile; stays here for now — issue #193.)
-bool pendingTimerHADiscoveryCleanup = false;
-
-void reconcileTimerHAState()
-{
-    if (SHOW_TIMER_HA_PREV && !SHOW_TIMER)
-    {
-        pendingTimerHADiscoveryCleanup = true;
-    }
-    if (SHOW_TIMER_HA_PREV != SHOW_TIMER)
-    {
-        SHOW_TIMER_HA_PREV = SHOW_TIMER;
-        saveSettings();
-    }
-}
+// The SHOW_TIMER reconcile bookkeeping and its pending-cleanup latch moved to
+// TimerHaHost (issue #195); MQTTManager now holds zero Timer-HA-specific state.
 
 // Forward declarations: the shared HA command callbacks are defined further down;
 // the base entities in setup() wire them, and each now delegates its Timer branch
@@ -483,14 +468,11 @@ void onMqttConnected()
     delay(200);
     if (HA_DISCOVERY)
     {
-        if (pendingTimerHADiscoveryCleanup)
-        {
-            TimerHaHost.remove();
-            pendingTimerHADiscoveryCleanup = false;
-        }
         myOwnID->setValue(MQTT_PREFIX.c_str());
         version->setValue(VERSION);
 
+        // onConnected() also flushes the pending discovery cleanup reconcile() latched
+        // when SHOW_TIMER went off across a reboot (issue #195).
         TimerHaHost.onConnected();   // Timer wire + attribute groups when SHOW_TIMER (issue #193)
     }
 
