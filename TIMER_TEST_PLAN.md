@@ -42,9 +42,9 @@ Only features added on `feat-timer-standalone`:
   **dismisses** notifications).
 - Firmware OTA / update flow, Wi-Fi provisioning, and unrelated `/api/settings`
   keys.
-- Automated unit/e2e tests — covered by `test/test_timer/` (run via
-  `pio test -e native`) and `tests/e2e/`. This plan is the **manual hardware**
-  companion.
+- Automated unit/e2e tests — covered by the 11 host suites under `test/`
+  (8 native PlatformIO envs, 289 tests — see the [§8 matrix](#8-automated-companion--native-test-matrix))
+  and `tests/e2e/`. This plan is the **manual hardware** companion.
 
 ---
 
@@ -268,6 +268,43 @@ expected, reproduction steps, and screenshots/serial-log where relevant.
   uploading `/ICONS/` and `/MELODIES/` assets; serial console for logs.
 - **Pre-flight:** valid `timer.jpg` and `timer_tick.txt`/`timer_end.txt` (plus
   any custom assets) uploaded before icon/melody cases.
+
+---
+
+## 8. Automated companion — native test matrix
+
+The automated host suites run on 8 native PlatformIO envs (11 suites, 289
+tests). Each env allowlists its own suite(s) via `test_filter` — never
+`test_ignore` (see the convention comment atop the native-env section of
+`platformio.ini`). Which env compiles which `src/` files is documented per-env
+in `platformio.ini`; this table maps env→suite→count. CI
+(`.github/workflows/test.yml`) gates **all 8 envs** on every PR touching
+`src/`, `test(s)/`, or the build config.
+
+| Env | Suite(s) | Tests |
+| --- | --- | --- |
+| `native` | `test_timer` | 190 |
+| `native_validate` | `test_validate` | 28 |
+| `native_runtime` | `test_runtime` | 21 |
+| `native_sync` | `test_syncenvelope` | 14 |
+| `native_peer` | `test_peerregistry` | 9 |
+| `native_targets` | `test_synctargets` | 9 |
+| `native_seen` | `test_syncseen` | 6 |
+| `native_ha` | `test_haselect` (4), `test_hasensor` (3), `test_hatext` (3), `test_hasync` (2) | 12 |
+| **Total** | **11 suites** | **289** |
+
+Run everything locally with:
+
+```sh
+pio test -e native -e native_peer -e native_seen -e native_sync -e native_validate -e native_runtime -e native_targets -e native_ha
+```
+
+### Local gotchas
+
+- Set `PLATFORMIO_BUILD_JOBS=1` — parallel native builds can OOM `cc1plus`.
+- After editing `tests/stubs/*`, delete `.pio/build/native*` — the stub headers
+  are force-included into library TUs and PlatformIO does not rebuild them when
+  a stub changes, so stale objects keep the old stub behaviour.
 
 ---
 

@@ -11,7 +11,7 @@ on:
 
 jobs:
   native_unit_tests:
-    name: Native unit tests (Timer + PeerRegistry)
+    name: Native unit tests (8 envs, 289 tests)
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repository
@@ -47,8 +47,10 @@ jobs:
       # native_runtime / native_targets run the dependency-light test_peerregistry /
       # test_syncseen / test_syncenvelope / test_validate / test_runtime / test_synctargets
       # in their own envs (each links only its extracted module(s) — see platformio.ini).
+      # native_ha runs the 4 vendored-ArduinoHA suites (test_haselect / test_hasensor /
+      # test_hatext / test_hasync) against lib/home-assistant-integration's test harness.
       - name: Run native unit tests
-        run: pio test -e native -e native_peer -e native_seen -e native_sync -e native_validate -e native_runtime -e native_targets --verbose
+        run: pio test -e native -e native_peer -e native_seen -e native_sync -e native_validate -e native_runtime -e native_targets -e native_ha --verbose
 
   device_build:
     name: Device firmware build (ulanzi + awtrix2_upgrade)
