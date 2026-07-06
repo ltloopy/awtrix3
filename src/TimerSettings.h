@@ -161,6 +161,12 @@ String timerClock(uint32_t seconds, ClockStyle style);
 // (state JSON, Duration publishes/echoes, the max_duration HA formatter). No globals.
 String timerFormatHMS(uint32_t seconds);
 
+// Raw seconds <-> H/M/S integer decomposition, relocated out of TimerManager's
+// last pure statics (#206). Pure math, no clamp (the on-device config editor —
+// the one caller — owns its 99h display cap), no globals.
+void     timerSecondsToHMS(uint32_t sec, uint32_t &h, uint32_t &m, uint32_t &s);
+uint32_t timerHmsToSeconds(uint32_t h, uint32_t m, uint32_t s);
+
 // ---------------------------------------------------------------------------
 // HA attribute-group projection (PRD #57) -- the descriptor-table family's fifth
 // member. One row per (carrier entity, settings key) projection: a persisted

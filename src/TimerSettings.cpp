@@ -364,8 +364,8 @@ bool timerMelodyValidateInline(const String &s)
 }
 
 // Relocated out of TimerManager (#142). Self-contained: inlines the
-// h*3600+m*60+sec sum (was TimerManager_::hmsToSeconds) so the helper carries no
-// singleton dependency -- behaviour-identical to the former static.
+// h*3600+m*60+sec sum (timerHmsToSeconds below) rather than delegating, so the
+// parse stays one readable pass -- behaviour-identical to the former static.
 bool timerParseHMS(const String &in, uint32_t &outSeconds)
 {
     String s = in;
@@ -476,6 +476,20 @@ String timerClock(uint32_t seconds, ClockStyle style)
 String timerFormatHMS(uint32_t seconds)
 {
     return timerClock(seconds, ClockStyle::Trimmed);
+}
+
+// Relocated out of TimerManager (#206), the singleton's last pure statics
+// (secondsToHMS / hmsToSeconds) -- byte-identical.
+void timerSecondsToHMS(uint32_t sec, uint32_t &h, uint32_t &m, uint32_t &s)
+{
+    h = sec / 3600;
+    m = (sec % 3600) / 60;
+    s = sec % 60;
+}
+
+uint32_t timerHmsToSeconds(uint32_t h, uint32_t m, uint32_t s)
+{
+    return h * 3600UL + m * 60UL + s;
 }
 
 // ---------------------------------------------------------------------------

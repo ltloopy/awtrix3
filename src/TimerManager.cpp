@@ -308,18 +308,6 @@ String TimerManager_::getStateJson() const
     return out;
 }
 
-void TimerManager_::secondsToHMS(uint32_t sec, uint32_t &h, uint32_t &m, uint32_t &s)
-{
-    h = sec / 3600;
-    m = (sec % 3600) / 60;
-    s = sec % 60;
-}
-
-uint32_t TimerManager_::hmsToSeconds(uint32_t h, uint32_t m, uint32_t s)
-{
-    return h * 3600UL + m * 60UL + s;
-}
-
 // Apply the run-state bookkeeping a returned Transition names (issue #180). The
 // pure engine decides the phase change; this owns the state mutation — including
 // enterRunning's runStart* capture and the ADR-0024 override restore behind

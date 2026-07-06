@@ -910,6 +910,49 @@ void test_timerParseHMS_direct(void) {
 }
 
 // ============================================================================
+// #206 — timerSecondsToHMS, the descriptor-table seconds->H/M/S decomposition
+// (relocated out of the singleton's secondsToHMS static, byte-identical). Pure integer
+// math: no clamp (100h decomposes to h=100 — the config editor owns its own
+// 99h cap), no globals.
+// ============================================================================
+void test_timerSecondsToHMS_direct(void) {
+    uint32_t h = 99, m = 99, s = 99;
+    timerSecondsToHMS(0, h, m, s);
+    TEST_ASSERT_EQUAL_UINT32(0, h); TEST_ASSERT_EQUAL_UINT32(0, m); TEST_ASSERT_EQUAL_UINT32(0, s);
+    timerSecondsToHMS(59, h, m, s);
+    TEST_ASSERT_EQUAL_UINT32(0, h); TEST_ASSERT_EQUAL_UINT32(0, m); TEST_ASSERT_EQUAL_UINT32(59, s);
+    timerSecondsToHMS(60, h, m, s);
+    TEST_ASSERT_EQUAL_UINT32(0, h); TEST_ASSERT_EQUAL_UINT32(1, m); TEST_ASSERT_EQUAL_UINT32(0, s);
+    timerSecondsToHMS(3599, h, m, s);
+    TEST_ASSERT_EQUAL_UINT32(0, h); TEST_ASSERT_EQUAL_UINT32(59, m); TEST_ASSERT_EQUAL_UINT32(59, s);
+    timerSecondsToHMS(3661, h, m, s);
+    TEST_ASSERT_EQUAL_UINT32(1, h); TEST_ASSERT_EQUAL_UINT32(1, m); TEST_ASSERT_EQUAL_UINT32(1, s);
+    timerSecondsToHMS(360000, h, m, s);   // 100h: no 99h clamp here (editor's job)
+    TEST_ASSERT_EQUAL_UINT32(100, h); TEST_ASSERT_EQUAL_UINT32(0, m); TEST_ASSERT_EQUAL_UINT32(0, s);
+}
+
+// ============================================================================
+// #206 — timerHmsToSeconds, the inverse H/M/S->seconds sum (relocated out of
+// the singleton's hmsToSeconds static, byte-identical). No 0-59 cap on m/s (pure sum),
+// and the two helpers round-trip exactly.
+// ============================================================================
+void test_timerHmsToSeconds_direct(void) {
+    TEST_ASSERT_EQUAL_UINT32(0,      timerHmsToSeconds(0, 0, 0));
+    TEST_ASSERT_EQUAL_UINT32(3661,   timerHmsToSeconds(1, 1, 1));
+    TEST_ASSERT_EQUAL_UINT32(359999, timerHmsToSeconds(99, 59, 59));   // editor's max wheels
+    TEST_ASSERT_EQUAL_UINT32(150,    timerHmsToSeconds(0, 2, 30));
+    TEST_ASSERT_EQUAL_UINT32(90,     timerHmsToSeconds(0, 0, 90));     // no 0-59 cap: pure sum
+
+    // Round-trip: decompose then recompose is identity on the editor's range.
+    const uint32_t cases[] = {0, 59, 60, 3599, 3600, 3661, 86399, 359999};
+    for (uint32_t v : cases) {
+        uint32_t h, m, s;
+        timerSecondsToHMS(v, h, m, s);
+        TEST_ASSERT_EQUAL_UINT32(v, timerHmsToSeconds(h, m, s));
+    }
+}
+
+// ============================================================================
 // #142 — timerIsValidAction, the descriptor-table action-verb predicate (its
 // singleton forwarder was deleted in #204): accepts exactly {start, pause,
 // reset} case-insensitively and rejects everything else. It does NOT trim, so
@@ -4424,6 +4467,8 @@ int main(int, char **) {
     RUN_TEST(test_IM6_malformed_inline_atomic_reject);
     RUN_TEST(test_U23_formatHMS_trimmed);
     RUN_TEST(test_timerParseHMS_direct);
+    RUN_TEST(test_timerSecondsToHMS_direct);
+    RUN_TEST(test_timerHmsToSeconds_direct);
     RUN_TEST(test_timerIsValidAction_direct);
     RUN_TEST(test_U26_parseCommand_duration_string_and_number);
     RUN_TEST(test_U29_parseCommand_strict_results);

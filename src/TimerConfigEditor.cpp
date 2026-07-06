@@ -1,7 +1,7 @@
 #include "TimerConfigEditor.h"
 
 #include "Globals.h"        // TIMER_MAX_DURATION (cap math)
-#include "TimerManager.h"   // secondsToHMS / hmsToSeconds (static math helpers, header-only)
+#include "TimerSettings.h"  // timerSecondsToHMS / timerHmsToSeconds (pure math free functions, #206)
 
 namespace {
     // Hold-to-repeat timing (was TimerManager.cpp's anon namespace before issue #23).
@@ -12,7 +12,7 @@ namespace {
 void TimerConfigEditor::enter(uint32_t durationSec)
 {
     uint32_t h, m, s;
-    TimerManager_::secondsToHMS(durationSec, h, m, s);
+    timerSecondsToHMS(durationSec, h, m, s);
     if (h > 99) h = 99;
     hh_    = (uint8_t)h;
     mm_    = (uint8_t)m;
@@ -24,7 +24,7 @@ void TimerConfigEditor::enter(uint32_t durationSec)
 uint32_t TimerConfigEditor::exit()
 {
     active_ = false;
-    return TimerManager_::hmsToSeconds(hh_, mm_, ss_);
+    return timerHmsToSeconds(hh_, mm_, ss_);
 }
 
 void TimerConfigEditor::cycleField()
