@@ -259,10 +259,6 @@ void timerFormatBarBgColor(const TimerSettingDesc &d, JsonDocument &doc);
 // Emit each member-config key's live value into `doc` (the B1 half of the config snapshot).
 void timerMemberConfigBuildSnapshot(JsonDocument &doc);
 
-// True iff `doc` carries any member-config key -- the broadcast trigger for the B1 half
-// (snapshot membership IS the broadcast trigger, ADR-0006).
-bool timerDocTouchesMemberConfig(const JsonDocument &doc);
-
 // Run `cmdKey`'s declared publish hook (no-op if the key has none / is unknown).
 // TimerManager's per-key publish methods dispatch through this, so the row is the
 // single place "how key X goes out on the wire" is defined (issue #33 / PRD #28).
