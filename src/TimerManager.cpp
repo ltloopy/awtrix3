@@ -287,9 +287,9 @@ String TimerManager_::getStateJson() const
     doc["state"]         = getStateString();
     doc["enabled"]       = (bool)SHOW_TIMER;
     doc["remaining"]     = remaining;
-    doc["remaining_str"] = formatHMS(remaining);
+    doc["remaining_str"] = timerFormatHMS(remaining);
     doc["duration"]      = durationSec;
-    doc["duration_str"]  = formatHMS(durationSec);
+    doc["duration_str"]  = timerFormatHMS(durationSec);
     doc["buzzer"]        = buzzerModeString();
     doc["finished"]      = finishedModeString();
 
@@ -318,14 +318,6 @@ void TimerManager_::secondsToHMS(uint32_t sec, uint32_t &h, uint32_t &m, uint32_
 uint32_t TimerManager_::hmsToSeconds(uint32_t h, uint32_t m, uint32_t s)
 {
     return h * 3600UL + m * 60UL + s;
-}
-
-// Forwarder: the trimmed-clock formatting now lives in the descriptor-table family as
-// the free function timerFormatHMS (#143), so the family's max_duration HA formatter
-// can render it without this singleton. Callers reach it unchanged through this static.
-String TimerManager_::formatHMS(uint32_t seconds)
-{
-    return timerFormatHMS(seconds);
 }
 
 // Apply the run-state bookkeeping a returned Transition names (issue #180). The
@@ -724,7 +716,7 @@ void TimerManager_::publishRemaining()
 void TimerManager_::publishDuration()
 {
     MQTTManager.publishTimerWire(MQTTManager.timerWireTopic(TimerHaEntity::Duration).c_str(),
-                                 formatHMS(durationSec).c_str());
+                                 timerFormatHMS(durationSec).c_str());
 }
 // The enum keys are member-config rows (issue #33): dispatch through the row's
 // declared publish hook so validate/apply/emit/publish stay co-located and the

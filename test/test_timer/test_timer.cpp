@@ -871,13 +871,13 @@ void test_IM6_malformed_inline_atomic_reject(void) {
 // most-significant shown field unpadded, lower fields zero-padded).
 // ============================================================================
 void test_U23_formatHMS_trimmed(void) {
-    TEST_ASSERT_EQUAL_STRING("0:00",     TimerManager_::formatHMS(0).c_str());
-    TEST_ASSERT_EQUAL_STRING("0:45",     TimerManager_::formatHMS(45).c_str());
-    TEST_ASSERT_EQUAL_STRING("3:00",     TimerManager_::formatHMS(180).c_str());
-    TEST_ASSERT_EQUAL_STRING("5:05",     TimerManager_::formatHMS(305).c_str());
-    TEST_ASSERT_EQUAL_STRING("1:00:00",  TimerManager_::formatHMS(3600).c_str());
-    TEST_ASSERT_EQUAL_STRING("1:01:01",  TimerManager_::formatHMS(3661).c_str());
-    TEST_ASSERT_EQUAL_STRING("10:00:00", TimerManager_::formatHMS(36000).c_str());
+    TEST_ASSERT_EQUAL_STRING("0:00",     timerFormatHMS(0).c_str());
+    TEST_ASSERT_EQUAL_STRING("0:45",     timerFormatHMS(45).c_str());
+    TEST_ASSERT_EQUAL_STRING("3:00",     timerFormatHMS(180).c_str());
+    TEST_ASSERT_EQUAL_STRING("5:05",     timerFormatHMS(305).c_str());
+    TEST_ASSERT_EQUAL_STRING("1:00:00",  timerFormatHMS(3600).c_str());
+    TEST_ASSERT_EQUAL_STRING("1:01:01",  timerFormatHMS(3661).c_str());
+    TEST_ASSERT_EQUAL_STRING("10:00:00", timerFormatHMS(36000).c_str());
 }
 
 // U24/U25 removed with the dead parseHMS forwarder (#204): the accept+reject
@@ -1569,7 +1569,7 @@ void test_D6_formatTimerDisplay_vs_wire_string(void) {
     TimerViewModel::formatTimerDisplay(3661, b, sizeof(b));  TEST_ASSERT_EQUAL_STRING("1:01", b);  // seconds dropped
     TimerViewModel::formatTimerDisplay(36000, b, sizeof(b)); TEST_ASSERT_EQUAL_STRING("10:00", b);
     // Contrast: the wire string for the same value keeps seconds.
-    TEST_ASSERT_EQUAL_STRING("1:01:01", TimerManager_::formatHMS(3661).c_str());
+    TEST_ASSERT_EQUAL_STRING("1:01:01", timerFormatHMS(3661).c_str());
 }
 
 // D7 — icon_enabled gates showIcon and reflows text + bar to the full panel.
@@ -4239,7 +4239,7 @@ void test_HA4_invalid_duration_rejected_and_snaps_back(void) {
     TEST_ASSERT_EQUAL_UINT32(300, TimerManager.getDuration());
 
     // The canonical live value to echo back is the unchanged 300 ("5:00").
-    TEST_ASSERT_EQUAL_STRING("5:00", TimerManager_::formatHMS(TimerManager.getDuration()).c_str());
+    TEST_ASSERT_EQUAL_STRING("5:00", timerFormatHMS(TimerManager.getDuration()).c_str());
 }
 
 // HA5 — the Start/Pause/Reset buttons route through parseCommand action commands,

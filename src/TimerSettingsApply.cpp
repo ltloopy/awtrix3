@@ -164,8 +164,8 @@ void timerBuildFullConfig(JsonDocument &doc)
         {
             timerSettingEmitValue(d, doc);   // raw seconds kept (e.g. 86400)
             // ...plus a trimmed clock-string sibling, this endpoint's raw+_str
-            // duration precedent, reusing the exact formatHMS the duration fields use.
-            doc["max_duration_str"] = TimerManager_::formatHMS(*static_cast<uint32_t *>(d.storage));
+            // duration precedent, reusing the exact timerFormatHMS the duration fields use.
+            doc["max_duration_str"] = timerFormatHMS(*static_cast<uint32_t *>(d.storage));
         }
         else
         {

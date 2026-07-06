@@ -415,8 +415,8 @@ bool timerIsValidAction(const String &s)
 }
 
 // Relocated out of TimerManager's statics (#143) so the command validator links the
-// table family, not the singleton. Behaviour-identical to the former statics; the
-// singleton keeps only the formatHMS forwarder (#204 deleted the rest).
+// table family, not the singleton. Behaviour-identical to the former statics, all
+// of which are gone (#204/#205 deleted the forwarders).
 
 bool timerIsValidIconName(const String &name)
 {

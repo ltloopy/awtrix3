@@ -80,7 +80,7 @@ namespace TimerViewModel
     //   < 1h   -> "M:SS"   (305  -> "5:05")
     //   1..9h  -> "H:MM"   (seconds dropped to fit; 3661 -> "1:01")
     //   >= 10h -> "HH:MM"  (36000 -> "10:00")
-    // Distinct from TimerManager::formatHMS (the "H:MM:SS" wire string, which
+    // Distinct from timerFormatHMS (the "H:MM:SS" wire string, which
     // always carries seconds). See CONTEXT.md ("Timer Display String").
     void formatTimerDisplay(uint32_t seconds, char *out, size_t outLen);
 }
