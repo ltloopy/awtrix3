@@ -44,11 +44,11 @@ jobs:
           pip install --upgrade platformio
 
       # native runs test_timer; native_peer / native_seen / native_sync / native_validate /
-      # native_runtime run the dependency-light test_peerregistry / test_syncseen /
-      # test_syncenvelope / test_validate / test_runtime in their own envs (each links only
-      # its extracted module(s) — see platformio.ini).
+      # native_runtime / native_targets run the dependency-light test_peerregistry /
+      # test_syncseen / test_syncenvelope / test_validate / test_runtime / test_synctargets
+      # in their own envs (each links only its extracted module(s) — see platformio.ini).
       - name: Run native unit tests
-        run: pio test -e native -e native_peer -e native_seen -e native_sync -e native_validate -e native_runtime --verbose
+        run: pio test -e native -e native_peer -e native_seen -e native_sync -e native_validate -e native_runtime -e native_targets --verbose
 
   device_build:
     name: Device firmware build (ulanzi + awtrix2_upgrade)
