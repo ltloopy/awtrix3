@@ -338,7 +338,12 @@ and the Timer branches of the shared ArduinoHA select/switch/button callbacks. T
 keep their non-Timer branches) and delegate the Timer sender via a leading
 `if (TimerHaHost.tryHandle…(…)) return;`; each `tryHandle*` returns whether the sender was
 a Timer carrier and, when so, performs the same route-through-`timerHaApply` +
-snap-back-echo it always did (ADR-0001 / ADR-0014). The host reaches the `HADevice`/`HAMqtt`
+snap-back-echo it always did (ADR-0001 / ADR-0014). The dynamic Targets select's
+**republish debounce decision** lives in the host-tested `SyncTargetsDebounce` module
+(`src/SyncTargetsDebounce.{h,cpp}`, ADR-0027): `refreshTargets()` keeps the shell —
+carrier/connected guards **before** `step()`, the options build, then the effects
+(rebuild options, republish discovery, re-apply state) only on `Republish`; carrier
+creation `seed()`s the baseline. The host reaches the `HADevice`/`HAMqtt`
 client via the `extern` globals still owned by `MQTTManager` — **no injection** (one
 implementation forever; ADR-0026). `reconcile()` likewise reaches `SHOW_TIMER_HA_PREV`
 via `extern`: it stays a **Globals-owned persisted (NVS-backed) flag**, not host-private,
@@ -512,7 +517,11 @@ not the `uniqueID`. See [ADR-0019](docs/adr/0019-peer-presence-registry.md).
 - **Dynamic HA Targets select** — the Home Assistant **Timer sync targets** select
   (writable since #110) consumes the registry: its options are built at runtime as
   `Off`, `All`, then each discovered peer id (sorted), and the entity's discovery is
-  re-published (debounced, on change) as membership shifts. It is **single-target** by
+  re-published (debounced, on change) as membership shifts — the settle-window decision
+  is the host-tested `SyncTargetsDebounce` module
+  ([src/SyncTargetsDebounce.h](src/SyncTargetsDebounce.h), ADR-0027), stepped by
+  `TimerHaHost::refreshTargets`. This is **HA-presentation** logic *consuming* the peer
+  registry, not propagation-surface logic. It is **single-target** by
   the platform's nature — picking a peer sets `sync_targets` to that one id; a multi-id
   CSV list (set out-of-band) cannot be shown and reflects as **unknown**, while the
   read-only `sync_targets` attribute stays authoritative for the exact value.
