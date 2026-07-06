@@ -589,10 +589,3 @@ const size_t TIMER_MEMBER_VALIDATOR_COUNT =
 
 static_assert(sizeof(TIMER_MEMBER_VALIDATORS) / sizeof(TIMER_MEMBER_VALIDATORS[0]) == TIMER_MEMBER_CONFIG_DESC_CAP,
               "TIMER_MEMBER_CONFIG_DESC_CAP must equal the member-config row count");
-
-bool timerDocTouchesMemberConfig(const JsonDocument &doc)
-{
-    for (size_t i = 0; i < TIMER_MEMBER_VALIDATOR_COUNT; ++i)
-        if (doc.containsKey(TIMER_MEMBER_VALIDATORS[i].cmdKey)) return true;
-    return false;
-}
