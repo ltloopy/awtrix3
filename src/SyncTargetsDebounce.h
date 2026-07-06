@@ -34,7 +34,8 @@
 //  - seed() adopts and closes the window (no spurious first republish).
 //  - (now - sinceMs) is unsigned wrap arithmetic, safe across millis() rollover.
 //
-// Nothing consumes this module yet — the TimerHaHost rewire is issue #200.
+// Consumed by TimerHaHost: refreshTargets() steps it, createCarriers() seeds it
+// (issue #200, ADR-0027).
 class SyncTargetsDebounce
 {
 public:

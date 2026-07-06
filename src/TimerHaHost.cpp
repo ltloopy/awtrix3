@@ -5,6 +5,7 @@
 #include "MQTTManager.h"   // kMaxHAEntities (the general MQTT module's HA entity cap)
 #include "TimerManager.h"
 #include "TimerHa.h"
+#include "SyncTargetsDebounce.h"
 
 // The ArduinoHA client + device stay owned by the general MQTT translation unit
 // (MQTTManager.cpp); the host reaches them via extern (no injection). See ADR-0026.
@@ -45,13 +46,10 @@ static char *timerHaId(TimerHaEntity slot) { return timerHaIds[static_cast<size_
 // Option-string sizing for the dynamic Targets select.
 constexpr size_t kSyncTargetPeerCap = 16;
 constexpr size_t kSyncTargetOptsCap = 8 + kSyncTargetPeerCap * 33 + 1; // "Off;All" + ";<id>"...
-// The options string last published to the select, plus the dirty bookkeeping the
-// republish (refreshTargets) debounces on. createCarriers() seeds them; refreshTargets
-// consumes them.
-static String        syncTargetsOptionsSig;
-static bool          syncTargetsDirty = false;
-static unsigned long syncTargetsDirtySinceMs = 0;
-static const unsigned long kSyncTargetsRepublishDebounceMs = 3000;
+// The settle-window republish decision (signature, dirty flag, window start) lives in
+// the host-tested SyncTargetsDebounce module (issue #199/#200, ADR-0027); this instance
+// is the only debounce state. createCarriers() seeds it; refreshTargets() steps it.
+static SyncTargetsDebounce syncTargetsDebounce;
 
 // Snapshot the current sorted peer ids and build the select's option string into
 // optsOut. Returns the peer count; idsOut holds the ids (whose c_str() backs ptrsOut)
@@ -204,8 +202,7 @@ static void createCarriers()
     size_t        stN = buildCurrentSyncTargetsOptions(stIds, stPtrs, kSyncTargetPeerCap,
                                                        stOpts, sizeof(stOpts));
     timerSyncTargetsSel->setOptions(stOpts);
-    syncTargetsOptionsSig = stOpts;   // seed the republish baseline (no spurious first republish)
-    syncTargetsDirty = false;
+    syncTargetsDebounce.seed(stOpts);   // seed the republish baseline (no spurious first republish)
     timerSyncTargetsSel->onCommand(onSelectCommand);
     timerSyncTargetsSel->setIcon(dSyncT.icon);
     timerSyncTargetsSel->setName(dSyncT.name);
@@ -338,24 +335,17 @@ void TimerHaHost_::refreshTargets(unsigned long nowMs)
     size_t      n = buildCurrentSyncTargetsOptions(ids, ptrs, kSyncTargetPeerCap,
                                                    opts, sizeof(opts));
 
-    if (syncTargetsOptionsSig == opts) { syncTargetsDirty = false; return; }  // unchanged
-
-    if (!syncTargetsDirty)   // first sighting of the change: start the debounce window
-    {
-        syncTargetsDirty = true;
-        syncTargetsDirtySinceMs = nowMs;
+    // The settle-window decision (unchanged / start window / waiting / republish) is
+    // SyncTargetsDebounce's transition table; only Republish reaches the effects below.
+    // The guards above stay BEFORE step() so window state ages across MQTT-down gaps.
+    if (syncTargetsDebounce.step(opts, nowMs) != SyncTargetsDebounce::Action::Republish)
         return;
-    }
-    if ((nowMs - syncTargetsDirtySinceMs) < kSyncTargetsRepublishDebounceMs) return;
 
     timerSyncTargetsSel->resetOptions();
     timerSyncTargetsSel->setOptions(opts);
     mqtt.publishConfigForDeviceType(timerSyncTargetsSel);
     timerSyncTargetsSel->setState(
         timerSyncTargetsIndexForValue(TIMER_SYNC_TARGETS.c_str(), ptrs, n), true);
-
-    syncTargetsOptionsSig = opts;
-    syncTargetsDirty = false;
 }
 
 bool TimerHaHost_::tryHandleButton(HAButton *sender)
