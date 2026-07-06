@@ -281,6 +281,18 @@ void test_V22_malformed_duration_rejected(void) {
     TEST_ASSERT_FALSE(classifyJson("{\"duration\":0}").ok);
 }
 
+// V28 -- the duration range boundaries (was test_U28 on the singleton's deleted
+// isValidDuration static, #204; the contract lives in classify's check against
+// Context.savedMaxDuration): floor 1 accepted, the ceiling itself accepted,
+// ceiling+1 rejected, savedMax=0 means uncapped -- but the floor still applies.
+void test_V28_duration_range_boundaries(void) {
+    TEST_ASSERT_TRUE (classifyJson("{\"duration\":1}").ok);                       // floor
+    TEST_ASSERT_TRUE (classifyJson("{\"duration\":86400}").ok);                   // == kSavedMax
+    TEST_ASSERT_FALSE(classifyJson("{\"duration\":86401}").ok);                   // ceiling+1
+    TEST_ASSERT_TRUE (classifyJson("{\"duration\":999999}", /*savedMax=*/0).ok);  // 0 = no cap
+    TEST_ASSERT_FALSE(classifyJson("{\"duration\":0}", /*savedMax=*/0).ok);       // floor survives
+}
+
 // V23 -- atomicity: a bad field rejects a command even when a valid action rides
 // along (the action must not survive the reject). Pure-level proof of ADR-0001
 // (was the atomic pairing in test_U37); the apply-level effect stays in test_timer.
@@ -354,5 +366,6 @@ int main(int, char **) {
     RUN_TEST(test_V25_clock_trimmed);
     RUN_TEST(test_V26_clock_padded);
     RUN_TEST(test_V27_clock_compact);
+    RUN_TEST(test_V28_duration_range_boundaries);
     return UNITY_END();
 }

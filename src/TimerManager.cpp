@@ -328,46 +328,6 @@ String TimerManager_::formatHMS(uint32_t seconds)
     return timerFormatHMS(seconds);
 }
 
-// Forwarder: the parse logic now lives in the descriptor-table family as the free
-// function timerParseHMS (#142), so the command validator links the table and not
-// this singleton. Callers reach it unchanged through this static.
-bool TimerManager_::parseHMS(const String &in, uint32_t &outSeconds)
-{
-    return timerParseHMS(in, outSeconds);
-}
-
-bool TimerManager_::isValidDuration(uint32_t seconds)
-{
-    if (seconds < 1) return false;
-    if (TIMER_MAX_DURATION > 0 && seconds > TIMER_MAX_DURATION) return false;
-    return true;
-}
-
-// Forwarders: the enum-parse + icon-name char-rule now live in the descriptor-table
-// family (timerParseBuzzerMode / timerParseFinishedMode / timerIsValidIconName, #143),
-// so the command validator + the member validators link the family, not this singleton.
-bool TimerManager_::parseBuzzerMode(const String &s, BuzzerMode &out)
-{
-    return timerParseBuzzerMode(s, out);
-}
-
-bool TimerManager_::parseFinishedMode(const String &s, FinishedMode &out)
-{
-    return timerParseFinishedMode(s, out);
-}
-
-bool TimerManager_::isValidIconName(const String &name)
-{
-    return timerIsValidIconName(name);
-}
-
-// Forwarder: the predicate now lives in the descriptor-table family as the free
-// function timerIsValidAction (#142). Callers reach it unchanged through this static.
-bool TimerManager_::isValidAction(const String &s)
-{
-    return timerIsValidAction(s);
-}
-
 // Apply the run-state bookkeeping a returned Transition names (issue #180). The
 // pure engine decides the phase change; this owns the state mutation — including
 // enterRunning's runStart* capture and the ADR-0024 override restore behind
@@ -707,7 +667,7 @@ TimerCmdResult TimerManager_::timerHaApply(TimerHaEntity entity, const String &r
     }
     case TimerHaEntity::Duration:
         // The raw HH:MM:SS text rides straight into parseCommand, which owns the
-        // parse/validate (parseHMS + range, reject-not-clamp). On a non-Ok result
+        // parse/validate (timerParseHMS + range, reject-not-clamp). On a non-Ok result
         // the caller echoes the canonical live value back (snap-back).
         doc["duration"] = rawValue;
         break;

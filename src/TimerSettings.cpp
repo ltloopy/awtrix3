@@ -363,7 +363,7 @@ bool timerMelodyValidateInline(const String &s)
     return true;
 }
 
-// Relocated from TimerManager_::parseHMS (#142). Self-contained: inlines the
+// Relocated out of TimerManager (#142). Self-contained: inlines the
 // h*3600+m*60+sec sum (was TimerManager_::hmsToSeconds) so the helper carries no
 // singleton dependency -- behaviour-identical to the former static.
 bool timerParseHMS(const String &in, uint32_t &outSeconds)
@@ -406,7 +406,7 @@ bool timerParseHMS(const String &in, uint32_t &outSeconds)
     return true;
 }
 
-// Relocated from TimerManager_::isValidAction (#142). Pure case-insensitive
+// Relocated out of TimerManager (#142). Pure case-insensitive
 // membership check over the three action verbs -- behaviour-identical.
 bool timerIsValidAction(const String &s)
 {
@@ -415,9 +415,8 @@ bool timerIsValidAction(const String &s)
 }
 
 // Relocated out of TimerManager's statics (#143) so the command validator links the
-// table family, not the singleton. Behaviour-identical to the former statics;
-// TimerManager keeps thin forwarders (TimerManager_::isValidIconName / parseBuzzerMode
-// / parseFinishedMode / formatHMS).
+// table family, not the singleton. Behaviour-identical to the former statics; the
+// singleton keeps only the formatHMS forwarder (#204 deleted the rest).
 
 bool timerIsValidIconName(const String &name)
 {

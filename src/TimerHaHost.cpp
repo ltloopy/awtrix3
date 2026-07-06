@@ -81,7 +81,7 @@ static void onTimerDurationMessage(const char *message, uint16_t length, HAText 
     in.trim();
 
     // Route the raw HH:MM:SS text through parseCommand (issue #109): it owns the
-    // parse/validate (parseHMS + range, reject-not-clamp) — the HA layer no longer
+    // parse/validate (timerParseHMS + range, reject-not-clamp) — the HA layer no longer
     // duplicates that logic. A rejected input applies nothing (atomic-reject).
     TimerManager.timerHaApply(TimerHaEntity::Duration, in);
 
