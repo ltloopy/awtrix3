@@ -237,15 +237,13 @@ public:
     void setBuzzerMode(BuzzerMode m, bool persist = true);
     void setFinishedMode(FinishedMode m, bool persist = true);
 
-    // Time <-> seconds helpers shared by the MQTT/HA string path and the
-    // on-device config editor. formatHMS is the external string contract (see
-    // docs/timer.md; the parse twin is the free function timerParseHMS);
-    // secondsToHMS/hmsToSeconds are the raw math. The parse/validate statics
-    // that once sat beside them were deleted in #204 — the descriptor-table
-    // free functions (TimerSettings.h) are the only spellings.
+    // Time <-> seconds raw math shared by the MQTT/HA string path and the
+    // on-device config editor. The external string contract is the free-function
+    // pair timerFormatHMS/timerParseHMS (TimerSettings.h; see docs/timer.md) —
+    // the parse/validate/format statics that once sat here were deleted in
+    // #204/#205; the descriptor-table free functions are the only spellings.
     static void     secondsToHMS(uint32_t sec, uint32_t &h, uint32_t &m, uint32_t &s);
     static uint32_t hmsToSeconds(uint32_t h, uint32_t m, uint32_t s);
-    static String   formatHMS(uint32_t seconds);
 
     // The one shared icon setter: validate/reject/equality-skip/assign/persist/publish
     // for one state's slot. The four named setters below are thin delegators over it.

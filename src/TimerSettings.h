@@ -157,8 +157,8 @@ enum class ClockStyle { Trimmed, Padded, Compact };
 String timerClock(uint32_t seconds, ClockStyle style);
 
 // Trimmed clock string ("24:00:00" / "1:00:00" / "0:45"). Thin alias for
-// timerClock(seconds, ClockStyle::Trimmed); see TimerManager_::formatHMS and the
-// max_duration HA formatter. No globals.
+// timerClock(seconds, ClockStyle::Trimmed); the Duration wire/state spelling
+// (state JSON, Duration publishes/echoes, the max_duration HA formatter). No globals.
 String timerFormatHMS(uint32_t seconds);
 
 // ---------------------------------------------------------------------------

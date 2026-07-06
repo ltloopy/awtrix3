@@ -44,8 +44,9 @@ struct TimerHaHost_
     bool tryHandleSwitch(bool state, HASwitch *sender);
     bool tryHandleButton(HAButton *sender);
 
-    // Transitional accessors for the Timer wire seam still resident in MQTTManager
-    // (issue #193): whether the carriers exist, and a carrier's resolved unique id.
+    // Accessors for the Timer wire seam that deliberately stays in MQTTManager
+    // (ADR-0026): whether the carriers exist, and a carrier's resolved unique id.
+    // They are the seam's surface, not a transition step.
     bool carriersReady() const;
     const char *entityId(TimerHaEntity slot) const;
 };

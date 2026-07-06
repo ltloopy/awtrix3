@@ -4,6 +4,7 @@
 #include "Globals.h"
 #include "MQTTManager.h"   // kMaxHAEntities (the general MQTT module's HA entity cap)
 #include "TimerManager.h"
+#include "TimerSettings.h"  // timerFormatHMS (the Duration state's clock string)
 #include "TimerHa.h"
 #include "SyncTargetsDebounce.h"
 
@@ -87,7 +88,7 @@ static void onTimerDurationMessage(const char *message, uint16_t length, HAText 
 
     // Echo the canonical value back so rejected input snaps the field to the
     // previous valid time rather than leaving the bad text displayed.
-    sender->setState(TimerManager_::formatHMS(TimerManager.getDuration()).c_str(), true);
+    sender->setState(timerFormatHMS(TimerManager.getDuration()).c_str(), true);
 }
 
 // Creates the Timer HA entity objects (and registers them with HAMqtt via their
@@ -115,7 +116,7 @@ static void createCarriers()
     timerDuration->setName(dDur.name);
     timerDuration->setRetain(true);
     timerDuration->onMessage(onTimerDurationMessage);
-    timerDuration->setState(TimerManager_::formatHMS(TimerManager.getDuration()).c_str(), true);
+    timerDuration->setState(timerFormatHMS(TimerManager.getDuration()).c_str(), true);
     // Opt the Duration text entity into JSON attributes (HAText opt-in, issue #67)
     // so its discovery config advertises json_attr_t; its retained {max_duration}
     // object — the cap in carrier-native clock form ("24:00:00") — rides the wire
