@@ -880,40 +880,15 @@ void test_U23_formatHMS_trimmed(void) {
     TEST_ASSERT_EQUAL_STRING("10:00:00", TimerManager_::formatHMS(36000).c_str());
 }
 
-// ============================================================================
-// U24 — parseHMS accepts bare seconds, MM:SS, HH:MM:SS, carries out-of-range
-// fields, and trims surrounding whitespace.
-// ============================================================================
-void test_U24_parseHMS_accepts(void) {
-    uint32_t s = 0;
-    TEST_ASSERT_TRUE(TimerManager_::parseHMS("00:05:00", s)); TEST_ASSERT_EQUAL_UINT32(300, s);
-    TEST_ASSERT_TRUE(TimerManager_::parseHMS("3:00", s));     TEST_ASSERT_EQUAL_UINT32(180, s);   // MM:SS
-    TEST_ASSERT_TRUE(TimerManager_::parseHMS("90", s));       TEST_ASSERT_EQUAL_UINT32(90, s);    // bare seconds
-    TEST_ASSERT_TRUE(TimerManager_::parseHMS("3:90", s));     TEST_ASSERT_EQUAL_UINT32(270, s);   // carry, no 0-59 cap
-    TEST_ASSERT_TRUE(TimerManager_::parseHMS(" 1:00:00 ", s));TEST_ASSERT_EQUAL_UINT32(3600, s);  // trims
-    TEST_ASSERT_TRUE(TimerManager_::parseHMS("0:45", s));     TEST_ASSERT_EQUAL_UINT32(45, s);
-}
+// U24/U25 removed with the dead parseHMS forwarder (#204): the accept+reject
+// contract is pinned on the free function below, case for case.
 
 // ============================================================================
-// U25 — parseHMS rejects empty fields, >2 colons, non-numeric, and empty input.
-// ============================================================================
-void test_U25_parseHMS_rejects(void) {
-    uint32_t s = 12345;  // sentinel; must be left untouched on reject
-    TEST_ASSERT_FALSE(TimerManager_::parseHMS("aa:bb", s));
-    TEST_ASSERT_FALSE(TimerManager_::parseHMS("5:", s));
-    TEST_ASSERT_FALSE(TimerManager_::parseHMS(":30", s));
-    TEST_ASSERT_FALSE(TimerManager_::parseHMS("1:2:3:4", s));
-    TEST_ASSERT_FALSE(TimerManager_::parseHMS("", s));
-    TEST_ASSERT_FALSE(TimerManager_::parseHMS("   ", s));
-    TEST_ASSERT_EQUAL_UINT32(12345, s);
-}
-
-// ============================================================================
-// #142 — parseHMS relocated into the descriptor-table family as the free
-// function timerParseHMS (TimerManager_::parseHMS now forwards to it). Direct
-// host test in its new home: the same accept+reject contract as U24/U25,
-// asserted on the free function so the relocation is pinned independent of the
-// forwarder. carry (no 0-59 cap) and whitespace-trim are the load-bearing edges.
+// #142/#204 — timerParseHMS, the descriptor-table duration parse (its singleton
+// forwarder was deleted in #204; this is THE accept+reject contract). Accepts
+// bare seconds, MM:SS, HH:MM:SS; carry (no 0-59 cap) and whitespace-trim are
+// the load-bearing edges. Rejects empty fields, >2 colons, non-numeric, and
+// empty input, leaving the out param untouched.
 // ============================================================================
 void test_timerParseHMS_direct(void) {
     uint32_t s = 0;
@@ -922,6 +897,7 @@ void test_timerParseHMS_direct(void) {
     TEST_ASSERT_TRUE(timerParseHMS("90", s));       TEST_ASSERT_EQUAL_UINT32(90, s);    // bare seconds
     TEST_ASSERT_TRUE(timerParseHMS("3:90", s));     TEST_ASSERT_EQUAL_UINT32(270, s);   // carry, no 0-59 cap
     TEST_ASSERT_TRUE(timerParseHMS(" 1:00:00 ", s));TEST_ASSERT_EQUAL_UINT32(3600, s);  // trims
+    TEST_ASSERT_TRUE(timerParseHMS("0:45", s));     TEST_ASSERT_EQUAL_UINT32(45, s);    // zero first field
 
     uint32_t r = 12345;  // sentinel; must be left untouched on reject
     TEST_ASSERT_FALSE(timerParseHMS("aa:bb", r));
@@ -934,11 +910,10 @@ void test_timerParseHMS_direct(void) {
 }
 
 // ============================================================================
-// #142 — isValidAction relocated into the descriptor-table family as the free
-// function timerIsValidAction (TimerManager_::isValidAction now forwards to it).
-// Direct host test in its new home: the action verb predicate accepts exactly
-// {start, pause, reset} case-insensitively and rejects everything else. It does
-// NOT trim, so a trailing space is a reject -- that no-trim edge pins the move.
+// #142 — timerIsValidAction, the descriptor-table action-verb predicate (its
+// singleton forwarder was deleted in #204): accepts exactly {start, pause,
+// reset} case-insensitively and rejects everything else. It does NOT trim, so
+// a trailing space is a reject -- that no-trim edge pins the move.
 // ============================================================================
 void test_timerIsValidAction_direct(void) {
     TEST_ASSERT_TRUE(timerIsValidAction("start"));
@@ -974,22 +949,8 @@ void test_U26_parseCommand_duration_string_and_number(void) {
 // U27 removed with the TimerManager config-mode surface (#168): the enter/exit
 // seconds<->HMS round-trip now lives entirely in TimerConfigEditor (test_CE2..CE5).
 
-// ============================================================================
-// U28 — isValidDuration: range gate used by the reject-everywhere policy.
-// ============================================================================
-void test_U28_isValidDuration(void) {
-    TIMER_MAX_DURATION = 86400;
-    TEST_ASSERT_FALSE(TimerManager_::isValidDuration(0));
-    TEST_ASSERT_TRUE (TimerManager_::isValidDuration(1));
-    TEST_ASSERT_TRUE (TimerManager_::isValidDuration(86400));
-    TEST_ASSERT_FALSE(TimerManager_::isValidDuration(86401));
-
-    TIMER_MAX_DURATION = 0;  // 0 = no upper cap
-    TEST_ASSERT_TRUE (TimerManager_::isValidDuration(999999));
-    TEST_ASSERT_FALSE(TimerManager_::isValidDuration(0));
-
-    TIMER_MAX_DURATION = 86400;  // restore default for later tests
-}
+// U28 removed with the dead isValidDuration static (#204): the range contract is
+// classify's duration check, pinned in test_validate (V28) through the public path.
 
 // ============================================================================
 // U29 — parseCommand is always strict: Ok / BadJson / BadField, and out-of-range
@@ -3156,7 +3117,7 @@ void test_T10_codec_roundtrip_aliases_and_case(void) {
         const char *s = TimerManager.buzzerModeString();
         TEST_ASSERT_EQUAL_STRING(TIMER_BUZZER_CODEC[i].wire, s);
         BuzzerMode back;
-        TEST_ASSERT_TRUE(TimerManager_::parseBuzzerMode(String(s), back));
+        TEST_ASSERT_TRUE(timerParseBuzzerMode(String(s), back));
         TEST_ASSERT_EQUAL_UINT8(i, (uint8_t)back);
     }
     // finished: same.
@@ -3166,7 +3127,7 @@ void test_T10_codec_roundtrip_aliases_and_case(void) {
         const char *s = TimerManager.finishedModeString();
         TEST_ASSERT_EQUAL_STRING(TIMER_FINISHED_CODEC[i].wire, s);
         FinishedMode back;
-        TEST_ASSERT_TRUE(TimerManager_::parseFinishedMode(String(s), back));
+        TEST_ASSERT_TRUE(timerParseFinishedMode(String(s), back));
         TEST_ASSERT_EQUAL_UINT8(i, (uint8_t)back);
     }
 
@@ -3174,35 +3135,35 @@ void test_T10_codec_roundtrip_aliases_and_case(void) {
     for (uint8_t i = 0; i < (uint8_t)BuzzerMode::COUNT; ++i) {
         if (!TIMER_BUZZER_CODEC[i].aliases) continue;
         BuzzerMode back;
-        TEST_ASSERT_TRUE(TimerManager_::parseBuzzerMode(String(TIMER_BUZZER_CODEC[i].aliases), back));
+        TEST_ASSERT_TRUE(timerParseBuzzerMode(String(TIMER_BUZZER_CODEC[i].aliases), back));
         TEST_ASSERT_EQUAL_UINT8(i, (uint8_t)back);
     }
     for (uint8_t i = 0; i < (uint8_t)FinishedMode::COUNT; ++i) {
         if (!TIMER_FINISHED_CODEC[i].aliases) continue;
         FinishedMode back;
-        TEST_ASSERT_TRUE(TimerManager_::parseFinishedMode(String(TIMER_FINISHED_CODEC[i].aliases), back));
+        TEST_ASSERT_TRUE(timerParseFinishedMode(String(TIMER_FINISHED_CODEC[i].aliases), back));
         TEST_ASSERT_EQUAL_UINT8(i, (uint8_t)back);
     }
 
     // The specific legacy aliases the old parser accepted, spelled out explicitly.
     FinishedMode f;
-    TEST_ASSERT_TRUE(TimerManager_::parseFinishedMode("autoclear", f));
+    TEST_ASSERT_TRUE(timerParseFinishedMode("autoclear", f));
     TEST_ASSERT_EQUAL_UINT8((uint8_t)FinishedMode::AutoClear, (uint8_t)f);
-    TEST_ASSERT_TRUE(TimerManager_::parseFinishedMode("realert", f));
+    TEST_ASSERT_TRUE(timerParseFinishedMode("realert", f));
     TEST_ASSERT_EQUAL_UINT8((uint8_t)FinishedMode::ReAlert, (uint8_t)f);
 
     // Case-insensitive: arbitrary case parses for canonical, hyphenated, and aliases.
     BuzzerMode b;
-    TEST_ASSERT_TRUE(TimerManager_::parseBuzzerMode("COUNTDOWN", b));
+    TEST_ASSERT_TRUE(timerParseBuzzerMode("COUNTDOWN", b));
     TEST_ASSERT_EQUAL_UINT8((uint8_t)BuzzerMode::Countdown, (uint8_t)b);
-    TEST_ASSERT_TRUE(TimerManager_::parseFinishedMode("Auto-Clear", f));
+    TEST_ASSERT_TRUE(timerParseFinishedMode("Auto-Clear", f));
     TEST_ASSERT_EQUAL_UINT8((uint8_t)FinishedMode::AutoClear, (uint8_t)f);
-    TEST_ASSERT_TRUE(TimerManager_::parseFinishedMode("ReAlert", f));
+    TEST_ASSERT_TRUE(timerParseFinishedMode("ReAlert", f));
     TEST_ASSERT_EQUAL_UINT8((uint8_t)FinishedMode::ReAlert, (uint8_t)f);
 
     // Junk is still rejected.
-    TEST_ASSERT_FALSE(TimerManager_::parseBuzzerMode("nope", b));
-    TEST_ASSERT_FALSE(TimerManager_::parseFinishedMode("nope", f));
+    TEST_ASSERT_FALSE(timerParseBuzzerMode("nope", b));
+    TEST_ASSERT_FALSE(timerParseFinishedMode("nope", f));
 }
 
 // ============================================================================
@@ -4254,7 +4215,7 @@ void test_HA2_finished_select_routes_through_parsecommand(void) {
 }
 
 // HA3 — the duration text routes its raw HH:MM:SS string through parseCommand,
-// which owns the parse/validate (parseHMS + range): a valid clock string applies.
+// which owns the parse/validate (timerParseHMS + range): a valid clock string applies.
 void test_HA3_duration_text_routes_through_parsecommand(void) {
     TEST_ASSERT_EQUAL(static_cast<int>(TimerCmdResult::Ok),
         static_cast<int>(TimerManager.timerHaApply(TimerHaEntity::Duration, "0:02:30")));
@@ -4462,12 +4423,9 @@ int main(int, char **) {
     RUN_TEST(test_IM5_inline_never_in_config_mirror);
     RUN_TEST(test_IM6_malformed_inline_atomic_reject);
     RUN_TEST(test_U23_formatHMS_trimmed);
-    RUN_TEST(test_U24_parseHMS_accepts);
-    RUN_TEST(test_U25_parseHMS_rejects);
     RUN_TEST(test_timerParseHMS_direct);
     RUN_TEST(test_timerIsValidAction_direct);
     RUN_TEST(test_U26_parseCommand_duration_string_and_number);
-    RUN_TEST(test_U28_isValidDuration);
     RUN_TEST(test_U29_parseCommand_strict_results);
     RUN_TEST(test_U30_parseCommand_atomic_reject);
     RUN_TEST(test_U36_parseCommand_tuning_keys_accepted_in_range);

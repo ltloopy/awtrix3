@@ -117,10 +117,9 @@ bool timerMelodyValidateInline(const String &s);
 
 // ---------------------------------------------------------------------------
 // Pure validation helpers relocated out of TimerManager's statics (#142) so the
-// command validator links the descriptor-table family, not the singleton.
-// TimerManager keeps thin forwarders (TimerManager_::parseHMS / ::isValidAction)
-// so every existing caller (the on-device duration editor, the HA layer) is
-// source-unchanged.
+// command validator links the descriptor-table family, not the singleton. The
+// singleton's thin forwarders were deleted once production callers were gone
+// (#204); these free functions are the only spellings.
 
 // Parse a duration string into seconds. Accepts bare seconds, MM:SS or HH:MM:SS;
 // each field is a non-empty digit run; fields are summed without a 0-59 cap
@@ -135,16 +134,14 @@ bool timerIsValidAction(const String &s);
 
 // More pure validators/formatters relocated into the table family (#143) so the
 // command validator (TimerCommand::classify) links the family, not the singleton.
-// TimerManager keeps thin static forwarders so existing callers are source-unchanged.
 
 // Bare icon/melody file-name char-rule: [A-Za-z0-9_-], length 0..32 (empty = clear,
-// accepted). The validation predicate behind TimerManager_::isValidIconName and the
-// table's Name check. No globals.
+// accepted). The validation predicate behind the table's Name check and
+// TimerManager's private icon-slot validation. No globals.
 bool timerIsValidIconName(const String &name);
 
 // String->enum over the buzzer / finished codec tables (ADR-0010), case-insensitive
-// wire spelling or alias. The validation behind TimerManager_::parseBuzzerMode /
-// ::parseFinishedMode. No globals.
+// wire spelling or alias. The enum parse behind the member validators. No globals.
 bool timerParseBuzzerMode(const String &s, BuzzerMode &out);
 bool timerParseFinishedMode(const String &s, FinishedMode &out);
 
