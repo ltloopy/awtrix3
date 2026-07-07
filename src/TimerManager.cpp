@@ -429,6 +429,20 @@ void TimerManager_::pause() { runCommand(TimerRuntime::Command::Pause); }
 
 void TimerManager_::reset() { runCommand(TimerRuntime::Command::Reset); }
 
+// The run-state seam (issue #221 / #213): the verb + its peer mirror, paired in one
+// place. broadcastRunState self-no-ops under _remoteApply and sync-off, so this is
+// safe to call unconditionally from any locally-driven path.
+void TimerManager_::runStateAction(TimerCommand::Action a)
+{
+    switch (a)
+    {
+    case TimerCommand::Action::Start: start(); broadcastRunState("start"); break;
+    case TimerCommand::Action::Pause: pause(); broadcastRunState("pause"); break;
+    case TimerCommand::Action::Reset: reset(); broadcastRunState("reset"); break;
+    case TimerCommand::Action::None:  break;   // no verb, no packet
+    }
+}
+
 void TimerManager_::setDuration(uint32_t seconds)
 {
     // Clamp + no-op guard stay in the adapter (input validation, not a transition);
@@ -586,32 +600,22 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
             if (plan.attrCarrierDirty[c]) publishAttributeGroup((TimerHaEntity)c);
     }
 
-    if (plan.action == TimerCommand::Action::Start)
+    // Run-state dispatch rides the runStateAction seam (issue #221): the verb and its
+    // peer mirror are paired there, so this path can't emit one without the other.
+    // The propagation contract is unchanged (run-scoped config mirror, ADR-0018,
+    // superseding ADR-0006): a `start` emits the ONE combined packet (action +
+    // duration + effective config snapshot), pause/reset propagate run-state only,
+    // and a config/bare-duration edit propagates NOTHING (#126); broadcastRunState
+    // itself no-ops under _remoteApply (one-hop) and sync-off. The broadcast fires
+    // BEFORE the switch-to-app below (deliberate, #213 grilling): the broadcast reads
+    // state/duration/effective config, switchToApp touches display only.
+    bool fromIdle = (state == TimerState::Idle);
+    runStateAction(plan.action);
+    if (plan.action == TimerCommand::Action::Start && fromIdle &&
+        !GAME_ACTIVE && !BLOCK_NAVIGATION)
     {
-        bool fromIdle = (state == TimerState::Idle);
-        start();
-        if (fromIdle && !GAME_ACTIVE && !BLOCK_NAVIGATION)
-        {
-            String j = "{\"name\":\"Timer\"}";
-            DisplayManager.switchToApp(j.c_str());
-        }
-    }
-    else if (plan.action == TimerCommand::Action::Pause) pause();
-    else if (plan.action == TimerCommand::Action::Reset) reset();
-
-    // Propagation surface (one-hop): mirror this locally-accepted command to peers. The
-    // broadcast* methods no-op when _remoteApply is set (inbound packet) or sync is off.
-    // Run-scoped config mirror (ADR-0018, superseding ADR-0006): a config EDIT propagates
-    // nothing — config travels only bundled with a `start` (the combined packet
-    // broadcastRunState emits, carrying the leader's effective config snapshot);
-    // pause/reset propagate run-state only; a bare duration edit propagates NOTHING
-    // (#126). sync_follow/sync_targets are local identity and never propagate.
-    if (!_remoteApply && plan.action != TimerCommand::Action::None)
-    {
-        const char *a = (plan.action == TimerCommand::Action::Start) ? "start"
-                      : (plan.action == TimerCommand::Action::Pause) ? "pause"
-                                                                     : "reset";
-        broadcastRunState(a);
+        String j = "{\"name\":\"Timer\"}";
+        DisplayManager.switchToApp(j.c_str());
     }
 
     return TimerCmdResult::Ok;

@@ -16,6 +16,7 @@
 #include "../../src/TimerMenu.h"
 #include "../../src/TimerMenuNav.h"
 #include "../../src/TimerConfigEditor.h"
+#include "../../src/TimerCommand.h"
 #include "Preferences.h"
 
 void setUp(void) {
@@ -4422,6 +4423,93 @@ void test_HA11_sync_control_writes_do_not_propagate(void) {
     TEST_ASSERT_EQUAL_INT(0, fixture::sync_packet_count());
 }
 
+// ============================================================================
+// RS1..RS4 — the runStateAction seam (issue #221 / parent #213): verb dispatch +
+// broadcastRunState folded into ONE public entry, so an accepted action and its
+// peer mirror can't be paired ad hoc at each call site.
+// ============================================================================
+
+// RS1 — runStateAction(Start) runs the verb AND emits the ONE combined packet
+// (action + duration + effective config snapshot, ADR-0018), exactly what the
+// parseCommand path emitted before the seam existed.
+void test_RS1_runStateAction_start_emits_combined_packet(void) {
+    SHOW_TIMER = true;
+    TIMER_SYNC_TARGETS = "all";
+    TimerManager.setDuration(240);
+
+    TimerManager.runStateAction(TimerCommand::Action::Start);
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Running),
+                      static_cast<int>(TimerManager.getState()));
+    TEST_ASSERT_EQUAL_INT(1, fixture::sync_packet_count());   // exactly one packet
+    DynamicJsonDocument doc(2048);
+    TEST_ASSERT_FALSE(deserializeJson(doc, fixture::last_sync_payload()));
+    TEST_ASSERT_EQUAL_STRING("start", doc["action"]);
+    TEST_ASSERT_EQUAL_UINT32(240, doc["duration"].as<uint32_t>());
+    TEST_ASSERT_TRUE(doc.containsKey("buzzer"));   // config rides WITH the start
+}
+
+// RS2 — runStateAction(Pause) / runStateAction(Reset) run their verb and emit ONE
+// run-state-only packet each (matching action string; no duration, no config —
+// only a start carries those, ADR-0018).
+void test_RS2_runStateAction_pause_reset_emit_runstate_only(void) {
+    SHOW_TIMER = true;
+    TIMER_SYNC_TARGETS = "all";
+    TimerManager.setDuration(240);
+    TimerManager.runStateAction(TimerCommand::Action::Start);
+    ServerManager.__test_reset();   // count only the packets under test
+
+    TimerManager.runStateAction(TimerCommand::Action::Pause);
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Paused),
+                      static_cast<int>(TimerManager.getState()));
+    TEST_ASSERT_EQUAL_INT(1, fixture::sync_packet_count());
+    DynamicJsonDocument doc(512);
+    TEST_ASSERT_FALSE(deserializeJson(doc, fixture::last_sync_payload()));
+    TEST_ASSERT_EQUAL_STRING("pause", doc["action"]);
+    TEST_ASSERT_FALSE(doc.containsKey("duration"));
+    TEST_ASSERT_FALSE(doc.containsKey("buzzer"));
+
+    TimerManager.runStateAction(TimerCommand::Action::Reset);
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Idle),
+                      static_cast<int>(TimerManager.getState()));
+    TEST_ASSERT_EQUAL_INT(2, fixture::sync_packet_count());
+    DynamicJsonDocument doc2(512);
+    TEST_ASSERT_FALSE(deserializeJson(doc2, fixture::last_sync_payload()));
+    TEST_ASSERT_EQUAL_STRING("reset", doc2["action"]);
+    TEST_ASSERT_FALSE(doc2.containsKey("duration"));
+    TEST_ASSERT_FALSE(doc2.containsKey("buzzer"));
+}
+
+// RS3 — runStateAction(Action::None) is a strict no-op: no verb runs (a Running
+// timer stays Running, remaining untouched) and no packet goes out.
+void test_RS3_runStateAction_none_is_noop(void) {
+    SHOW_TIMER = true;
+    TIMER_SYNC_TARGETS = "all";
+    TimerManager.setDuration(240);
+    TimerManager.runStateAction(TimerCommand::Action::Start);
+    ServerManager.__test_reset();
+
+    TimerManager.runStateAction(TimerCommand::Action::None);
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Running),
+                      static_cast<int>(TimerManager.getState()));
+    TEST_ASSERT_EQUAL_INT(0, fixture::sync_packet_count());
+}
+
+// RS4 — the seam inherits broadcastRunState's gates: with sync off (empty targets,
+// the follow-only posture) the verb still runs locally but NO packet goes out.
+void test_RS4_runStateAction_sync_off_no_packet(void) {
+    SHOW_TIMER = true;
+    TIMER_SYNC_TARGETS = "";   // follow-only / sync off: never a sender
+    TimerManager.setDuration(240);
+
+    TimerManager.runStateAction(TimerCommand::Action::Start);
+
+    TEST_ASSERT_EQUAL(static_cast<int>(TimerState::Running),
+                      static_cast<int>(TimerManager.getState()));
+    TEST_ASSERT_EQUAL_INT(0, fixture::sync_packet_count());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_U1_setDuration_clamps_low_and_high);
@@ -4617,5 +4705,9 @@ int main(int, char **) {
     RUN_TEST(test_HA8_sync_targets_select_routes_through_parsecommand);
     RUN_TEST(test_HA10_invalid_sync_targets_write_rejected);
     RUN_TEST(test_HA11_sync_control_writes_do_not_propagate);
+    RUN_TEST(test_RS1_runStateAction_start_emits_combined_packet);
+    RUN_TEST(test_RS2_runStateAction_pause_reset_emit_runstate_only);
+    RUN_TEST(test_RS3_runStateAction_none_is_noop);
+    RUN_TEST(test_RS4_runStateAction_sync_off_no_packet);
     return UNITY_END();
 }

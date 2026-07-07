@@ -8,6 +8,7 @@
 #include "TimerRuntime.h"        // pure run-state engine: step() returns effects this class applies (issue #178)
 #include "TimerHa.h"             // TimerHaEntity (the HA carrier publishAttributeGroup targets)
 #include "TimerSettings.h"       // TcValue + TIMER_SETTINGS_DESC_CAP (one-shot override snapshot, PRD #99)
+#include "TimerCommand.h"        // TimerCommand::Action (the runStateAction verb, issue #221)
 #include "PeerRegistry.h"        // the LAN peer set (extracted from this class, ADR-0019/0021)
 #include "SyncSeenCache.h"       // the sync dedup set (extracted from this class, ADR-0022)
 
@@ -229,6 +230,13 @@ public:
     void start();
     void pause();
     void reset();
+
+    // The run-state seam (issue #221 / #213): dispatch the verb (start/pause/reset)
+    // AND mirror it to peers via broadcastRunState with the matching action string —
+    // the pairing every accepted action must make, folded into one entry so a call
+    // site can't emit the verb without the mirror. Action::None is a no-op. Safe on
+    // every path: broadcastRunState self-no-ops under _remoteApply and sync-off.
+    void runStateAction(TimerCommand::Action a);
 
     void setDuration(uint32_t seconds);
     // persist=false applies + publishes live but defers the NVS write (the TIMER
