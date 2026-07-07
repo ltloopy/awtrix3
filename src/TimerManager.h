@@ -76,6 +76,12 @@ private:
     bool     _remoteApply = false;
     uint32_t _syncSeq     = 0;     // per-command sequence; only needs uniqueness within the dedup window
 
+    // Emit one UDP broadcast mirroring a locally-accepted action to peers. No-ops
+    // when sync is off (empty target list) or while applying an inbound packet
+    // (_remoteApply). Private since #222: every local run-state actor goes through
+    // runStateAction(), so the verb+mirror pairing is not a caller obligation.
+    void broadcastRunState(const char *action);
+
     // Bounded recently-seen (src,seq) dedup set so the 3x redundant send is applied
     // once. Extracted to its own host-testable module (SyncSeenCache, ADR-0022); the
     // UDP transport + parseCommand re-entry stay here. TTL-based, so a sender reboot
@@ -326,11 +332,8 @@ public:
     TimerCmdResult timerHaApply(TimerHaEntity entity, const String &rawValue);
 
     // -- Propagation surface --
-    // Emit one UDP broadcast mirroring a locally-accepted action to peers. No-ops
-    // when sync is off (empty target list) or while applying an inbound packet
-    // (_remoteApply). Run-state and config travel on separate packets; `action`
-    // may be nullptr for a duration-only edit. See docs/adr/0006.
-    void broadcastRunState(const char *action);
+    // Run-state and config travel on separate packets; broadcastRunState is private
+    // (the runStateAction seam owns the verb+mirror pairing). See docs/adr/0006.
     void broadcastConfig();
     // Validate, gate (echo/follow/target/dedup), then apply an inbound sync packet
     // through parseCommand under the _remoteApply guard. A presence beacon
