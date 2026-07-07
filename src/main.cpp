@@ -35,10 +35,12 @@
 #include "DisplayManager.h"
 #include "PeripheryManager.h"
 #include "MQTTManager.h"
+#include "TimerHaHost.h"
 #include "ServerManager.h"
 #include "Globals.h"
 #include "UpdateManager.h"
 #include "timer.h"
+#include "TimerManager.h"
 
 TaskHandle_t taskHandle;
 volatile bool StopTask = false;
@@ -69,6 +71,7 @@ void setup()
   PeripheryManager.setup();
   ServerManager.loadSettings();
   DisplayManager.setup();
+  TimerManager.setup();
   DisplayManager.HSVtext(9, 6, VERSION, true, 0);
   delay(500);
   xTaskCreatePinnedToCore(BootAnimation, "Task", 10000, NULL, 1, &taskHandle, 0);
@@ -100,6 +103,7 @@ void setup()
       if (MQTT_HOST != "")
       {
         DisplayManager.HSVtext(4, 6, "MQTT...", true, 0);
+        TimerHaHost.reconcile();
         MQTTManager.setup();
         MQTTManager.tick();
       }
@@ -119,9 +123,12 @@ void loop()
   timer_tick();
   ServerManager.tick();
   DisplayManager.tick();
+  TimerManager.tick();
+  TimerManager.tickPresence(millis());   // peer presence beacon + registry aging (#111)
   PeripheryManager.tick();
   if (ServerManager.isConnected)
   {
     MQTTManager.tick();
+    TimerHaHost.refreshTargets(millis());   // dynamic HA Targets select republish (#112)
   }
 }

@@ -4,6 +4,19 @@
 #include <Arduino.h>
 #include <map>
 
+#include "TimerHa.h"
+
+// HA entity registration cap. ArduinoHA's HAMqtt::addDeviceType has an off-by-one
+// (`_devicesTypesNb + 1 >= _maxDevicesTypesNb`), so the EFFECTIVE capacity is
+// kMaxHAEntities - 1 (= 39 here). Inventory: 25 base entities (incl. battery on
+// ulanzi) + 10 Timer entities (TIMER_HA_DESCRIPTOR_COUNT) = 35, leaving 4 spare
+// slots. Raised from 34 (issue #125): at 34 the effective cap of 33 silently
+// dropped the two Timer sync-control entities (the last to register). No clean
+// compile-time guard — the base count is build-flag conditional — so the runtime
+// guard is the DEBUG_MODE warning in TimerHaHost's carrier build via haRegistrationAtCap().
+// Shared with TimerHaHost (the Timer carrier build reads it for that guard).
+constexpr uint8_t kMaxHAEntities = 40;
+
 class MQTTManager_
 {
 private:
@@ -27,7 +40,19 @@ public:
     bool isConnected();
     String getValueForTopic(const String &topic);
 
+    // The Timer wire seam (issue #31 / PRD #28): the single chokepoint through
+    // which Timer MQTT output flows as (topic, payload) strings. On device it
+    // reaches the broker (retained, like the HA setValue path it replaces); the
+    // host-test stub records the pair. timerWireTopic() sources an entity's
+    // canonical data topic — byte-identical to what ArduinoHA emits.
+    void publishTimerWire(const char *topic, const char *payload);
+    String timerWireTopic(TimerHaEntity slot);
+    String timerWireAttrTopic(TimerHaEntity slot);
+    String timerIconsTopic();
 };
+
+void reconcileTimerHAState();
+
 extern MQTTManager_ &MQTTManager;
 
 #endif
