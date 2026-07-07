@@ -535,11 +535,13 @@ observation only and never a write path.
 ## Multi-device sync (propagation surface)
 
 Two or more clocks on the same LAN can mirror each other's timer — when one
-starts/pauses/resets, or its configuration is edited, the change propagates to a
-chosen set of peers (or `all`). This is the **propagation surface** (see
-[`CONTEXT.md`](../CONTEXT.md)); it is **broker-free** (no MQTT broker required) and
-rides a dedicated **UDP broadcast** on **port 4212**. Full rationale in
-[ADR-0006](adr/0006-timer-multi-device-sync.md).
+starts/pauses/resets, the action propagates to a chosen set of peers (or `all`).
+This is the **propagation surface** (see [`CONTEXT.md`](../CONTEXT.md)); it is
+**broker-free** (no MQTT broker required) and rides a dedicated **UDP broadcast**
+on **port 4212**. Full rationale in
+[ADR-0006](adr/0006-timer-multi-device-sync.md); the config-propagation half of
+that design is superseded by the run-scoped config mirror,
+[ADR-0018](adr/0018-run-scoped-config-mirror.md).
 
 ### Roles (two independent axes)
 
@@ -558,11 +560,13 @@ every clock to `sync_targets=all` and `sync_follow=true`.
 - **Run-state** — a `start` / `pause` / `reset` propagate the action; a `start` also
   carries the `duration` (it is the **sole duration-bearing packet**). A bare duration
   edit propagates **nothing** (#126): `duration` is run-state that rides only with a
-  start, so a length edit never moves a follower's countdown, and a start never carries
-  config that could clobber a peer's settings.
-- **Config** — a deliberate config edit (buzzer, finished, the timing knobs, behavior
-  parameters, bar/icon toggles, icon images, melodies) propagates a **full config
-  snapshot**; the group ends up configured identically (last-config-writer-wins).
+  start, so a length edit never moves a follower's countdown.
+- **Config** — a config edit propagates **nothing**. Config travels **only** bundled
+  inside a `start`, as the leader's **effective** config snapshot (the run-scoped
+  config mirror, [ADR-0018](adr/0018-run-scoped-config-mirror.md)); the follower
+  applies it **one-shot** for that run and reverts to its own saved settings on its
+  own return to Idle. A start therefore cannot clobber a peer's saved settings —
+  the follower never persists the leader's values.
 - **Not propagated:** `sync_follow` / `sync_targets` (each clock's own identity), and the
   live `remaining` (receivers snapshot their own; a missed packet self-heals on the next
   `start`, which re-establishes a shared duration).
