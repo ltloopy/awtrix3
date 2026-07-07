@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pio test -e native)",
+      "Bash(pio test -e native *)",
+      "Bash(pio run -e ulanzi)",
+      "Bash(pio run -e ulanzi *)",
+      "Bash(gh label list)",
+      "Bash(gh label list *)",
+      "Bash(gh pr *)",
+      "Bash(git -C *)",
+      "Bash(cat *)",
+      "Bash(cd *)"
+    ]
+  }
+}

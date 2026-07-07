@@ -1,0 +1,94 @@
+name: Test
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'test/**'
+      - 'platformio.ini'
+      - '.github/workflows/test.yml'
+
+jobs:
+  native_unit_tests:
+    name: Native unit tests (8 envs, 289 tests)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: ${{ runner.os }}-pio-native-${{ hashFiles('platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-native-
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade platformio
+
+      # native runs test_timer; native_peer / native_seen / native_sync / native_validate /
+      # native_runtime / native_targets run the dependency-light test_peerregistry /
+      # test_syncseen / test_syncenvelope / test_validate / test_runtime / test_synctargets
+      # in their own envs (each links only its extracted module(s) — see platformio.ini).
+      # native_ha runs the 4 vendored-ArduinoHA suites (test_haselect / test_hasensor /
+      # test_hatext / test_hasync) against lib/home-assistant-integration's test harness.
+      - name: Run native unit tests
+        run: pio test -e native -e native_peer -e native_seen -e native_sync -e native_validate -e native_runtime -e native_targets -e native_ha --verbose
+
+  device_build:
+    name: Device firmware build (ulanzi + awtrix2_upgrade)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: ${{ runner.os }}-pio-device-${{ hashFiles('platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-device-
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade platformio
+
+      # Compile the device envs on PRs so a C++14/17 construct that breaks the
+      # gnu++11 device build can't slip past the native-only suite (issue #25).
+      - name: Build ulanzi firmware
+        run: pio run -e ulanzi
+
+      - name: Build awtrix2_upgrade firmware
+        run: pio run -e awtrix2_upgrade

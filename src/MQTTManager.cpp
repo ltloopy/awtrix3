@@ -9,12 +9,18 @@
 #include "PeripheryManager.h"
 #include "UpdateManager.h"
 #include "PowerManager.h"
+#include "TimerManager.h"
+#include "TimerHa.h"
+#include "TimerHaHost.h"
 
 const uint16_t PORT = 1883;
 
+// kMaxHAEntities (the HA entity registration cap) now lives in MQTTManager.h so
+// TimerHaHost's carrier build can share it for the haRegistrationAtCap guard.
+
 WiFiClient espClient;
 HADevice device;
-HAMqtt mqtt(espClient, device, 26);
+HAMqtt mqtt(espClient, device, kMaxHAEntities);
 
 HALight *Matrix, *Indikator1, *Indikator2, *Indikator3 = nullptr;
 HASelect *BriMode, *transEffect = nullptr;
@@ -25,8 +31,20 @@ HASensor *battery = nullptr;
 #endif
 HASensor *temperature, *humidity, *illuminance, *uptime, *strength, *version, *ram, *curApp, *myOwnID, *ipAddr = nullptr;
 HABinarySensor *btnleft, *btnmid, *btnright = nullptr;
+// The ten Timer HA carrier pointers and their resolved id buffers moved to
+// TimerHaHost (issue #193 / PRD #191); the wire seam reaches ids via TimerHaHost.entityId().
 bool connected;
 char matID[40], ind1ID[40], ind2ID[40], ind3ID[40], briID[40], btnAID[40], btnBID[40], btnCID[40], appID[40], tempID[40], humID[40], luxID[40], verID[40], ramID[40], upID[40], sigID[40], btnLID[40], btnMID[40], btnRID[40], transID[40], doUpdateID[40], batID[40], myID[40], sSpeed[40], effectID[40], ipAddrID[40];
+// The SHOW_TIMER reconcile bookkeeping and its pending-cleanup latch moved to
+// TimerHaHost (issue #195); MQTTManager now holds zero Timer-HA-specific state.
+
+// Forward declarations: the shared HA command callbacks are defined further down;
+// the base entities in setup() wire them, and each now delegates its Timer branch
+// to TimerHaHost via a leading tryHandle* guard.
+void onButtonCommand(HAButton *sender);
+void onSelectCommand(int8_t index, HASelect *sender);
+void onSwitchCommand(bool state, HASwitch *sender);
+
 long previousMillis_Stats;
 std::map<String, String> mqttValues;
 std::vector<String> topicsToSubscribe;
@@ -84,6 +102,18 @@ void processMqttMessage(const String &strTopic, const String &payloadCopy)
     {
         DisplayManager.switchToApp(payloadCopy.c_str());
         return;
+    }
+
+    {
+        size_t plen = MQTT_PREFIX.length();
+        const char *t = strTopic.c_str();
+        if (strTopic.length() > plen
+            && strncmp(t, MQTT_PREFIX.c_str(), plen) == 0
+            && strcmp(t + plen, "/timer") == 0)
+        {
+            TimerManager.parseCommand(payloadCopy.c_str());
+            return;
+        }
     }
 
     if (strTopic.equals(MQTT_PREFIX + "/sendscreen"))
@@ -224,6 +254,7 @@ void processMqttMessage(const String &strTopic, const String &payloadCopy)
 
 void onButtonCommand(HAButton *sender)
 {
+    if (TimerHaHost.tryHandleButton(sender)) return;   // Timer carrier: routed by the host
     if (sender == dismiss)
     {
         DisplayManager.dismissNotify();
@@ -247,6 +278,7 @@ void onButtonCommand(HAButton *sender)
 
 void onSwitchCommand(bool state, HASwitch *sender)
 {
+    if (TimerHaHost.tryHandleSwitch(state, sender)) return;   // Timer carrier: routed by the host
     AUTO_TRANSITION = state;
     DisplayManager.setAutoTransition(state);
     saveSettings();
@@ -255,6 +287,7 @@ void onSwitchCommand(bool state, HASwitch *sender)
 
 void onSelectCommand(int8_t index, HASelect *sender)
 {
+    if (TimerHaHost.tryHandleSelect(sender, index)) return;   // Timer carrier: routed by the host
     if (sender == BriMode)
     {
         switch (index)
@@ -330,6 +363,9 @@ void onBrightnessCommand(uint8_t brightness, HALight *sender)
     DisplayManager.setBrightness(brightness);
 }
 
+// onTimerDurationMessage moved to TimerHaHost (issue #193): the dedicated Timer
+// duration text callback is registered on the Duration carrier by the host.
+
 void onNumberCommand(HANumeric number, HANumber *sender)
 {
     if (!number.isSet())
@@ -379,6 +415,15 @@ void onMqttConnected()
 
     if (DEBUG_MODE)
         DEBUG_PRINTLN(F("MQTT Connected"));
+
+    // Command topics must never carry a retained payload. A retained
+    // {prefix}/timer command (e.g. {"action":"start"}) is re-delivered by the
+    // broker on every (re)connect and would auto-start the timer on boot, which
+    // breaks the "a reboot returns the device to Idle" contract (docs/timer.md).
+    // PubSubClient doesn't surface the retain flag to the receive callback, so we
+    // purge the retained command at the source: clear it before subscribing.
+    mqtt.publish((MQTT_PREFIX + "/timer").c_str(), "", true);
+
     const char *topics[] PROGMEM = {
         "/brightness",
         "/notify/dismiss",
@@ -403,7 +448,8 @@ void onMqttConnected()
         "/sound",
         "/rtttl",
         "/sendscreen",
-        "/r2d2"};
+        "/r2d2",
+        "/timer"};
     for (const char *topic : topics)
     {
         if (DEBUG_MODE)
@@ -424,6 +470,10 @@ void onMqttConnected()
     {
         myOwnID->setValue(MQTT_PREFIX.c_str());
         version->setValue(VERSION);
+
+        // onConnected() also flushes the pending discovery cleanup reconcile() latched
+        // when SHOW_TIMER went off across a reboot (issue #195).
+        TimerHaHost.onConnected();   // Timer wire + attribute groups when SHOW_TIMER (issue #193)
     }
 
     MQTTManager.publish("stats/effects", DisplayManager.getEffectNames().c_str());
@@ -729,6 +779,12 @@ void MQTTManager_::setup()
         ipAddr = new HASensor(ipAddrID);
         ipAddr->setName(HAipAddrName);
         ipAddr->setIcon(HAipAddrIcon);
+
+        // Resolve the Timer carrier ids and (when SHOW_TIMER) construct/register the
+        // carriers — at the same sequence point as before (after the device's own
+        // entities register), so the ArduinoHA registration/entity-cap drop order is
+        // unchanged. The carrier lifecycle now lives in TimerHaHost (issue #193).
+        TimerHaHost.setup();
     }
     else
     {
@@ -751,6 +807,54 @@ void MQTTManager_::tick()
         previousMillis_Stats = currentMillis_Stats;
         sendStats();
     }
+}
+
+// The Timer wire seam (issue #31): publishes the exact (topic, payload) the
+// caller hands over — retained, like the HASensor::setValue path it replaces.
+// Gated on the Timer HA carriers existing (TimerHaHost.carriersReady() mirrors the
+// old timerDuration creation-sentinel check), which preserves the per-entity
+// null-check behaviour of the retired one-liner publish methods; mqtt.publish
+// itself no-ops while disconnected, as beginPublish did before.
+void MQTTManager_::publishTimerWire(const char *topic, const char *payload)
+{
+    if (!TimerHaHost.carriersReady()) return;
+    mqtt.publish(topic, payload, true);
+}
+
+// Canonical full data topic for a Timer HA entity slot, from the same inputs
+// ArduinoHA's HASerializer::generateDataTopic uses: the data prefix installed
+// in setup() (MQTT_PREFIX), the device unique id, and the entity id buffer
+// resolved through formatTimerHaEntityId (owned by TimerHaHost, read via
+// entityId()). Byte-identity is pinned by test W1.
+String MQTTManager_::timerWireTopic(TimerHaEntity slot)
+{
+    const char *deviceUniqueId = device.getUniqueId();
+    if (!deviceUniqueId) return String();
+    char topic[160];
+    formatTimerHaDataTopic(MQTT_PREFIX.c_str(), deviceUniqueId, TimerHaHost.entityId(slot), topic, sizeof(topic));
+    return String(topic);
+}
+
+// A carrier entity's JSON-attributes topic (PRD #57, generalizing the issue-#51
+// finished-only topic): same inputs as timerWireTopic but the json_attr_t suffix,
+// so it matches the topic the carrier's HASelect advertised in discovery via
+// setJsonAttributes. The retained attribute value rides the wire seam to here.
+String MQTTManager_::timerWireAttrTopic(TimerHaEntity slot)
+{
+    const char *deviceUniqueId = device.getUniqueId();
+    if (!deviceUniqueId) return String();
+    char topic[160];
+    formatTimerHaAttrTopic(MQTT_PREFIX.c_str(), deviceUniqueId,
+                           TimerHaHost.entityId(slot), topic, sizeof(topic));
+    return String(topic);
+}
+
+// Canonical topic for the aggregate icons JSON (issue #34) — the one published
+// Timer topic that is NOT an HA entity data topic. The host-test stub mirrors
+// this from its fixture prefix, so tests pin the same spelling.
+String MQTTManager_::timerIconsTopic()
+{
+    return MQTT_PREFIX + "/timer/icons";
 }
 
 void MQTTManager_::publish(const char *topic, const char *payload)
