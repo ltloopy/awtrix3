@@ -386,21 +386,21 @@ All JSON properties are optional. When multiple are sent together, property sett
 | `finished_hold`     | integer | 1–300 (s)            | Auto-clear delay (only meaningful when `finished = "auto-clear"`). Persists. |
 | `realert_interval`  | integer | 5–300 (s)            | Re-alert cadence (only meaningful when `finished = "re-alert"`). Persists. |
 | `countdown_seconds` | integer | 0–30   (s)           | Pre-expiry beep window (only meaningful when `buzzer = "countdown"`). Persists. |
-| `max_duration`               | integer | 1–604800 (s, 1 s .. 7 days) | Upper bound on accepted `duration` (ADR-0004). Persists. |
-| `remaining_publish_interval` | integer | 1–60 (s)             | How often `timer_rem` republishes while Running (ADR-0004). Persists. |
-| `melody_tick` | string | **Either** a bare name resolved against `/MELODIES/<name>.txt` (≤32 chars) **or** an inline RTTTL tune | RTTTL countdown-beep melody (ADR-0004). A bare name persists and obeys `save`; an **inline tune is always one-shot** (never saved, ADR-0017). |
-| `melody_end`  | string | Same. A bare empty string resets to default `"timer_end"`. | RTTTL end melody. Bare name persists & obeys `save`; inline tune always one-shot (ADR-0004 / ADR-0017). |
-| `bar_enabled` | bool | `true` / `false` | Show/hide the Running/Paused progress bar (ADR-0004). Persists. |
-| `icon_enabled` | bool | `true` / `false` | Show/hide the timer icon; when hidden the time text and bar reflow to span the full panel (ADR-0005). Persists. |
-| `bar_color`   | int or hex string | `0..0xFFFFFF` or `"#RRGGBB"` / `"RRGGBB"` | Progress-bar (foreground) color; `0` follows `TEXTCOLOR_888` (ADR-0004). Persists. |
-| `bar_bg_color` | int or hex string | `0..0xFFFFFF` or `"#RRGGBB"` / `"RRGGBB"` | Progress-bar **background track** color (drawn behind the bar); `0` = black = no track (the default — bar looks unchanged). Unlike `bar_color`'s `0`, this is a literal black, not a sentinel (ADR-0020). Persists. |
-| `sync_follow`  | bool | `true` / `false` | Obey inbound multi-device timer-sync this clock is targeted by (follow consent gate, ADR-0006). Local identity — not propagated. Persists. |
-| `sync_targets` | string | `""` / `all` / comma list of peer `uniqueID`s | Whom this clock commands on a local timer action (ADR-0006). Local identity — not propagated. Persists. |
-| `save` | bool | `true` (default) / `false` | `save:false` makes the **whole command one-shot**: its config applies to the current run only and reverts to the saved settings when the timer next returns to Idle (a `reset` or auto-clear), writing nothing to flash. A non-boolean is rejected (atomic-reject). See the one-shot note below and ADR-0017. |
+| `max_duration`               | integer | 1–604800 (s, 1 s .. 7 days) | Upper bound on accepted `duration`. Persists. |
+| `remaining_publish_interval` | integer | 1–60 (s)             | How often `timer_rem` republishes while Running. Persists. |
+| `melody_tick` | string | **Either** a bare name resolved against `/MELODIES/<name>.txt` (≤32 chars) **or** an inline RTTTL tune | RTTTL countdown-beep melody. A bare name persists and obeys `save`; an **inline tune is always one-shot** (never saved). |
+| `melody_end`  | string | Same. A bare empty string resets to default `"timer_end"`. | RTTTL end melody. Bare name persists & obeys `save`; inline tune always one-shot. |
+| `bar_enabled` | bool | `true` / `false` | Show/hide the Running/Paused progress bar. Persists. |
+| `icon_enabled` | bool | `true` / `false` | Show/hide the timer icon; when hidden the time text and bar reflow to span the full panel. Persists. |
+| `bar_color`   | int or hex string | `0..0xFFFFFF` or `"#RRGGBB"` / `"RRGGBB"` | Progress-bar (foreground) color; `0` follows `TEXTCOLOR_888`. Persists. |
+| `bar_bg_color` | int or hex string | `0..0xFFFFFF` or `"#RRGGBB"` / `"RRGGBB"` | Progress-bar **background track** color (drawn behind the bar); `0` = black = no track (the default — bar looks unchanged). Unlike `bar_color`'s `0`, this is a literal black, not a sentinel. Persists. |
+| `sync_follow`  | bool | `true` / `false` | Obey inbound multi-device timer-sync this clock is targeted by (follow consent gate). Local identity — not propagated. Persists. |
+| `sync_targets` | string | `""` / `all` / comma list of peer `uniqueID`s | Whom this clock commands on a local timer action. Local identity — not propagated. Persists. |
+| `save` | bool | `true` (default) / `false` | `save:false` makes the **whole command one-shot**: its config applies to the current run only and reverts to the saved settings when the timer next returns to Idle (a `reset` or auto-clear), writing nothing to flash. A non-boolean is rejected (atomic-reject). See the one-shot note below. |
 
 `action` / `buzzer` / `finished` values are case-insensitive; `auto-clear`/`autoclear` and `re-alert`/`realert` are both accepted. Icon and **bare** melody values are **case-sensitive** (they map to filenames on LittleFS) and **capped at 32 characters** (alphanumeric, `_`, `-`). The icon loader checks `/ICONS/<name>.jpg` then `/ICONS/<name>.gif`; the melody loader reads `/MELODIES/<name>.txt`.
 
-**One-shot commands (`save:false`) and inline melodies** (ADR-0017). By default every config key persists to flash and becomes your new default. Send `save:false` to run a timer **once** with custom parameters: its config applies to the current run only and reverts when the timer next returns to Idle, writing nothing to flash. While a one-shot run is active the **observation surface stays honest** — the `GET /api/timer` `config` mirror, the Home Assistant attribute entities, and device-to-device sync all keep reporting your **saved** configuration, never the one-off values (the top-level `duration`/`buzzer`/`finished` still show the live values). `melody_end`/`melody_tick` additionally accept an **inline RTTTL tune** (a literal melody string such as `"alarm:d=4,o=5,b=120:c,e,g"`, detected by its `:`-separated `d=`/`o=`/`b=` structure; a malformed tune is rejected `400`); an inline tune is **always one-shot** regardless of `save`, never persists, and **never appears** in the `config` mirror (which shows the saved bare name throughout). The on-device TIMER menu always persists.
+**One-shot commands (`save:false`) and inline melodies**. By default every config key persists to flash and becomes your new default. Send `save:false` to run a timer **once** with custom parameters: its config applies to the current run only and reverts when the timer next returns to Idle, writing nothing to flash. While a one-shot run is active the **observation surface stays honest** — the `GET /api/timer` `config` mirror, the Home Assistant attribute entities, and device-to-device sync all keep reporting your **saved** configuration, never the one-off values (the top-level `duration`/`buzzer`/`finished` still show the live values). `melody_end`/`melody_tick` additionally accept an **inline RTTTL tune** (a literal melody string such as `"alarm:d=4,o=5,b=120:c,e,g"`, detected by its `:`-separated `d=`/`o=`/`b=` structure; a malformed tune is rejected `400`); an inline tune is **always one-shot** regardless of `save`, never persists, and **never appears** in the `config` mirror (which shows the saved bare name throughout). The on-device TIMER menu always persists.
 
 #### Responses
 
@@ -413,7 +413,7 @@ All JSON properties are optional. When multiple are sent together, property sett
 | `400 Bad Request` | `InvalidValue` | A field has an unusable value: malformed/out-of-range `duration`, or an unknown `buzzer`/`finished`/`action`/icon. |
 | `409 Conflict` | `TimerDisabled` | The Timer feature is off (`SHOW_TIMER=false`); the command is understood but can't apply. |
 
-Out-of-range durations are **rejected**, not clamped (e.g. `"30:00:00"` when the max is 24 h → `400`). The `{prefix}/timer` MQTT topic applies the same validation but, being fire-and-forget, ignores invalid commands silently (no error is published); the retained `timer_dur` state reflects the unchanged value. See [ADR 0001](adr/0001-timer-command-validation-parity.md).
+Out-of-range durations are **rejected**, not clamped (e.g. `"30:00:00"` when the max is 24 h → `400`). The `{prefix}/timer` MQTT topic applies the same validation but, being fire-and-forget, ignores invalid commands silently (no error is published); the retained `timer_dur` state reflects the unchanged value.
 
 #### Examples
 
@@ -503,12 +503,12 @@ The `buzzer` / `finished` strings are the **canonical output spellings** (hyphen
 
 The `config` object reports **every persisted Timer configuration key** — exactly the keys you can write via `POST /api/timer` — so an HTTP-only integrator can read the device's live configuration (and confirm a write applied) without Home Assistant or an MQTT subscription. It is projected from the same descriptor tables that drive the control surface and the HA attribute groups, so the read surface cannot drift from what is writable: adding a new persisted config key automatically makes it readable here.
 
-While a **one-shot** run (`save:false`, see above / ADR-0017) is active, `config` reports your **saved** configuration, never the one-off values — so a read-after-write check sees the saved truth, not the transient run-only override. The top-level `duration`/`buzzer`/`finished` continue to show the live one-shot values. An inline RTTTL tune never appears here; `config.melody_*` shows the saved bare name throughout.
+While a **one-shot** run (`save:false`, see above) is active, `config` reports your **saved** configuration, never the one-off values — so a read-after-write check sees the saved truth, not the transient run-only override. The top-level `duration`/`buzzer`/`finished` continue to show the live one-shot values. An inline RTTTL tune never appears here; `config.melody_*` shows the saved bare name throughout.
 
 Values are **raw** by default (interval seconds as integers, melodies and `sync_targets` as strings, toggles as booleans), with two deliberate carrier-native renderings that follow this endpoint's own raw+`_str` duration precedent:
 
 - **`bar_color`** is rendered as `"#RRGGBB"` (uppercase) or `"default"` when it follows the text color, rather than a raw 24-bit integer.
-- **`bar_bg_color`** is rendered as `"#RRGGBB"` (uppercase) or `"none"` when it is black (no track), rather than a raw integer — the `"none"` vs `"default"` wording reflects the deliberate sentinel asymmetry between the two colors (ADR-0020).
+- **`bar_bg_color`** is rendered as `"#RRGGBB"` (uppercase) or `"none"` when it is black (no track), rather than a raw integer — the `"none"` vs `"default"` wording reflects the deliberate sentinel asymmetry between the two colors.
 - **`max_duration`** is reported **both** raw (`86400`) **and** as `max_duration_str` (`"24:00:00"`, trimmed clock form).
 
 | `config` key | Type | Notes |
@@ -531,7 +531,7 @@ Values are **raw** by default (interval seconds as integers, melodies and `sync_
 | `finished` | string | Finished mode — mirrored here for completeness (also top-level). |
 | `icon_idle` / `icon_running` / `icon_paused` / `icon_finished` | string | The four per-state icon names (empty string = falls back to the Idle icon). |
 
-`config` never contains `duration` (run-state, reported top-level only) or `action` (a transient command verb, not persisted). The endpoint stays a pure observation read regardless: always `200 OK`, never mutating, no `409`. See [ADR 0015](adr/0015-http-observation-mirrors-full-config.md).
+`config` never contains `duration` (run-state, reported top-level only) or `action` (a transient command verb, not persisted). The endpoint stays a pure observation read regardless: always `200 OK`, never mutating, no `409`.
 
 > **Note on freshness vs. Home Assistant:** `remaining` here is computed at the moment of the request, so during `running` it can read a second or two lower than the HA `{id}_timer_rem` sensor, which is push-throttled to `remaining_publish_interval` (default 1 s). This is expected — the polled HTTP read is simply fresher than the throttled push sensor; the two are not in disagreement.
 
