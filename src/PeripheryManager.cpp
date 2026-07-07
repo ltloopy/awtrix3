@@ -19,6 +19,7 @@
 #include <MeanFilterLib.h>
 #include <Games/GameManager.h>
 #include "TimerManager.h"
+#include "TimerCommand.h"        // TimerCommand::Action for the runStateAction seam (#222)
 const int buzzerPin = 2;       // Buzzer an GPIO2
 const int baudRate = 50;       // Nachrichtenübertragungsrate
 const char *message = "HELLO"; // Die Nachricht, die gesendet werden soll
@@ -180,14 +181,13 @@ void select_button_pressed()
             TimerState ts = TimerManager.getState();
             if (ts == TimerState::Finished)
             {
-                TimerManager.reset();
-                TimerManager.broadcastRunState("reset");
+                TimerManager.runStateAction(TimerCommand::Action::Reset);
                 return;
             }
             if (CURRENT_APP == "Timer")
             {
-                if (ts == TimerState::Running) { TimerManager.pause(); TimerManager.broadcastRunState("pause"); }
-                else                           { TimerManager.start(); TimerManager.broadcastRunState("start"); }
+                if (ts == TimerState::Running) { TimerManager.runStateAction(TimerCommand::Action::Pause); }
+                else                           { TimerManager.runStateAction(TimerCommand::Action::Start); }
                 return;
             }
         }
@@ -229,8 +229,7 @@ void select_button_pressed_long()
             TimerState ts = TimerManager.getState();
             if (ts == TimerState::Finished)
             {
-                TimerManager.start();
-                TimerManager.broadcastRunState("start");
+                TimerManager.runStateAction(TimerCommand::Action::Start);
                 return;
             }
             if (CURRENT_APP == "Timer" && ts == TimerState::Idle)
@@ -242,8 +241,7 @@ void select_button_pressed_long()
             }
             if (CURRENT_APP == "Timer")
             {
-                TimerManager.reset();
-                TimerManager.broadcastRunState("reset");
+                TimerManager.runStateAction(TimerCommand::Action::Reset);
                 return;
             }
         }

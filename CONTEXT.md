@@ -370,7 +370,10 @@ the `ulanzi`/`native` builds compiling).
 A third kind of Timer interface, distinct from both control and observation. The
 **propagation surface** is the device-to-device sync channel: when a clock takes a
 local control-surface action, it relays that action to other clocks over the network,
-and a receiving clock re-applies it locally.
+and a receiving clock re-applies it locally. On the send side there is one seam: every
+local run-state actor (MQTT/HTTP/HA via `parseCommand`, the physical buttons) calls
+`TimerManager.runStateAction()`, which pairs the verb with its peer mirror itself —
+`broadcastRunState` is private, so the pairing is no longer a caller obligation (#213).
 
 It is **not** a fourth control surface. The "three control surfaces that must stay in
 parity" (ADR-0001) are the *user-facing* write paths. The propagation surface carries a
