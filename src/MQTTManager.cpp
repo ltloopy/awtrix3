@@ -32,11 +32,11 @@ HASensor *battery = nullptr;
 HASensor *temperature, *humidity, *illuminance, *uptime, *strength, *version, *ram, *curApp, *myOwnID, *ipAddr = nullptr;
 HABinarySensor *btnleft, *btnmid, *btnright = nullptr;
 // The ten Timer HA carrier pointers and their resolved id buffers moved to
-// TimerHaHost (issue #193 / PRD #191); the wire seam reaches ids via TimerHaHost.entityId().
+// TimerHaHost; the wire seam reaches ids via TimerHaHost.entityId().
 bool connected;
 char matID[40], ind1ID[40], ind2ID[40], ind3ID[40], briID[40], btnAID[40], btnBID[40], btnCID[40], appID[40], tempID[40], humID[40], luxID[40], verID[40], ramID[40], upID[40], sigID[40], btnLID[40], btnMID[40], btnRID[40], transID[40], doUpdateID[40], batID[40], myID[40], sSpeed[40], effectID[40], ipAddrID[40];
 // The SHOW_TIMER reconcile bookkeeping and its pending-cleanup latch moved to
-// TimerHaHost (issue #195); MQTTManager now holds zero Timer-HA-specific state.
+// TimerHaHost; MQTTManager now holds zero Timer-HA-specific state.
 
 // Forward declarations: the shared HA command callbacks are defined further down;
 // the base entities in setup() wire them, and each now delegates its Timer branch
@@ -363,7 +363,7 @@ void onBrightnessCommand(uint8_t brightness, HALight *sender)
     DisplayManager.setBrightness(brightness);
 }
 
-// onTimerDurationMessage moved to TimerHaHost (issue #193): the dedicated Timer
+// onTimerDurationMessage moved to TimerHaHost: the dedicated Timer
 // duration text callback is registered on the Duration carrier by the host.
 
 void onNumberCommand(HANumeric number, HANumber *sender)
@@ -472,8 +472,8 @@ void onMqttConnected()
         version->setValue(VERSION);
 
         // onConnected() also flushes the pending discovery cleanup reconcile() latched
-        // when SHOW_TIMER went off across a reboot (issue #195).
-        TimerHaHost.onConnected();   // Timer wire + attribute groups when SHOW_TIMER (issue #193)
+        // when SHOW_TIMER went off across a reboot.
+        TimerHaHost.onConnected();   // Timer wire + attribute groups when SHOW_TIMER
     }
 
     MQTTManager.publish("stats/effects", DisplayManager.getEffectNames().c_str());
@@ -783,7 +783,7 @@ void MQTTManager_::setup()
         // Resolve the Timer carrier ids and (when SHOW_TIMER) construct/register the
         // carriers — at the same sequence point as before (after the device's own
         // entities register), so the ArduinoHA registration/entity-cap drop order is
-        // unchanged. The carrier lifecycle now lives in TimerHaHost (issue #193).
+        // unchanged. The carrier lifecycle now lives in TimerHaHost.
         TimerHaHost.setup();
     }
     else
@@ -809,7 +809,7 @@ void MQTTManager_::tick()
     }
 }
 
-// The Timer wire seam (issue #31): publishes the exact (topic, payload) the
+// The Timer wire seam: publishes the exact (topic, payload) the
 // caller hands over — retained, like the HASensor::setValue path it replaces.
 // Gated on the Timer HA carriers existing (TimerHaHost.carriersReady() mirrors the
 // old timerDuration creation-sentinel check), which preserves the per-entity
@@ -835,7 +835,7 @@ String MQTTManager_::timerWireTopic(TimerHaEntity slot)
     return String(topic);
 }
 
-// A carrier entity's JSON-attributes topic (PRD #57, generalizing the issue-#51
+// A carrier entity's JSON-attributes topic (generalizing the formerly
 // finished-only topic): same inputs as timerWireTopic but the json_attr_t suffix,
 // so it matches the topic the carrier's HASelect advertised in discovery via
 // setJsonAttributes. The retained attribute value rides the wire seam to here.
@@ -849,9 +849,8 @@ String MQTTManager_::timerWireAttrTopic(TimerHaEntity slot)
     return String(topic);
 }
 
-// Canonical topic for the aggregate icons JSON (issue #34) — the one published
-// Timer topic that is NOT an HA entity data topic. The host-test stub mirrors
-// this from its fixture prefix, so tests pin the same spelling.
+// Canonical topic for the aggregate icons JSON — the one published
+// Timer topic that is NOT an HA entity data topic.
 String MQTTManager_::timerIconsTopic()
 {
     return MQTT_PREFIX + "/timer/icons";

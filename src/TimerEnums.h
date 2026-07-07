@@ -5,8 +5,7 @@
 
 // The Timer's two label-bearing enums and their per-enum CODEC TABLE: the fifth
 // member of the descriptor-table family (alongside TIMER_SETTINGS_DESCS,
-// TIMER_MEMBER_CONFIG_DESCS, TIMER_HA_DESCRIPTORS, TIMER_MENU_SLOTS). See
-// docs/adr/0010.
+// TIMER_MEMBER_CONFIG_DESCS, TIMER_HA_DESCRIPTORS, TIMER_MENU_SLOTS).
 //
 // One row per enum value, INDEXED BY THE ENUM'S NUMERIC VALUE -- the enum value
 // *is* the row index (the convention kBuzzerLabels/kFinishedLabels already used,
@@ -20,7 +19,7 @@
 // reused by TimerManager, TimerMenu and TimerHa without forming a dependency cycle
 // (TimerManager.h includes THIS header for the enums, never the reverse).
 //
-// B1 boundary is unchanged (ADR-0007/0009): this only consolidates how labels /
+// B1 boundary is unchanged: this only consolidates how labels /
 // strings are ENCODED. The MQTT raw-uint8_t-index publish path is untouched -- the
 // published index is the enum value, which is exactly this table's row index.
 

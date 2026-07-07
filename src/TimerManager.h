@@ -4,17 +4,17 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
-#include "TimerEnums.h"          // TimerState + BuzzerMode / FinishedMode + their codec tables (ADR-0010)
-#include "TimerRuntime.h"        // pure run-state engine: step() returns effects this class applies (issue #178)
+#include "TimerEnums.h"          // TimerState + BuzzerMode / FinishedMode + their codec tables
+#include "TimerRuntime.h"        // pure run-state engine: step() returns effects this class applies
 #include "TimerHa.h"             // TimerHaEntity (the HA carrier publishAttributeGroup targets)
-#include "TimerSettings.h"       // TcValue + TIMER_SETTINGS_DESC_CAP (one-shot override snapshot, PRD #99)
-#include "TimerCommand.h"        // TimerCommand::Action (the runStateAction verb, issue #221)
-#include "PeerRegistry.h"        // the LAN peer set (extracted from this class, ADR-0019/0021)
-#include "SyncSeenCache.h"       // the sync dedup set (extracted from this class, ADR-0022)
+#include "TimerSettings.h"       // TcValue + TIMER_SETTINGS_DESC_CAP (one-shot override snapshot)
+#include "TimerCommand.h"        // TimerCommand::Action (the runStateAction verb)
+#include "PeerRegistry.h"        // the LAN peer set (extracted from this class)
+#include "SyncSeenCache.h"       // the sync dedup set (extracted from this class)
 
 // Result of parseCommand. All control surfaces share one validation policy
 // (reject invalid input atomically); only the HTTP API surfaces this as a
-// status code — MQTT ignores it. See docs/adr/0001-timer-command-validation-parity.md.
+// status code — MQTT ignores it.
 enum class TimerCmdResult : uint8_t { Ok = 0, BadJson = 1, BadField = 2, Disabled = 3 };
 
 // Globals.cpp's full "awtrix"-namespace flush (declared in Globals.h, repeated
@@ -27,13 +27,19 @@ void saveSettings();
 // override snapshots and SavedConfigScope swaps, so "swap == copy this struct" holds.
 // Deliberately excludes durationSec (run-state) and the resolved melody RAM
 // (endRtttl/tickRtttl -- the saved melody NAME is a table key); those revert with the
-// override but are not config the observation carriers project as "saved". See ADR-0024.
+// override but are not config the observation carriers project as "saved".
 // Number of TimerState values (Idle/Running/Paused/Finished) — the width of the
 // state-indexed icon array. TimerState has no COUNT member; this is its stand-in.
 static constexpr size_t kTimerStateCount = 4;
 
 struct TimerMemberConfig
 {
+    // The explicit constructor keeps the two-value brace-init valid in C++11
+    // (a class with default member initializers is not a C++11 aggregate).
+    TimerMemberConfig() = default;
+    TimerMemberConfig(BuzzerMode buzzer_, FinishedMode finished_)
+        : buzzer(buzzer_), finished(finished_) {}
+
     BuzzerMode   buzzer   = BuzzerMode::End;
     FinishedMode finished = FinishedMode::AutoClear;
     String       iconByState[kTimerStateCount];   // indexed by TimerState
@@ -72,25 +78,24 @@ private:
     // -- Propagation surface (device-to-device timer sync) --
     // While true, an inbound sync packet is being applied via parseCommand; the
     // broadcast* methods early-return so a received command is never re-emitted
-    // (one-hop topology). See CONTEXT.md "Propagation surface".
+    // (one-hop topology).
     bool     _remoteApply = false;
     uint32_t _syncSeq     = 0;     // per-command sequence; only needs uniqueness within the dedup window
 
     // Emit one UDP broadcast mirroring a locally-accepted action to peers. No-ops
     // when sync is off (empty target list) or while applying an inbound packet
-    // (_remoteApply). Private since #222: every local run-state actor goes through
+    // (_remoteApply). Private: every local run-state actor goes through
     // runStateAction(), so the verb+mirror pairing is not a caller obligation.
     void broadcastRunState(const char *action);
 
     // Bounded recently-seen (src,seq) dedup set so the 3x redundant send is applied
-    // once. Extracted to its own host-testable module (SyncSeenCache, ADR-0022); the
+    // once. Extracted to its own self-contained module (SyncSeenCache); the
     // UDP transport + parseCommand re-entry stay here. TTL-based, so a sender reboot
     // (seq restart) self-clears by ageing out.
     SyncSeenCache _seen;
 
-    // -- Peer presence registry (#111 / ADR-0019, extracted to PeerRegistry per
-    //    ADR-0021) --
-    // The LAN peer set lives in its own host-testable module (PeerRegistry); this
+    // -- Peer presence registry (extracted to PeerRegistry) --
+    // The LAN peer set lives in its own self-contained module (PeerRegistry); this
     // class keeps only the beacon cadence + UDP send. Harvested UNGATED from
     // inbound presence beacons (presence is informational, not a command — it
     // bypasses the follow/target gate and applies no timer state).
@@ -100,7 +105,7 @@ private:
     bool          _presenceEverSent  = false;
     void broadcastPresence();                                  // emit one {_sync,presence:true} beacon
 
-    // -- One-shot override (save:false), PRD #99 / issue #100 --
+    // -- One-shot override (save:false) --
     // A save:false command applies its config for the CURRENT RUN only: the saved
     // config is snapshotted, the command applies live, and returnToIdle() restores
     // the snapshot when the timer next returns to Idle (reset or auto-clear). While
@@ -123,7 +128,7 @@ private:
     TimerMemberConfig snapshotMemberConfig() const;
     void              restoreMemberConfig(const TimerMemberConfig &c);
 
-    // Honest observation carriers (issue #101). RAII: while an override is active,
+    // Honest observation carriers. RAII: while an override is active,
     // present the SAVED config block (table inSnapshot rows + member-backed half) in
     // live storage so a carrier projection reads saved values, then restore the
     // effective (one-shot) values on scope exit. No-op when no override is active.
@@ -146,15 +151,15 @@ private:
     };
 
     // Which config a serializer reports: Saved opens a SavedConfigScope so an active
-    // one-shot override is masked (broadcastConfig / ADR-0006); Effective takes live
-    // storage as-is so a leader's own one-shot run mirrors to followers (ADR-0018 §4).
+    // one-shot override is masked (broadcastConfig); Effective takes live
+    // storage as-is so a leader's own one-shot run mirrors to followers.
     enum class View { Saved, Effective };
 
     // The one seam every config-honesty serializer names its view through: runs
     // `serialize` with live storage swapped to `view` (View::Saved opens a
     // SavedConfigScope masking the one-shot override; View::Effective is a no-op).
     // Callers (GET mirror, HA bags, propagated snapshot) must name a View to compile,
-    // so no path silently omits the scope (ADR-0015 / ADR-0017).
+    // so no path silently omits the scope.
     template <typename Serialize>
     void withConfigView(View view, Serialize &&serialize) const
     {
@@ -165,11 +170,11 @@ private:
     void addSyncEnvelope(JsonObject &sync);              // forwards to SyncEnvelope::build (injects _syncSeq)
 
     uint32_t computeCurrentRemaining() const;
-    TimerRuntime::Inputs buildInputs() const;           // resolve engine inputs from the environment (issue #179)
-    void runCommand(TimerRuntime::Command cmd);         // start/pause/reset/setDuration adapter: step() + apply (issue #180)
+    TimerRuntime::Inputs buildInputs() const;           // resolve engine inputs from the environment
+    void runCommand(TimerRuntime::Command cmd);         // start/pause/reset/setDuration adapter: step() + apply
     void applyTransition(const TimerRuntime::Result &r, unsigned long now,
                          const TimerRuntime::Inputs &in);   // run-state bookkeeping for a returned Transition
-    void applyEffect(const TimerRuntime::Effect &e);    // the effects-adapter seam (issue #178)
+    void applyEffect(const TimerRuntime::Effect &e);    // the effects-adapter seam
     void persist();
     void persistIfDirty();
     void loadMelodiesCached();
@@ -178,7 +183,7 @@ private:
 
 public:
     // RAII guard that makes the persist-batching window a visible lexical scope
-    // (PRD #29) — the ONE commit seam shared by both batch call sites:
+    // — the ONE commit seam shared by both batch call sites:
     // parseCommand's apply block and the TIMER menu's long-press commit
     // (MenuManager). While the guard lives, member-backed persistence is
     // suspended; scope exit commits the whole Timer config, flushing both NVS
@@ -217,7 +222,7 @@ public:
         }
         // A table-backed ("awtrix"-namespace) value changed inside the window.
         void markTableDirty() { tableDirty = true; }
-        // Mark this window one-shot: scope exit skips both NVS flushes (issue #100).
+        // Mark this window one-shot: scope exit skips both NVS flushes.
         void setTransient() { transient = true; }
 
         PersistBatch(const PersistBatch &) = delete;
@@ -237,7 +242,7 @@ public:
     void pause();
     void reset();
 
-    // The run-state seam (issue #221 / #213): dispatch the verb (start/pause/reset)
+    // The run-state seam: dispatch the verb (start/pause/reset)
     // AND mirror it to peers via broadcastRunState with the matching action string —
     // the pairing every accepted action must make, folded into one entry so a call
     // site can't emit the verb without the mirror. Action::None is a no-op. Safe on
@@ -247,13 +252,12 @@ public:
     void setDuration(uint32_t seconds);
     // persist=false applies + publishes live but defers the NVS write (the TIMER
     // menu's deferred-to-commit path; mirrors setIcon*'s publish flag). Every other
-    // caller uses the default and persists immediately. See docs/adr/0008.
+    // caller uses the default and persists immediately.
     void setBuzzerMode(BuzzerMode m, bool persist = true);
     void setFinishedMode(FinishedMode m, bool persist = true);
 
     // The parse/validate/format statics that once sat here are gone: deleted or
-    // relocated into the descriptor-table free functions (#204/#205/#206,
-    // TimerSettings.h; see docs/timer.md) — those are the only spellings.
+    // relocated into the descriptor-table free functions (    // TimerSettings.h; see docs/timer.md) — those are the only spellings.
 
     // The one shared icon setter: validate/reject/equality-skip/assign/persist/publish
     // for one state's slot. The four named setters below are thin delegators over it.
@@ -266,27 +270,27 @@ public:
 
     void publishIcons();
 
-    // Republish the current run-state string through the wire seam (issue #31).
+    // Republish the current run-state string through the wire seam.
     // Public because MQTTManager re-emits it on connect / discovery enable; it
     // is the only path that puts the state key on the wire.
     void publishState();
 
-    // Same for the remaining-seconds key (issue #32): the only path that puts
+    // Same for the remaining-seconds key: the only path that puts
     // remaining on the wire; the periodic republish throttle stays in tick().
     void publishRemaining();
 
-    // Same for the duration key (issue #34): the only path that puts the
+    // Same for the duration key: the only path that puts the
     // trimmed-HMS duration on the wire. Public for the same connect /
     // discovery-enable republish sites.
     void publishDuration();
 
-    // Same for the two enum keys (issue #33), dispatching through their member-
+    // Same for the two enum keys, dispatching through their member-
     // config rows' publish hooks: the only paths that put buzzer/finished on
     // the wire. Public for the same connect / discovery-enable republish sites.
     void publishBuzzerMode();
     void publishFinishedMode();
 
-    // Full wire refresh (issue #41): republish every Timer wire artifact once —
+    // Full wire refresh: republish every Timer wire artifact once —
     // the run-state trio plus every member-config row's publish hook, derived
     // from TIMER_MEMBER_CONFIG_DESCS so a new published row cannot be skipped.
     // The single call the connect / discovery-enable republish sites make.
@@ -294,8 +298,7 @@ public:
 
     // Publish one HA carrier's read-only JSON attribute object — the carrier's
     // mapped settings keys built via timerBuildAttributeGroup — onto its
-    // json_attr_t topic via the wire seam (PRD #57 / issue #58, generalizing the
-    // bespoke realert_interval publish of issue #51). Retained, so HA repopulates
+    // json_attr_t topic via the wire seam. Retained, so HA repopulates
     // after a restart for free. No-op for a carrier with no mapped keys.
     void publishAttributeGroup(TimerHaEntity carrier);
 
@@ -307,22 +310,22 @@ public:
     // Clear (empty retained payload) every distinct carrier's json_attr_t topic —
     // the teardown mirror of publishAllAttributeGroups(). The discovery teardown
     // (TimerHaHost::remove, SHOW_TIMER true->false) calls this so disabling the
-    // Timer leaves no orphaned attribute object retained on the broker (issue #60).
+    // Timer leaves no orphaned attribute object retained on the broker.
     void clearAllAttributeGroups();
 
     TimerCmdResult parseCommand(const char *json);
 
-    // -- Home Assistant control adapter (issue #109) --
+    // -- Home Assistant control adapter --
     // Route a single HA timer callback through parseCommand instead of a deep
     // setter, so HA edits get the SAME atomic-reject validation, the same
     // propagation, and the same codec strings as the {prefix}/timer MQTT surface.
     // Each entity builds the minimal JSON command it represents and hands it to
     // parseCommand, mirroring the sync receive path. Display-free (no ArduinoHA,
-    // no MQTT client) so the HA->parseCommand path is host-testable.
+    // no MQTT client), so the HA->parseCommand path has no device dependency.
     //
     // rawValue per entity:
     //   * Buzzer / Finished : the selected select-option INDEX as a decimal
-    //     string; mapped through the per-enum codec (ADR-0010) to the canonical
+    //     string; mapped through the per-enum codec to the canonical
     //     wire spelling, so emitted and accepted JSON cannot drift.
     //   * Duration          : the raw HH:MM:SS text; parseCommand owns the
     //     parse/validate (timerParseHMS + range), so that logic is NOT duplicated here.
@@ -333,7 +336,7 @@ public:
 
     // -- Propagation surface --
     // Run-state and config travel on separate packets; broadcastRunState is private
-    // (the runStateAction seam owns the verb+mirror pairing). See docs/adr/0006.
+    // (the runStateAction seam owns the verb+mirror pairing).
     void broadcastConfig();
     // Validate, gate (echo/follow/target/dedup), then apply an inbound sync packet
     // through parseCommand under the _remoteApply guard. A presence beacon
@@ -341,14 +344,14 @@ public:
     // before any command path (it carries no action/config and changes no state).
     void applySyncCommand(const char *json);
 
-    // Peer presence (#111 / ADR-0019). Called from the device loop with the current
+    // Peer presence. Called from the device loop with the current
     // millis(): emits a presence beacon at most once per kPresenceIntervalMs when on
     // a real network (NEVER in AP mode — broadcasts unconditionally otherwise so a
     // standalone clock is still discoverable), and ages out stale peers each call.
     void tickPresence(unsigned long nowMs);
-    // Peer registry observers (consumed by the dynamic HA Targets select in #112).
+    // Peer registry observers (consumed by the dynamic HA Targets select).
     // Thin forwarders onto the extracted PeerRegistry, so consumers (MQTTManager)
-    // are unchanged by the extraction (ADR-0021).
+    // are unchanged by the extraction.
     int  peerCount() const { return _registry.count(); }
     bool hasPeer(const String &id) const { return _registry.has(id); }
     size_t peerIds(String *out, size_t cap) const { return _registry.ids(out, cap); }
@@ -364,7 +367,7 @@ public:
 
     // The raw per-state slot (no Idle fallback — that lives in getIconForState).
     // The one indexed read the snapshot/emit hook uses; the four named getters
-    // delegate here, mirroring how setIcon unified the setters (#184/#185).
+    // delegate here, mirroring how setIcon unified the setters.
     const String &getIcon(TimerState s) const { return iconByState[(size_t)s]; }
     const String &getIconIdle()     const { return getIcon(TimerState::Idle); }
     const String &getIconRunning()  const { return getIcon(TimerState::Running); }
@@ -378,13 +381,13 @@ public:
     // getStateString() so the one true spelling of each enum lives in one place.
     // (The command parser additionally tolerates non-hyphen aliases on input.)
     // Public so the member-config table's emit hooks (TimerSettings.cpp) can read
-    // them when building the propagated config snapshot. See docs/adr/0009.
+    // them when building the propagated config snapshot.
     const char *buzzerModeString() const;
     const char *finishedModeString() const;
 
     // Live read-only snapshot for the GET /api/timer observation surface.
     // Reports computeCurrentRemaining() (wall-clock fresh), not the throttled
-    // cached value. See docs/api.md and CONTEXT.md "observation surface".
+    // cached value. See docs/api.md.
     String getStateJson() const;
 };
 

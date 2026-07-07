@@ -9,10 +9,9 @@
 // and teardown, the dedicated Timer duration text callback, and the Timer branches
 // of the shared ArduinoHA select/switch/button callbacks (reached via tryHandle*).
 // It is a device-bound adapter — it constructs real ArduinoHA objects against the
-// HADevice/HAMqtt globals still owned by MQTTManager (reached via extern) — so it is
-// compiled only on device (excluded from every native env's build_src_filter, exactly
-// like MQTTManager.cpp). The pure builder half lives in TimerHa (topics, descriptors,
-// options, haRegistrationAtCap). See PRD #191 / issue #193 / ADR-0026.
+// HADevice/HAMqtt globals still owned by MQTTManager (reached via extern), exactly
+// like MQTTManager.cpp. The pure builder half lives in TimerHa (topics, descriptors,
+// options, haRegistrationAtCap).
 
 struct TimerHaHost_
 {
@@ -34,7 +33,7 @@ struct TimerHaHost_
     void remove();
 
     // Re-publish the dynamic Targets select's discovery when peer-registry membership
-    // changes, debounced (issue #112). Called every device loop; a no-op when the
+    // changes, debounced. Called every device loop; a no-op when the
     // carriers are absent or MQTT is down. See the debounce state in TimerHaHost.cpp.
     void refreshTargets(unsigned long nowMs);
 
@@ -45,7 +44,7 @@ struct TimerHaHost_
     bool tryHandleButton(HAButton *sender);
 
     // Accessors for the Timer wire seam that deliberately stays in MQTTManager
-    // (ADR-0026): whether the carriers exist, and a carrier's resolved unique id.
+    //: whether the carriers exist, and a carrier's resolved unique id.
     // They are the seam's surface, not a transition step.
     bool carriersReady() const;
     const char *entityId(TimerHaEntity slot) const;

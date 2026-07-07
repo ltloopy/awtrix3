@@ -5,19 +5,19 @@
 #include <ArduinoJson.h>
 
 #include "TimerHa.h"      // TimerHaEntity (the HA carrier each attribute group rides)
-#include "TimerEnums.h"   // BuzzerMode / FinishedMode for the relocated enum parsers (#143)
+#include "TimerEnums.h"   // BuzzerMode / FinishedMode for the relocated enum parsers
 
 // Persisted Timer settings: the single descriptor table that drives validation,
 // apply, NVS persistence, dev.json overrides and the propagated config snapshot
 // for the value-config Timer keys. Modelled on TimerHa.h ("one table, no drift").
 //
-// This table is a SUPERSET, not "the config block": the `inSnapshot` column is the
-// codified boundary CONTEXT.md describes in prose --
+// This table is a SUPERSET, not "the config block": the `inSnapshot` column
+// codifies the config/identity boundary --
 //   * config block            = the inSnapshot == true rows (the propagated snapshot)
 //   * sync roles / local id    = the inSnapshot == false rows (sync_follow/sync_targets,
-//                                deliberately excluded from the snapshot per ADR-0006)
+//                                deliberately excluded from the snapshot)
 //
-// Out of scope (the B1 boundary, see docs/adr/0007): duration/buzzer/finished and the
+// Out of scope (the B1 boundary): duration/buzzer/finished and the
 // four icon_<state> keys stay on TimerManager's publish-aware setters. They are config
 // block too, but their snapshot/broadcast membership is governed by the shared
 // member-config list in TimerManager.cpp, not by this table.
@@ -56,7 +56,7 @@ extern const size_t           TIMER_SETTINGS_DESC_COUNT;
 // Compile-time row count (TIMER_SETTINGS_DESC_COUNT is only known at runtime, so it
 // cannot size a fixed array). A static_assert in TimerSettings.cpp pins it equal to
 // the table extent, so it cannot drift. Used by the one-shot override controller
-// (PRD #99 / issue #100) to stack a config snapshot buffer over the table.
+// to stack a config snapshot buffer over the table.
 constexpr size_t TIMER_SETTINGS_DESC_CAP = 13;
 
 // Validate + coerce one field into `out`. Never writes a global (pure parse). Strict
@@ -80,13 +80,13 @@ void timerSettingsLoadDevJson(JsonObjectConst obj);
 // Emit ONE row's live value into `doc` under its cmdKey, dispatched by `type` and
 // IGNORING snapshot membership. The single "storage -> JSON value" helper shared by
 // the config snapshot (inSnapshot rows) and the HA attribute builder, so the two can
-// never disagree about a value (PRD #57).
+// never disagree about a value.
 void timerSettingEmitValue(const TimerSettingDesc &d, JsonDocument &doc);
 
 // Emit the inSnapshot rows into `doc` (the propagated config block, table half).
 void timerSettingsBuildSnapshot(JsonDocument &doc);
 
-// One-shot override (PRD #99 / issue #100): capture/restore the table half's config
+// One-shot override: capture/restore the table half's config
 // block (the inSnapshot rows; sync_* are inSnapshot=false and excluded by
 // construction) into a caller-owned TcValue buffer of TIMER_SETTINGS_DESC_CAP slots,
 // indexed by row. Capture reads each storage by type; restore writes it back via
@@ -98,7 +98,7 @@ void timerSettingsRestoreSnapshot(const TcValue in[]);
 const TimerSettingDesc *timerSettingByCmdKey(const char *cmdKey);
 
 // ---------------------------------------------------------------------------
-// Inline RTTTL classifier/validator (PRD #99 / issue #102) -- a pure, reusable pair
+// Inline RTTTL classifier/validator -- a pure, reusable pair
 // reused by command validation and melody resolution. `melody_end`/`melody_tick`
 // accept EITHER a bare file-name token (as today) OR an inline RTTTL tune; the two
 // are distinguished by content. An inline tune is always one-shot (it has no
@@ -116,10 +116,10 @@ bool timerMelodyIsInline(const String &s);
 bool timerMelodyValidateInline(const String &s);
 
 // ---------------------------------------------------------------------------
-// Pure validation helpers relocated out of TimerManager's statics (#142) so the
+// Pure validation helpers relocated out of TimerManager's statics so the
 // command validator links the descriptor-table family, not the singleton. The
-// singleton's thin forwarders were deleted once production callers were gone
-// (#204); these free functions are the only spellings.
+// singleton's thin forwarders were deleted once production callers were gone;
+// these free functions are the only spellings.
 
 // Parse a duration string into seconds. Accepts bare seconds, MM:SS or HH:MM:SS;
 // each field is a non-empty digit run; fields are summed without a 0-59 cap
@@ -132,7 +132,7 @@ bool timerParseHMS(const String &s, uint32_t &outSeconds);
 // {start, pause, reset}. No trim (a surrounding space rejects). No globals.
 bool timerIsValidAction(const String &s);
 
-// More pure validators/formatters relocated into the table family (#143) so the
+// More pure validators/formatters relocated into the table family so the
 // command validator (TimerCommand::classify) links the family, not the singleton.
 
 // Bare icon/melody file-name char-rule: [A-Za-z0-9_-], length 0..32 (empty = clear,
@@ -140,12 +140,12 @@ bool timerIsValidAction(const String &s);
 // TimerManager's private icon-slot validation. No globals.
 bool timerIsValidIconName(const String &name);
 
-// String->enum over the buzzer / finished codec tables (ADR-0010), case-insensitive
+// String->enum over the buzzer / finished codec tables, case-insensitive
 // wire spelling or alias. The enum parse behind the member validators. No globals.
 bool timerParseBuzzerMode(const String &s, BuzzerMode &out);
 bool timerParseFinishedMode(const String &s, FinishedMode &out);
 
-// The one seconds->clock renderer (#153/#158). Three deliberate spellings the timer
+// The one seconds->clock renderer. Three deliberate spellings the timer
 // surfaces speak, collapsed into one function:
 //   Trimmed  drop the hours group when zero; most-significant field unpadded, lower
 //            fields zero-padded ("24:00:00" / "1:00:00" / "0:45"). HA/config-read form.
@@ -162,13 +162,13 @@ String timerClock(uint32_t seconds, ClockStyle style);
 String timerFormatHMS(uint32_t seconds);
 
 // Raw seconds <-> H/M/S integer decomposition, relocated out of TimerManager's
-// last pure statics (#206). Pure math, no clamp (the on-device config editor —
+// last pure statics. Pure math, no clamp (the on-device config editor —
 // the one caller — owns its 99h display cap), no globals.
 void     timerSecondsToHMS(uint32_t sec, uint32_t &h, uint32_t &m, uint32_t &s);
 uint32_t timerHmsToSeconds(uint32_t h, uint32_t m, uint32_t s);
 
 // ---------------------------------------------------------------------------
-// HA attribute-group projection (PRD #57) -- the descriptor-table family's fifth
+// HA attribute-group projection -- the descriptor-table family's fifth
 // member. One row per (carrier entity, settings key) projection: a persisted
 // settings value surfaced as a read-only JSON attribute on the HA entity it is
 // semantically about. A key may map to MULTIPLE carriers (one row each). The
@@ -193,18 +193,18 @@ extern const size_t             TIMER_ATTR_GROUP_DESC_COUNT;
 void timerBuildAttributeGroup(TimerHaEntity carrier, JsonDocument &doc);
 
 // ---------------------------------------------------------------------------
-// The config block's SECOND table: the member-backed half (B1, ADR-0007/0009).
+// The config block's SECOND table: the member-backed half (B1).
 //
 // One row per member-backed config key (buzzer / finished / the four icon_<state>).
 // Unlike TIMER_SETTINGS_DESCS' DECLARATIVE rows, these carry function-pointer hooks
 // -- exactly like TIMER_MENU_SLOTS' enum slots -- because their values are owned by
 // TimerManager's publish-aware setters (equality-skip, _suspendPersist batching, MQTT
-// publish), not by a typed storage pointer. This is NOT ADR-0007's rejected "B2 / fold
-// into the declarative table"; it is a separate hook table, the fourth member of the
+// publish), not by a typed storage pointer. This is deliberately NOT folded
+// into the declarative table; it is a separate hook table, the fourth member of the
 // descriptor-table family (TIMER_SETTINGS_DESCS, TIMER_HA_DESCRIPTORS, TIMER_MENU_SLOTS).
 //
 // Together the two tables ARE the config block. `duration` is member-backed too but is
-// deliberately EXCLUDED: it is run-state, not config (CONTEXT.md), and its validation
+// deliberately EXCLUDED: it is run-state, not config, and its validation
 // depends on the cross-field effectiveMaxDuration staged from the table half.
 struct TimerMemberConfigDesc
 {
@@ -213,7 +213,7 @@ struct TimerMemberConfigDesc
     void (*apply)(const TcValue &);                      // routes via TimerManager's deep setter
     void (*emit)(JsonDocument &doc);                     // writes the live value into the snapshot
     void (*publish)();                                   // optional: live value onto the MQTT wire
-                                                         // seam (issue #33); nullptr = key not
+                                                         // seam; nullptr = key not
                                                          // individually published
 };
 
@@ -225,13 +225,13 @@ extern const size_t                TIMER_MEMBER_CONFIG_DESC_COUNT;
 // pins it to the table extent. Bump if a member-config row is added.
 constexpr size_t TIMER_MEMBER_CONFIG_DESC_CAP = 6;
 
-// The member-config half's PURE validation projection (#143). TIMER_MEMBER_CONFIG_DESCS
+// The member-config half's PURE validation projection. TIMER_MEMBER_CONFIG_DESCS
 // carries impure apply/emit/publish hooks (the TimerManager singleton + the MQTT wire
-// seam), so the whole table can't link in the dependency-light command-validator env
-// (native_validate). This parallel table carries ONLY the pure {cmdKey, validate}
+// seam), so the whole table can't link where only the dependency-light command
+// validator is wanted. This parallel table carries ONLY the pure {cmdKey, validate}
 // columns -- the exact same validate function pointers -- so TimerCommand::classify
-// validates the member half without dragging in the apply machinery. A drift guard
-// (test) pins the two tables row-for-row (same cmdKey, same validate) so they cannot
+// validates the member half without dragging in the apply machinery. The two
+// tables stay row-for-row (same cmdKey, same validate) so they cannot
 // disagree about what a member key is or how it validates.
 struct TimerMemberValidatorDesc
 {
@@ -252,7 +252,7 @@ bool timerMemValidateFinished(JsonVariantConst v, TcValue &out);
 bool timerMemValidateIcon(JsonVariantConst v, TcValue &out);
 
 // bar_color / bar_bg_color attribute formatters (external linkage, defined in the pure
-// TU) shared by the attr-group table and the HTTP full-config dump (#143).
+// TU) shared by the attr-group table and the HTTP full-config dump.
 void timerFormatBarColor(const TimerSettingDesc &d, JsonDocument &doc);
 void timerFormatBarBgColor(const TimerSettingDesc &d, JsonDocument &doc);
 
@@ -261,11 +261,11 @@ void timerMemberConfigBuildSnapshot(JsonDocument &doc);
 
 // Run `cmdKey`'s declared publish hook (no-op if the key has none / is unknown).
 // TimerManager's per-key publish methods dispatch through this, so the row is the
-// single place "how key X goes out on the wire" is defined (issue #33 / PRD #28).
+// single place "how key X goes out on the wire" is defined.
 void timerMemberConfigPublish(const char *cmdKey);
 
 // ---------------------------------------------------------------------------
-// HTTP GET /api/timer config mirror (PRD #73). Build the COMPLETE persisted
+// HTTP GET /api/timer config mirror. Build the COMPLETE persisted
 // configuration into `doc`: the full two-table dump an HTTP-only client reads
 // back so it can confirm everything it can POST. Unlike timerSettingsBuildSnapshot
 // it does NOT honour the inSnapshot filter -- the sync-role keys
@@ -273,9 +273,9 @@ void timerMemberConfigPublish(const char *cmdKey);
 // (buzzer/finished/the four icon_*) via timerMemberConfigBuildSnapshot. Pure: it
 // reads only the descriptor storage, no I/O, no globals beyond that. Because it
 // walks the same two tables that drive the control surface, the read surface
-// cannot drift from what is writable (the drift-guard test pins this). Values are
-// raw here; the two carrier-native renderings (friendly bar_color,
-// max_duration_str) are layered on in issue #75.
+// cannot drift from what is writable. Values are raw here; the two
+// carrier-native renderings (friendly bar_color, max_duration_str) are layered
+// on by the HA attribute builder.
 void timerBuildFullConfig(JsonDocument &doc);
 
 #endif

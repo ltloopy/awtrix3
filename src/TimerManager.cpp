@@ -1,8 +1,8 @@
 #include "TimerManager.h"
 #include "TimerSettings.h"
-#include "TimerCommand.h"   // the pure atomic-reject command plan (classify, #143)
+#include "TimerCommand.h"   // the pure atomic-reject command plan (classify)
 #include "TimerHa.h"
-#include "SyncEnvelope.h"     // wire envelope + pure inbound receive gate (ADR-0023)
+#include "SyncEnvelope.h"     // wire envelope + pure inbound receive gate
 #include "Globals.h"
 #include "PeripheryManager.h"
 #include "DisplayManager.h"
@@ -15,14 +15,14 @@
 
 namespace {
     // Sized to hold the full config snapshot (~18 keys) plus the _sync envelope on
-    // the propagation surface, with headroom for ArduinoJson's larger 64-bit slots
-    // (host tests). The HTTP/MQTT control surfaces never approach it.
+    // the propagation surface, with headroom for ArduinoJson's larger 64-bit
+    // slots. The HTTP/MQTT control surfaces never approach it.
     constexpr uint16_t kTimerCmdJsonSize     = 2048;
 
     const char *FALLBACK_END_RTTTL  = "timer:d=4,o=5,b=120:c,8p,c,8p,c";
     const char *FALLBACK_TICK_RTTTL = "tick:d=16,o=6,b=200:c";
 
-    // The config-block keys that stay member-backed (B1 boundary, ADR-0007/0009) now
+    // The config-block keys that stay member-backed (B1 boundary) now
     // live in TIMER_MEMBER_CONFIG_DESCS (TimerSettings.cpp), the config block's second
     // table. Validation, apply, snapshot-emit and the broadcast trigger all loop that
     // one table, so they cannot drift apart.
@@ -65,7 +65,7 @@ void TimerManager_::loadMelodiesCached()
     tickRtttl = PeripheryManager.resolveRtttl(tickName, FALLBACK_TICK_RTTTL);
 }
 
-// One-shot override (PRD #99 / issue #100). captureSnapshot records the SAVED config
+// One-shot override. captureSnapshot records the SAVED config
 // before a save:false command applies on top of it; restoreSnapshot writes it back
 // when the timer returns to Idle. The table half (Family A inSnapshot rows) is captured
 // generically over TIMER_SETTINGS_DESCS; the member-backed half (Family B) is captured as
@@ -123,7 +123,7 @@ void TimerManager_::returnToIdle()
     _overrideActive = false;
 }
 
-// Honest observation carriers (issue #101): swap the SAVED config block into live
+// Honest observation carriers: swap the SAVED config block into live
 // storage for the duration of a carrier projection, then restore the effective
 // (one-shot) values. Only the config-block state the projections read is swapped —
 // the table inSnapshot rows (sync_* excluded by construction) and the member-backed
@@ -173,14 +173,14 @@ void TimerManager_::setup()
     _dirty = false;        // just loaded from NVS: RAM matches it, nothing pending
 
     // A (re)boot knows no peers and has emitted no beacon yet — the peer registry is
-    // pure RAM/LAN-derived state, repopulated by inbound beacons (#111 / ADR-0019).
+    // pure RAM/LAN-derived state, repopulated by inbound beacons.
     _registry.setOwnId(uniqueID);
     _registry.clear();
     _lastPresenceMs   = 0;
     _presenceEverSent = false;
 
     // A (re)boot has applied no sync command yet; the dedup set is pure RAM
-    // (ADR-0022), repopulated by inbound commands.
+    //, repopulated by inbound commands.
     _seen.clear();
 
     loadMelodiesCached();
@@ -210,7 +210,7 @@ void TimerManager_::persistIfDirty()
 
 String TimerManager_::validateIconName(const String &name)
 {
-    // Coercing wrapper around the family's char-rule (#143): accepted name passes
+    // Coercing wrapper around the family's char-rule: accepted name passes
     // through (empty = clear), a rejected one coerces to "" (and logs). Single source
     // of the char-rule is timerIsValidIconName, so this cannot drift from the parser.
     if (timerIsValidIconName(name)) return name;
@@ -239,7 +239,7 @@ void TimerManager_::setIcon(TimerState s, const String &name, bool publish)
 
 void TimerManager_::publishIcons()
 {
-    // The four icon rows declare ONE shared aggregate publish hook (issue #34),
+    // The four icon rows declare ONE shared aggregate publish hook,
     // so dispatching any icon key reaches the same declaration.
     timerMemberConfigPublish("icon_idle");
 }
@@ -266,7 +266,7 @@ const char *TimerManager_::getStateString() const
 }
 
 // Canonical wire spellings are a single row read from the per-enum codec table
-// (src/TimerEnums.cpp) -- the enum value is the row index. See docs/adr/0010.
+// (src/TimerEnums.cpp) -- the enum value is the row index.
 const char *TimerManager_::buzzerModeString() const
 {
     return buzzerCodec(buzzerMode).wire;
@@ -281,7 +281,7 @@ String TimerManager_::getStateJson() const
 {
     // Bumped from the old 512-byte fixed buffer to the shared command-size
     // constant the snapshot/broadcast paths use, to hold the added config mirror
-    // (PRD #73: ~20 keys incl. two melodies, a CSV sync_targets, four icon names).
+    // (~20 keys incl. two melodies, a CSV sync_targets, four icon names).
     DynamicJsonDocument doc(kTimerCmdJsonSize);
     uint32_t remaining = computeCurrentRemaining();
     doc["state"]         = getStateString();
@@ -293,13 +293,13 @@ String TimerManager_::getStateJson() const
     doc["buzzer"]        = buzzerModeString();
     doc["finished"]      = finishedModeString();
 
-    // Persisted-config mirror (PRD #73): the complete two-table dump under a
+    // Persisted-config mirror: the complete two-table dump under a
     // nested `config` object, so an HTTP-only client reads back everything it can
     // POST. Built in a temp doc by the pure table-walking projection, then
     // deep-copied in -- duration stays top-level only (run-state, not config).
     DynamicJsonDocument cfg(kTimerCmdJsonSize);
     // During a one-shot override the `config` mirror reports the SAVED config, while
-    // the top-level run-state above stays effective (issue #101 / ADR-0015).
+    // the top-level run-state above stays effective.
     withConfigView(View::Saved, [&] { timerBuildFullConfig(cfg); });
     doc["config"] = cfg.as<JsonObject>();
 
@@ -308,10 +308,10 @@ String TimerManager_::getStateJson() const
     return out;
 }
 
-// Apply the run-state bookkeeping a returned Transition names (issue #180). The
+// Apply the run-state bookkeeping a returned Transition names. The
 // pure engine decides the phase change; this owns the state mutation — including
-// enterRunning's runStart* capture and the ADR-0024 override restore behind
-// ToIdle — so the override store stays in the singleton (PRD #28 US7). Runs
+// enterRunning's runStart* capture and the one-shot override restore behind
+// ToIdle — so the override store stays in the singleton. Runs
 // BEFORE the effects, so the publishes carry the new phase/remaining.
 void TimerManager_::applyTransition(const TimerRuntime::Result &r, unsigned long now,
                                     const TimerRuntime::Inputs &in)
@@ -340,7 +340,7 @@ void TimerManager_::applyTransition(const TimerRuntime::Result &r, unsigned long
         lastRealertMs = now;
         break;
     case TimerRuntime::Transition::ToIdle:
-        returnToIdle();                    // one-shot: restore saved config (ADR-0024 store stays here)
+        returnToIdle();                    // one-shot: restore saved config (override store lives here)
         state = TimerState::Idle;
         remainingSec = in.durationSec;
         break;
@@ -352,7 +352,7 @@ void TimerManager_::applyTransition(const TimerRuntime::Result &r, unsigned long
     }
 }
 
-// Thin adapter for the input-driven lifecycle verbs (issue #180): resolve the
+// Thin adapter for the input-driven lifecycle verbs: resolve the
 // inputs, let TimerRuntime::step() decide the transition + ordered effects, apply
 // the run-state bookkeeping, then execute the effects. The same shape tick() uses,
 // so start/pause/reset/setDuration and the countdown step share one seam.
@@ -368,7 +368,7 @@ void TimerManager_::runCommand(TimerRuntime::Command cmd)
 }
 
 // Resolve the environment gates + config the pure engine reads into an Inputs
-// value (issue #179). tick() shares this across the Running and Finished branches,
+// value. tick() shares this across the Running and Finished branches,
 // so the globals/singletons the engine deliberately doesn't name are touched in
 // exactly one place.
 TimerRuntime::Inputs TimerManager_::buildInputs() const
@@ -394,7 +394,7 @@ TimerRuntime::Inputs TimerManager_::buildInputs() const
 
 // Executes one effect against the hardware managers / wire seam. The full effect
 // vocabulary is handled so the later slices can lean on it; the Finished path emits
-// only a subset (issue #178).
+// only a subset.
 void TimerManager_::applyEffect(const TimerRuntime::Effect &e)
 {
     switch (e.kind)
@@ -429,7 +429,7 @@ void TimerManager_::pause() { runCommand(TimerRuntime::Command::Pause); }
 
 void TimerManager_::reset() { runCommand(TimerRuntime::Command::Reset); }
 
-// The run-state seam (issue #221 / #213): the verb + its peer mirror, paired in one
+// The run-state seam: the verb + its peer mirror, paired in one
 // place. broadcastRunState self-no-ops under _remoteApply and sync-off, so this is
 // safe to call unconditionally from any locally-driven path.
 void TimerManager_::runStateAction(TimerCommand::Action a)
@@ -448,7 +448,7 @@ void TimerManager_::setDuration(uint32_t seconds)
     // Clamp + no-op guard stay in the adapter (input validation, not a transition);
     // durationSec must be committed before runCommand so buildInputs() feeds the
     // engine the NEW duration (the Idle reload / paused-edit reset load it into
-    // remaining). The engine decides the phase transition (issue #180); the duration
+    // remaining). The engine decides the phase transition; the duration
     // persist + republish are unconditional adapter concerns.
     if (seconds < 1) seconds = 1;
     if (TIMER_MAX_DURATION > 0 && seconds > TIMER_MAX_DURATION) seconds = TIMER_MAX_DURATION;
@@ -477,10 +477,10 @@ void TimerManager_::setFinishedMode(FinishedMode m, bool persist)
     publishFinishedMode();
 }
 
-// Thin adapter over the pure engine (issue #179): resolve the inputs, let
+// Thin adapter over the pure engine: resolve the inputs, let
 // TimerRuntime::step() decide the ordered effects + the run-state bookkeeping for
 // both the Running and Finished branches, then apply the bookkeeping and execute
-// the effects in order. The state mutation (and the ADR-0024 override restore
+// the effects in order. The state mutation (and the one-shot override restore
 // behind ToIdle) stays here; effects run after it so the publishes carry the new
 // phase/remaining, exactly as the imperative tick did.
 void TimerManager_::tick()
@@ -496,7 +496,7 @@ void TimerManager_::tick()
     // always advances remaining to the freshly-computed value and re-anchors the
     // publish throttle; the Finished branch advances the re-alert anchor. The phase
     // change itself (ToFinished / auto-clear ToIdle) is applied by applyTransition,
-    // the same seam start/pause/reset/setDuration use (issue #180).
+    // the same seam start/pause/reset/setDuration use.
     if (state == TimerState::Running)
     {
         remainingSec = in.newRemaining;
@@ -527,7 +527,7 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     }
 
     // -- Validation: the whole atomic-reject pass runs once in the pure
-    //    TimerCommand::classify, mutating nothing (ADR-0001, extracted #143). The shell
+    //    TimerCommand::classify, mutating nothing. The shell
     //    fills the Context from the globals it owns (the saved ceiling + _remoteApply)
     //    and drives apply from the returned Plan -- the packet is never re-read below. --
     TimerCommand::Plan plan =
@@ -536,7 +536,7 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     if (!plan.ok) return TimerCmdResult::BadField;   // first invalid field; nothing applied
 
     // -- Command is known-good: only now disturb device state. --
-    // One-shot override (issue #100): before applying, snapshot the saved config so
+    // One-shot override: before applying, snapshot the saved config so
     // returnToIdle() can restore it. Only the first one-shot in a run captures (latest-
     // command-wins, single snapshot); a later one-shot applies on top of the same baseline.
     if (plan.oneShot && !_overrideActive)
@@ -548,7 +548,7 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     // -- Apply, inside ONE PersistBatch window; its scope exit commits the whole config
     //    (both NVS namespaces, each at most once). Table rows FIRST, so a raised
     //    TIMER_MAX_DURATION lands before setDuration() re-clamps against the GLOBAL
-    //    ceiling (ADR-0001 addendum -- a duration classify accepted against the staged
+    //    ceiling (a duration classify accepted against the staged
     //    ceiling would otherwise be silently clamped to the old one). Then duration
     //    (run-state, B1), then the member-backed applies via their publish-aware setters. --
     bool melodyChanged = false;
@@ -568,14 +568,14 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     }
 
     if (melodyChanged) loadMelodiesCached();
-    // Inline melodies (issue #102): use the validated tune directly as the resolved RAM,
+    // Inline melodies: use the validated tune directly as the resolved RAM,
     // after any bare-name re-resolve above so it wins. The saved name globals are
     // untouched (config mirror keeps the saved name); the snapshot captured the saved-
     // resolved RAM, so returnToIdle() reverts these on return to Idle.
     if (plan.haveInlineEnd)  endRtttl  = plan.inlineEnd;
     if (plan.haveInlineTick) tickRtttl = plan.inlineTick;
 
-    // Rebaseline (issue #100, story 21): a normal (save:true) config command arriving
+    // Rebaseline (story 21): a normal (save:true) config command arriving
     // during an active one-shot run commits the live config — including prior one-shot
     // values — as the new saved baseline and ends the override, so a later revert leaves
     // the promoted truth in place. A pure action/duration command does NOT rebaseline (it
@@ -589,26 +589,26 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
         _overrideActive = false;
     }
 
-    // Settings projected as read-only HA attributes (PRD #57): republish each affected
+    // Settings projected as read-only HA attributes: republish each affected
     // carrier's bag when any of its mapped keys was in the command (classify computed the
     // dirty set). Fires on the remote-apply path too (not _remoteApply-gated), keeping
-    // each synced peer's HA attributes consistent (generalizes #52). Suppressed under a
-    // one-shot command so the retained bags keep reporting the saved config (#101).
+    // each synced peer's HA attributes consistent. Suppressed under a
+    // one-shot command so the retained bags keep reporting the saved config.
     if (!plan.oneShot)
     {
         for (size_t c = 0; c < (size_t)TimerHaEntity::COUNT; ++c)
             if (plan.attrCarrierDirty[c]) publishAttributeGroup((TimerHaEntity)c);
     }
 
-    // Run-state dispatch rides the runStateAction seam (issue #221): the verb and its
+    // Run-state dispatch rides the runStateAction seam: the verb and its
     // peer mirror are paired there, so this path can't emit one without the other.
-    // The propagation contract is unchanged (run-scoped config mirror, ADR-0018,
-    // superseding ADR-0006): a `start` emits the ONE combined packet (action +
-    // duration + effective config snapshot), pause/reset propagate run-state only,
-    // and a config/bare-duration edit propagates NOTHING (#126); broadcastRunState
-    // itself no-ops under _remoteApply (one-hop) and sync-off. The broadcast fires
-    // BEFORE the switch-to-app below (deliberate, #213 grilling): the broadcast reads
-    // state/duration/effective config, switchToApp touches display only.
+    // The propagation contract is the run-scoped config mirror: a `start` emits
+    // the ONE combined packet (action + duration + effective config snapshot),
+    // pause/reset propagate run-state only, and a config/bare-duration edit
+    // propagates NOTHING; broadcastRunState itself no-ops under _remoteApply
+    // (one-hop) and sync-off. The broadcast deliberately fires BEFORE the
+    // switch-to-app below: the broadcast reads state/duration/effective config,
+    // switchToApp touches display only.
     bool fromIdle = (state == TimerState::Idle);
     runStateAction(plan.action);
     if (plan.action == TimerCommand::Action::Start && fromIdle &&
@@ -621,7 +621,7 @@ TimerCmdResult TimerManager_::parseCommand(const char *json)
     return TimerCmdResult::Ok;
 }
 
-// HA control adapter (issue #109): each HA timer callback re-enters the control
+// HA control adapter: each HA timer callback re-enters the control
 // surface through parseCommand, exactly as the propagation surface does, rather
 // than poking a deep setter. The minimal JSON each entity builds is the SAME shape
 // the {prefix}/timer MQTT topic accepts, so HA edits inherit atomic-reject
@@ -635,7 +635,7 @@ TimerCmdResult TimerManager_::timerHaApply(TimerHaEntity entity, const String &r
     case TimerHaEntity::Buzzer:
     {
         // The select callback hands us the chosen option index; map it through the
-        // per-enum codec (ADR-0010) so the emitted wire string is the one
+        // per-enum codec so the emitted wire string is the one
         // parseCommand accepts — the two cannot drift.
         long idx = rawValue.toInt();
         if (idx < 0 || (size_t)idx >= TIMER_BUZZER_CODEC_COUNT) return TimerCmdResult::BadField;
@@ -665,7 +665,7 @@ TimerCmdResult TimerManager_::timerHaApply(TimerHaEntity entity, const String &r
         doc["sync_follow"] = (rawValue.toInt() != 0);
         break;
     case TimerHaEntity::SyncTargets:
-        // The dynamic select (issue #112) hands us the RESOLVED sync_targets value,
+        // The dynamic select hands us the RESOLVED sync_targets value,
         // not an index: "" (Off), "all" (All), or a discovered peer id. MQTTManager
         // maps the chosen option index through the CURRENT id list before calling, so
         // the option set tracks the registry. The bespoke sync_targets validator
@@ -689,13 +689,13 @@ void TimerManager_::onShowTimerChange(bool prev, bool now)
 
 // State is run-state, not a member-config row, so it goes through the wire
 // seam directly: the exact (topic, payload) the broker receives, byte-identical
-// to the retired HASensor::setValue path (issue #31 / PRD #28).
+// to the retired HASensor::setValue path.
 void TimerManager_::publishState()
 {
     MQTTManager.publishTimerWire(MQTTManager.timerWireTopic(TimerHaEntity::State).c_str(),
                                  getStateString());
 }
-// Remaining is run-state too (issue #32): straight through the seam, payload a
+// Remaining is run-state too: straight through the seam, payload a
 // plain decimal string — byte-identical to the retired HASensorNumber
 // (PrecisionP0) setValue path.
 void TimerManager_::publishRemaining()
@@ -703,20 +703,20 @@ void TimerManager_::publishRemaining()
     MQTTManager.publishTimerWire(MQTTManager.timerWireTopic(TimerHaEntity::Remaining).c_str(),
                                  String(remainingSec).c_str());
 }
-// Duration is run-state too (issue #34): straight through the seam, payload the
+// Duration is run-state too: straight through the seam, payload the
 // trimmed-HMS clock string — byte-identical to the retired HAText::setState path.
 void TimerManager_::publishDuration()
 {
     MQTTManager.publishTimerWire(MQTTManager.timerWireTopic(TimerHaEntity::Duration).c_str(),
                                  timerFormatHMS(durationSec).c_str());
 }
-// The enum keys are member-config rows (issue #33): dispatch through the row's
+// The enum keys are member-config rows: dispatch through the row's
 // declared publish hook so validate/apply/emit/publish stay co-located and the
 // table is the single definition of how each key goes out on the wire.
 void TimerManager_::publishBuzzerMode()   { timerMemberConfigPublish("buzzer"); }
 void TimerManager_::publishFinishedMode() { timerMemberConfigPublish("finished"); }
 
-// A carrier's read-only JSON attribute object (PRD #57 / issue #58): the bag is
+// A carrier's read-only JSON attribute object: the bag is
 // built table-driven by timerBuildAttributeGroup, serialized, and ridden onto the
 // carrier's json_attr_t topic by the wire seam — the same path every other Timer
 // value takes. HA reads it because the TimerHaHost carrier build opted the carrier
@@ -726,11 +726,10 @@ void TimerManager_::publishFinishedMode() { timerMemberConfigPublish("finished")
 void TimerManager_::publishAttributeGroup(TimerHaEntity carrier)
 {
     // 512: the state sensor's bag is the largest (eight config-view keys incl.
-    // two strings), which overflows 256 on a 64-bit host (issue #59).
+    // two strings), which overflows 256 on a 64-bit host.
     DynamicJsonDocument doc(512);
     // A republish (e.g. on reconnect) during a one-shot override serializes the SAVED
-    // config, so HA attribute bags never show transient one-off values (issue #101 /
-    // ADR-0014).
+    // config, so HA attribute bags never show transient one-off values.
     withConfigView(View::Saved, [&] { timerBuildAttributeGroup(carrier, doc); });
     if (doc.as<JsonObjectConst>().size() == 0) return;
     String payload;
@@ -749,8 +748,8 @@ void TimerManager_::publishAllAttributeGroups()
 }
 
 // Teardown mirror of publishAllAttributeGroups: empty the retained json_attr_t
-// topic of every distinct carrier so disabling the Timer (discovery teardown,
-// issue #60) leaves no orphaned attribute object on the broker. Same carrier
+// topic of every distinct carrier so disabling the Timer (discovery teardown)
+// leaves no orphaned attribute object on the broker. Same carrier
 // dedupe and same wire seam — an empty retained payload is the MQTT clear.
 // publishTimerWire's creation-sentinel gate makes this no-op when no entity ever
 // existed (nothing was advertised, so nothing to clear).
@@ -763,7 +762,7 @@ void TimerManager_::clearAllAttributeGroups()
         });
 }
 
-// Full wire refresh (issue #41, closing PRD #28). The run-state trio is a fixed
+// Full wire refresh. The run-state trio is a fixed
 // set (state/remaining/duration are run-state, not table rows); the config half
 // is DERIVED from TIMER_MEMBER_CONFIG_DESCS, so a row added with a publish hook
 // is republished on connect / discovery-enable without touching this function.
@@ -783,14 +782,14 @@ void TimerManager_::publishAllWire()
 }
 
 // ---------------------------------------------------------------------------
-// Propagation surface (device-to-device timer sync). See CONTEXT.md and
-// docs/adr/0006-timer-multi-device-sync.md.
+// Propagation surface (device-to-device timer sync). See docs/timer.md
+// "Multi-device sync".
 // ---------------------------------------------------------------------------
 
 void TimerManager_::addSyncEnvelope(JsonObject &sync)
 {
     // Thin forwarder: this class owns the monotonic _syncSeq counter (injected as
-    // seq); the envelope shape + target-CSV parsing live in SyncEnvelope (ADR-0023).
+    // seq); the envelope shape + target-CSV parsing live in SyncEnvelope.
     SyncEnvelope::build(sync, uniqueID, ++_syncSeq, TIMER_SYNC_TARGETS);
 }
 
@@ -798,15 +797,15 @@ void TimerManager_::buildConfigSnapshot(JsonDocument &doc, View view) const
 {
     // Config block only — never action/duration (run-state) or sync_* (local identity,
     // inSnapshot=false). Two tables, one config block: TIMER_SETTINGS_DESCS' inSnapshot
-    // rows and TIMER_MEMBER_CONFIG_DESCS (the member-backed half, B1, ADR-0007/0009).
+    // rows and TIMER_MEMBER_CONFIG_DESCS (the member-backed half, B1).
     // Each table also feeds the parseCommand broadcast trigger, so the snapshot can't
     // drift from what fires a broadcast.
     // View::Saved masks an active one-shot override so the snapshot reports the SAVED
     // config — a follower never receives transient one-off values it has no notion of
-    // reverting (issue #101 / ADR-0006; broadcastConfig is itself suppressed during an
-    // override, issue #100, so this is also defensive). View::Effective takes live
+    // reverting (broadcastConfig is itself suppressed during an
+    // override, so this is also defensive). View::Effective takes live
     // storage as-is so a leader's own one-shot run mirrors to followers — the snapshot
-    // reports what is actually running (ADR-0018 §4).
+    // reports what is actually running.
     withConfigView(view, [&] {
         timerSettingsBuildSnapshot(doc);
         timerMemberConfigBuildSnapshot(doc);
@@ -818,10 +817,10 @@ void TimerManager_::broadcastRunState(const char *action)
     if (_remoteApply) return;                       // one-hop: never re-emit an applied remote command
     if (TIMER_SYNC_TARGETS.length() == 0) return;   // sync off
 
-    // Only an action ever reaches here — start / pause / reset (#126). A `start` is the
+    // Only an action ever reaches here — start / pause / reset. A `start` is the
     // SOLE duration-bearing packet: it carries the leader's effective `duration` plus the
     // leader's EFFECTIVE config snapshot, bundled into one combined packet — the
-    // run-scoped config mirror (ADR-0018). Config no longer travels on a config edit, and
+    // run-scoped config mirror. Config no longer travels on a config edit, and
     // a bare duration edit propagates nothing; both ride one combined packet with the
     // start so a follower mirrors the leader for that run. The combined packet needs the
     // full kTimerCmdJsonSize buffer (config snapshot + envelope); pause/reset stay
@@ -838,7 +837,7 @@ void TimerManager_::broadcastRunState(const char *action)
         // EFFECTIVE config: a leader's own one-shot run mirrors to followers, so the
         // snapshot reports what is actually running. sync_* are inSnapshot=false and
         // excluded by construction; inline melodies never travel (the saved bare name
-        // globals back the snapshot, ADR-0017 / ADR-0018 §4).
+        // globals back the snapshot).
         buildConfigSnapshot(doc, View::Effective);
 
         String out; serializeJson(doc, out);
@@ -864,7 +863,7 @@ void TimerManager_::broadcastConfig()
     DynamicJsonDocument doc(kTimerCmdJsonSize);
     JsonObject sync = doc.createNestedObject("_sync");
     addSyncEnvelope(sync);
-    buildConfigSnapshot(doc, View::Saved);   // propagated config reports SAVED (ADR-0006 / ADR-0017)
+    buildConfigSnapshot(doc, View::Saved);   // propagated config reports SAVED
 
     String out; serializeJson(doc, out);
     ServerManager.sendTimerSync(out);
@@ -877,8 +876,8 @@ void TimerManager_::applySyncCommand(const char *json)
     DynamicJsonDocument doc(kTimerCmdJsonSize);
     if (deserializeJson(doc, json)) return;
 
-    // The echo/presence/follow/target decision is a PURE function (SyncEnvelope,
-    // ADR-0023): this shell only deserializes, then acts on the Decision. Dedup is
+    // The echo/presence/follow/target decision is a PURE function (SyncEnvelope):
+    // this shell only deserializes, then acts on the Decision. Dedup is
     // deliberately NOT in classify — SyncSeenCache::seen() is stateful (test-and-
     // record), so it stays here as the single guard before re-entry.
     SyncEnvelope::Decision d =
@@ -887,7 +886,7 @@ void TimerManager_::applySyncCommand(const char *json)
     switch (d.kind)
     {
     case SyncEnvelope::Decision::HarvestPresence:
-        // Presence harvest (#111 / ADR-0019): record the sender ungated, apply no
+        // Presence harvest: record the sender ungated, apply no
         // timer state. classify already bypassed the follow/target gate.
         _registry.record(d.src, millis());
         break;
@@ -907,8 +906,8 @@ void TimerManager_::applySyncCommand(const char *json)
 }
 
 // ---------------------------------------------------------------------------
-// Peer presence beacon (#111 / ADR-0019). The peer SET lives in PeerRegistry
-// (extracted per ADR-0021); this class keeps only the beacon cadence + UDP send.
+// Peer presence beacon. The peer SET lives in PeerRegistry
+// (extracted); this class keeps only the beacon cadence + UDP send.
 // ---------------------------------------------------------------------------
 
 void TimerManager_::broadcastPresence()

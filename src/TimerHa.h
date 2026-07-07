@@ -9,7 +9,7 @@
 // (no ArduinoHA, no Globals) so it compiles on the host and the contract below can
 // be unit-tested. The ArduinoHA `new HAX + setters` apply and the discovery
 // teardown both read TIMER_HA_DESCRIPTORS in MQTTManager — one table, no drift.
-// See CONTEXT.md ("Timer HA Presence") and docs/timer.md.
+// See docs/timer.md.
 
 enum class TimerHaEntity : uint8_t
 {
@@ -26,7 +26,7 @@ enum class TimerHaEntity : uint8_t
     COUNT
 };
 
-// The static option indices for the SyncTargets select (issue #110). The select
+// The static option indices for the SyncTargets select. The select
 // ships ONLY these two base options ("Off"/"All"); a specific-ID CSV set out-of-band
 // is reflected as unknown (-1) — see timerSyncTargetsIndexForValue.
 enum class TimerSyncTargetsOption : int8_t
@@ -83,11 +83,11 @@ void formatTimerHaDataTopic(const char *dataPrefix, const char *deviceUniqueId,
 void formatTimerHaAttrTopic(const char *dataPrefix, const char *deviceUniqueId,
                             const char *entityId, char *out, size_t outLen);
 
-// Dynamic SyncTargets select (#112). The select consumes the peer registry, so its
+// Dynamic SyncTargets select. The select consumes the peer registry, so its
 // option list and id<->index mapping are built at runtime from the CURRENT set of
 // discovered peer ids (already sorted) rather than the static "Off;All" table field.
-// All three helpers are pure (char* / out-buffer, no String/Globals) so they are
-// host-testable alongside the rest of this contract.
+// All three helpers are pure (char* / out-buffer, no String/Globals), like the
+// rest of this contract.
 
 // Build the option list "Off;All" followed by ";<id>" for each of the n peer ids,
 // in the given order, into out[outLen] (truncated like snprintf). n==0 -> "Off;All".
@@ -107,10 +107,10 @@ bool timerSyncTargetsValueForIndex(int8_t index, const char *const *ids, size_t 
 // ArduinoHA's HAMqtt::addDeviceType drops an entity when
 // `_devicesTypesNb + 1 >= _maxDevicesTypesNb`, so the EFFECTIVE capacity is
 // maxEntities - 1, not maxEntities (an off-by-one that silently dropped the two
-// Timer sync-control entities — issue #125). This helper encodes that guard once,
-// host-tested, so the DEBUG_MODE registration check and ArduinoHA agree: it returns
+// Timer sync-control entities). This helper encodes that guard once,
+// so the DEBUG_MODE registration check and ArduinoHA agree: it returns
 // true when `registered` entities already fill the effective cap, i.e. the next
-// addDeviceType would be rejected. Pure (no ArduinoHA/Globals) so it is host-testable.
+// addDeviceType would be rejected. Pure (no ArduinoHA/Globals).
 bool haRegistrationAtCap(uint8_t registered, uint8_t maxEntities);
 
 #endif

@@ -1,8 +1,8 @@
 #include "SyncTargetsDebounce.h"
 
 // The settle-window state machine for the dynamic Targets select's republish
-// (issue #199 / PRD #192). The transition table lives in the header; the effects
-// live in TimerHaHost. See test/test_synctargets for the row-for-row pinning.
+// decision. The transition table lives in the header; the effects
+// live in TimerHaHost.
 
 SyncTargetsDebounce::Action SyncTargetsDebounce::step(const char *currentOpts, unsigned long nowMs)
 {

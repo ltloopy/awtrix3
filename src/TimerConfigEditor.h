@@ -11,10 +11,8 @@
 // without a real clock or buttons. Duration flows in via enter() and back out via
 // exit(); the caller commits the result through setDuration().
 //
-// The no-input auto-apply timeout was removed with PRD #83 / issue #88 (the TIMER
-// menu — now the editor's only host — is timeout-free); only hold-to-repeat remains.
-// See docs/adr/0011-timer-config-editor-extraction.md (extraction) and
-// docs/adr/0012-timer-config-timing-in-editor.md (timing; auto-apply half removed).
+// There is no no-input auto-apply timeout (the TIMER menu — the editor's only
+// host — is timeout-free); only hold-to-repeat remains.
 class TimerConfigEditor
 {
 public:
@@ -42,7 +40,7 @@ public:
     // member defaults but makes construction standard-independent: a class with default
     // member initializers is not an aggregate under C++11, so the call site's two-arg
     // brace-init (TimerManager.cpp) would otherwise need the C++14 relaxed-aggregate
-    // rule and break the gnu++11 device build. See docs/adr/0013 and issue #25.
+    // rule and break the gnu++11 device build.
     struct ButtonState
     {
         bool leftPressed  = false;
@@ -52,7 +50,7 @@ public:
     };
 
     // Drive button hold-to-repeat: 500 ms long-press threshold then 250 ms cadence
-    // (left = -1 / right = +1). No timeout — the editor never auto-applies (#88).
+    // (left = -1 / right = +1). No timeout — the editor never auto-applies.
     void tick(unsigned long nowMs, ButtonState buttons);
 
     bool    isActive() const { return active_; }
@@ -74,7 +72,7 @@ private:
     uint8_t mm_     = 0;
     uint8_t ss_     = 0;
 
-    // Per-button hold-to-repeat bookkeeping (issue #23). 0 = unpressed / no repeat yet.
+    // Per-button hold-to-repeat bookkeeping. 0 = unpressed / no repeat yet.
     unsigned long leftPressStartMs_  = 0;
     unsigned long rightPressStartMs_ = 0;
     unsigned long leftRepeatMs_      = 0;

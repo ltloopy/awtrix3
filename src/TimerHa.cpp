@@ -14,7 +14,7 @@
 
 // Build a select's "`;`"-joined HA option list from a per-enum codec table's HA
 // column, in enum-value order (the table's row index IS the enum value, pinned by
-// its static_assert — see docs/adr/0010). One join site, no hand-written list to
+// its static_assert —). One join site, no hand-written list to
 // drift from the enum labels. The returned String has static lifetime below, so
 // the descriptor's `options` pointer stays valid for the program's life.
 static String joinHaOptions(const TimerEnumCodec *table, size_t count)
@@ -66,7 +66,7 @@ static const char HAtimerResetID[] PROGMEM   = {"%s_timer_reset"};
 static const char HAtimerResetIcon[] PROGMEM = {"mdi:restore"};
 static const char HAtimerResetName[] PROGMEM = {"Timer reset"};
 
-// Sync-control entities (issue #110): the two sync settings — until now read-only
+// Sync-control entities: the two sync settings — until now read-only
 // HA attributes on the state sensor — become writable. The Follow switch carries
 // the receive-consent toggle; the Targets select ships STATIC Off/All only (it
 // becomes dynamic in a later peer-discovery slice).
@@ -94,7 +94,7 @@ const TimerHaDescriptor TIMER_HA_DESCRIPTORS[TIMER_HA_DESCRIPTOR_COUNT] = {
     {TimerHaEntity::SyncTargets, "select", HAtimerSyncTargetsID, HAtimerSyncTargetsIcon, HAtimerSyncTargetsName, HAtimerSyncTargetsOptions, nullptr, nullptr},
 };
 
-// --- Dynamic SyncTargets select (#112) ---------------------------------------
+// --- Dynamic SyncTargets select ---------------------------------------
 // The select's options and id<->index mapping are derived at runtime from the
 // CURRENT peer-id list. See the contract in TimerHa.h.
 

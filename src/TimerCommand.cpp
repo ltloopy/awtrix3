@@ -2,8 +2,8 @@
 
 #include <string.h>   // strcmp
 
-// The pure Timer command plan. See TimerCommand.h and docs/adr/0001. Lifted verbatim
-// (behaviour-identical) from TimerManager::parseCommand's validation pass (#143); the
+// The pure Timer command plan. See TimerCommand.h. Lifted verbatim
+// (behaviour-identical) from TimerManager::parseCommand's validation pass; the
 // shell now drives apply from the returned Plan instead of re-deriving these flags.
 
 namespace TimerCommand
@@ -13,10 +13,10 @@ namespace TimerCommand
         Plan p;   // ok defaults false; arrays default-zeroed
 
         // -- Table settings: validate + coerce each present row into staging. Nothing is
-        //    kept until every field below validates too (atomic-reject, ADR-0001).
+        //    kept until every field below validates too (atomic-reject).
         //    max_duration is range-defining for duration: capture its staged value so a
         //    payload that raises the ceiling AND sets a duration within it in the same
-        //    call is accepted atomically (ADR-0001 addendum). melody_end/melody_tick
+        //    call is accepted atomically. melody_end/melody_tick
         //    accept an inline RTTTL tune (detected by content): validated here, staged as
         //    RAM, and the table row excluded from the bare-name store (always one-shot).
         uint32_t effectiveMaxDuration = ctx.savedMaxDuration;
@@ -66,7 +66,7 @@ namespace TimerCommand
         }
 
         // -- Member-backed config half (B1): validate + coerce each present row via its
-        //    pure validator. A bad member field rejects the whole command (ADR-0001).
+        //    pure validator. A bad member field rejects the whole command.
         for (size_t i = 0; i < TIMER_MEMBER_VALIDATOR_COUNT; ++i)
         {
             const TimerMemberValidatorDesc &d = TIMER_MEMBER_VALIDATORS[i];
@@ -86,8 +86,8 @@ namespace TimerCommand
                                       : Action::Reset;
         }
 
-        // -- save flag (PRD #99 / issue #100): payload-level bool, default true. A
-        //    non-boolean rejects the whole command (atomic-reject, ADR-0001).
+        // -- save flag: payload-level bool, default true. A
+        //    non-boolean rejects the whole command (atomic-reject).
         bool saveFlag = true;
         if (packet.containsKey("save"))
         {
@@ -96,7 +96,7 @@ namespace TimerCommand
             saveFlag = sv.as<bool>();
         }
 
-        // -- one-shot decision (ADR-0017/0018). An inline melody is always one-shot; a
+        // -- one-shot decision. An inline melody is always one-shot; a
         //    remote-applied command is ALWAYS one-shot regardless of the leader's save.
         p.oneShot = !saveFlag || p.haveInlineEnd || p.haveInlineTick || ctx.remoteApply;
 

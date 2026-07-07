@@ -7,10 +7,9 @@
 #include "MQTTManager.h"    // the (topic, payload) wire seam the publish hooks emit on
 #include "TimerHa.h"        // TimerHaEntity slots for the hooks' canonical topics
 
-// The IMPURE half of the descriptor-table family (#143). Everything here touches the
-// TimerManager singleton, the MQTT wire seam, or Preferences -- so it is split out of
-// the pure TimerSettings.cpp and linked only in device + full-suite builds, never in
-// the dependency-light command-validator env (native_validate). The PURE half (the
+// The IMPURE half of the descriptor-table family. Everything here touches the
+// TimerManager singleton, the MQTT wire seam, or Preferences -- so it is split out
+// of the pure TimerSettings.cpp, which stays dependency-light. The PURE half (the
 // descriptor tables, parsers, member VALIDATORS) lives in TimerSettings.cpp; this file
 // carries the member apply/emit/publish hooks, the full TIMER_MEMBER_CONFIG_DESCS
 // table, the NVS round-trip, and the HTTP full-config dump.
@@ -60,7 +59,7 @@ namespace
     // -- buzzer --
     void memApplyBuzzer(const TcValue &v) { TimerManager.setBuzzerMode((BuzzerMode)v.num); }
     void memEmitBuzzer (JsonDocument &doc) { doc["buzzer"] = TimerManager.buzzerModeString(); }
-    // Publish hook (issue #33): the live value onto the wire seam, payload the
+    // Publish hook: the live value onto the wire seam, payload the
     // per-enum codec's canonical `wire` string -- never the numeric index, and
     // deliberately not the HASelect `ha` label the retired setState path sent.
     void memPublishBuzzer()
@@ -82,7 +81,7 @@ namespace
     // -- icon_<state> (shared validate + shared aggregate publish; the per-slot
     // apply/emit fold into these two TimerState-indexed templates over iconByState[]).
     // A fifth timer state wires its apply + emit for free from its row's <State> tag
-    // instead of needing a hand-written pair that could be forgotten (#185). The
+    // instead of needing a hand-written pair that could be forgotten. The
     // snapshot/command key per state, ordered by TimerState (== each row's cmdKey).
     static const char *const kIconCmdKeys[kTimerStateCount] = {
         "icon_idle", "icon_running", "icon_paused", "icon_finished"};
@@ -90,7 +89,7 @@ namespace
     void memApplyIcon(const TcValue &v) { TimerManager.setIcon(S, v.str); }
     template <TimerState S>
     void memEmitIcon (JsonDocument &doc) { doc[kIconCmdKeys[(size_t)S]] = TimerManager.getIcon(S); }
-    // Publish hook, shared by all four icon rows (issue #34): the icon keys have
+    // Publish hook, shared by all four icon rows: the icon keys have
     // ONE wire artifact — the aggregate four-state JSON on the plain
     // {MQTT_PREFIX}/timer/icons topic (not an HA entity data topic), payload
     // byte-identical to the retired MQTTManager::publishTimerIcons composer.
@@ -137,7 +136,7 @@ void timerMemberConfigPublish(const char *cmdKey)
 }
 
 // ===========================================================================
-// HTTP GET /api/timer config mirror (PRD #73). The complete persisted-config
+// HTTP GET /api/timer config mirror. The complete persisted-config
 // projection: both tables, no snapshot filter, raw values. Lives beside the impure
 // member half it dumps. See the header for the full contract.
 // ===========================================================================
@@ -146,7 +145,7 @@ void timerBuildFullConfig(JsonDocument &doc)
     // Table half: EVERY settings row, ignoring inSnapshot, so the sync-role keys
     // (sync_follow/sync_targets) are part of the read mirror even though they are
     // never propagated. Raw value per row via the shared single-row emitter, with
-    // the two deliberate carrier-native overrides (PRD #73 D2) reusing the family's
+    // the two deliberate carrier-native overrides reusing the family's
     // shared bar formatters -- diverging from the raw propagation snapshot by design,
     // yet never able to disagree in value (same storage).
     for (size_t i = 0; i < TIMER_SETTINGS_DESC_COUNT; ++i)

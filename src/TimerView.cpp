@@ -54,8 +54,8 @@ TimerView TimerViewModel::compute(const TimerSnapshot &s)
 
     // The bar divides by the duration captured when the run began, not the live
     // configured duration, so editing the duration mid-run leaves the in-progress
-    // bar untouched (it re-arms on the next start/reset). See API-17 in
-    // TIMER_TEST_PLAN.md. Falls back to the configured duration if no snapshot.
+    // bar untouched (it re-arms on the next start/reset). Falls back to the
+    // configured duration if no snapshot.
     uint32_t barDuration = s.runDuration;
     if (barDuration == 0) barDuration = duration;
     if (ts != TimerState::Idle && barDuration > 0)
@@ -68,7 +68,7 @@ TimerView TimerViewModel::compute(const TimerSnapshot &s)
 
         // The background track is the full bar trough and persists for the whole
         // Running/Paused window, independent of the foreground's len-rounds-to-0
-        // gate below (ADR-0020). The painter AND-s in TIMER_BAR_ENABLED / a non-black
+        // gate below. The painter AND-s in TIMER_BAR_ENABLED / a non-black
         // bar_bg_color, exactly as it does for the foreground.
         v.showBarTrack   = true;
         v.barTrackLen    = (uint8_t)barMaxLen;

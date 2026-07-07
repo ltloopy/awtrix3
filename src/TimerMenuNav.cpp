@@ -1,9 +1,8 @@
 #include "TimerMenuNav.h"
 
-// Display-free TIMER-menu navigation state machine (PRD #83 / issues #85, #86).
+// Display-free TIMER-menu navigation state machine.
 // See the header for the input->outcome contract. The implementation is pure logic
-// over {focus, index, origin, leaf, bounds} -- no device, no display, no storage --
-// which is exactly what makes the interaction model host-testable.
+// over {focus, index, origin, leaf, bounds} -- no device, no display, no storage.
 
 TimerMenuNav::TimerMenuNav()
     : _itemCount(1), _mainIndex(0), _index(0),

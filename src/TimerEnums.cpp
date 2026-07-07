@@ -3,7 +3,7 @@
 // One row per enum value, in enum-value order so the array index IS the enum
 // value. Wire spellings are the canonical MQTT/HTTP/sync contract; menu/ha are the
 // on-device and Home Assistant labels; aliases are extra accepted input spellings
-// (parse only -- never emitted). See docs/adr/0010.
+// (parse only -- never emitted).
 const TimerEnumCodec TIMER_BUZZER_CODEC[] = {
     {"off",       "OFF", "Off",       nullptr},
     {"end",       "END", "End",       nullptr},

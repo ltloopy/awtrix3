@@ -7,8 +7,8 @@ namespace
 {
     // Enum hooks. The setters defer the NVS write (persist=false): the TIMER menu
     // applies + publishes live during scroll and persists on the long-press
-    // commit, where MenuManager opens the PersistBatch guard (ADR-0008 as amended
-    // by PRD #29 / #45). Non-capturing lambdas decay to the row's function pointers.
+    // commit, where MenuManager opens the PersistBatch guard. Non-capturing
+    // lambdas decay to the row's function pointers.
     uint8_t getBuzzer()        { return (uint8_t)TimerManager.getBuzzerMode(); }
     void    setBuzzer(uint8_t v) { TimerManager.setBuzzerMode((BuzzerMode)v, /*persist=*/false); }
     uint8_t getFinished()      { return (uint8_t)TimerManager.getFinishedMode(); }
@@ -17,11 +17,10 @@ namespace
 
 // idx order is the on-screen list order (left/right walks it, wrapping). DURATION
 // is first (the HH:MM:SS wheel, delegating to TimerConfigEditor); MAIN is the lone
-// Navigation row and sits last (the device reads it as the back-to-main item; PRD
-// #83).
+// Navigation row and sits last (the device reads it as the back-to-main item).
 //   kind, name, cmdKey, step, codec, labelCount, getEnum, setEnum
 // The two EnumCycle slots read their bare leaf value from the per-enum codec
-// table's menu column (ADR-0010) -- no private label copy to drift from it.
+// table's menu column -- no private label copy to drift from it.
 const TimerMenuSlot TIMER_MENU_SLOTS[] = {
     {TimerMenuKind::Duration,     "DURATION",  nullptr,             0, nullptr,              0, nullptr,     nullptr},
     {TimerMenuKind::EnumCycle,    "BUZZER",    nullptr,             0, TIMER_BUZZER_CODEC,   (uint8_t)BuzzerMode::COUNT,   getBuzzer,   setBuzzer},

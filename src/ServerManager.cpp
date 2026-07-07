@@ -24,7 +24,7 @@ char incomingPacket[255];
 
 // Propagation surface: dedicated UDP socket for device-to-device timer sync. A
 // separate port (and buffer) from discovery so a full config snapshot fits and the
-// FIND_AWTRIX traffic is never parsed as JSON. See docs/adr/0006.
+// FIND_AWTRIX traffic is never parsed as JSON.
 WiFiUDP syncUdp;
 const uint16_t kTimerSyncPort = 4212;
 char syncBuffer[1024];
@@ -390,7 +390,7 @@ void ServerManager_::sendTimerSync(const String &payload)
     IPAddress bcast = WiFi.broadcastIP();
     if ((uint32_t)bcast == 0) bcast = IPAddress(255, 255, 255, 255);
     // Redundant best-effort send; receivers dedup by (src,seq). Spacing rides out
-    // transient congestion without acks/per-target state (ADR-0006).
+    // transient congestion without acks/per-target state.
     for (uint8_t i = 0; i < 3; ++i)
     {
         syncUdp.beginPacket(bcast, kTimerSyncPort);

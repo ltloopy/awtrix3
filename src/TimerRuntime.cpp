@@ -39,10 +39,10 @@ namespace TimerRuntime
             fx.push_back({EffectKind::SetBrightness});   // brightness 0
     }
 
-    // The input-driven lifecycle transitions (issue #180): start/pause/reset/
+    // The input-driven lifecycle transitions: start/pause/reset/
     // setDuration decided as pure phase transitions over the same effect seam. The
     // adapter owns the run-state bookkeeping each Transition names (enterRunning's
-    // runStart* capture, the ADR-0024 override restore behind ToIdle); here we only
+    // runStart* capture, the one-shot override restore behind ToIdle); here we only
     // decide the phase change and the ordered effects.
     static Result stepCommand(const State &s, const Inputs &in)
     {
@@ -116,7 +116,7 @@ namespace TimerRuntime
             {
                 // Auto-clear: stop the sound, return to Idle, republish, and (when
                 // the panel is dark) drop brightness to 0. The adapter maps ToIdle
-                // to returnToIdle()+state/remaining so ADR-0024's store stays there.
+                // to returnToIdle()+state/remaining so the override store stays there.
                 r.effects.push_back({EffectKind::StopSound});
                 r.effects.push_back({EffectKind::PublishState});
                 r.effects.push_back({EffectKind::PublishRemaining});

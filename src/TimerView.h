@@ -8,8 +8,7 @@
 // The explicit, per-frame input to TimerViewModel::compute(): a plain-data
 // snapshot of everything the view reads, captured once from TimerManager by the
 // painter (src/Apps.cpp). It carries no methods and no TimerManager dependency,
-// so compute() is a pure function of this value and the host tests can construct
-// it directly. See CONTEXT.md ("Timer View").
+// so compute() is a pure function of this value.
 struct TimerSnapshot
 {
     TimerState    state;        // lifecycle state (Idle/Running/Paused/Finished)
@@ -26,9 +25,8 @@ struct TimerSnapshot
 // gates the icon and, when off, reflows text+bar to the full panel). TimerApp
 // (src/Apps.cpp) is its painter — it maps this struct to DisplayManager / matrix
 // calls and owns the font-dependent text centering. Keeping the view display-free
-// is what lets the host tests cover the bar geometry, blink cadence and
-// display-string selection that the renderer previously hid. See CONTEXT.md
-// ("Timer View").
+// keeps the bar geometry, blink cadence and display-string selection
+// independently checkable instead of hidden in the renderer.
 struct TimerView
 {
     enum class Screen : uint8_t { Config, Finished, Time };
@@ -52,7 +50,7 @@ struct TimerView
     uint8_t barLen;          // 0 .. (kBarMaxLen, or kScreenW when the icon is hidden)
     int16_t barStartX;       // app-local start column
 
-    // Background track behind the bar (ADR-0020): the FULL bar extent, painted in
+    // Background track behind the bar: the FULL bar extent, painted in
     // bar_bg_color before the foreground segment. Unlike showBar it PERSISTS for the
     // whole Running/Paused window -- including the final stretch where barLen rounds
     // to 0 and showBar is false -- so the trough stays visible like the app's
@@ -81,7 +79,7 @@ namespace TimerViewModel
     //   1..9h  -> "H:MM"   (seconds dropped to fit; 3661 -> "1:01")
     //   >= 10h -> "HH:MM"  (36000 -> "10:00")
     // Distinct from timerFormatHMS (the "H:MM:SS" wire string, which
-    // always carries seconds). See CONTEXT.md ("Timer Display String").
+    // always carries seconds).
     void formatTimerDisplay(uint32_t seconds, char *out, size_t outLen);
 }
 

@@ -217,7 +217,7 @@ void loadDevSettings()
         // boot override layer, so an invalid key is skipped, not atomic-rejected.
         timerSettingsLoadDevJson(doc.as<JsonObjectConst>());
 
-        // Timer state icons stay member-backed (B1, ADR-0007); their dev.json shadows
+        // Timer state icons stay member-backed (B1); their dev.json shadows
         // seed the TimerManager members at setup().
         if (doc.containsKey("timer_icon_idle"))     TIMER_ICON_IDLE     = doc["timer_icon_idle"].as<String>();
         if (doc.containsKey("timer_icon_running"))  TIMER_ICON_RUNNING  = doc["timer_icon_running"].as<String>();
@@ -476,7 +476,7 @@ bool SHOW_TIMER = true;
 bool SHOW_TIMER_HA_PREV = true;
 // The 13 table-backed timer settings (max_duration, melodies, bar/sync, etc.) are
 // DEFINED in TimerSettings.cpp beside the descriptor table whose storage pointers
-// reference them (#143). The extern decls stay in Globals.h. These four icon_<state>
+// reference them. The extern decls stay in Globals.h. These four icon_<state>
 // values are member-backed (owned by TimerManager's setters, not the table), so they
 // stay here.
 String TIMER_ICON_IDLE = "";

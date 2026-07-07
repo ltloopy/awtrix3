@@ -3,14 +3,13 @@
 #include <stdlib.h>
 #include <stdio.h>          // snprintf (timerFormatHMS, the bar-color formatters)
 
-// The descriptor-table family is the PURE Timer validation surface (#143): it links
+// The descriptor-table family is the PURE Timer validation surface: it links
 // against ArduinoJson + the enum codec tables ONLY -- no Globals.h (FastLED), no
 // TimerManager singleton, no MQTTManager, no Preferences. That dependency-light link
-// is what lets TimerCommand::classify be host-tested in [env:native_validate] with no
-// stubs. The impure half -- the member-config apply/emit/publish hooks, the NVS
-// round-trip, and the full-config dump, all of which DO touch the singleton / MQTT /
-// Preferences -- lives in TimerSettingsApply.cpp, linked only in device + full-suite
-// builds. The two share this header.
+// is what lets TimerCommand::classify be exercised in isolation. The impure
+// half -- the member-config apply/emit/publish hooks, the NVS round-trip, and the
+// full-config dump, all of which DO touch the singleton / MQTT / Preferences --
+// lives in TimerSettingsApply.cpp. The two share this header.
 //
 // The 13 persisted timer-setting globals are DEFINED here (moved out of Globals.cpp;
 // Globals.h keeps the extern decls so every other caller is source-unchanged) so the
@@ -25,8 +24,8 @@ String   TIMER_MELODY_END        = "timer_end";
 bool     TIMER_BAR_ENABLED       = true;
 bool     TIMER_ICON_ENABLED      = true;
 uint32_t TIMER_BAR_COLOR         = 0;
-uint32_t TIMER_BAR_BG_COLOR      = 0;     // 0 = black = no track (literal off; see ADR-0020)
-bool     TIMER_SYNC_FOLLOW       = true;  // fresh clock is a follower; standalone is opt-out (#124)
+uint32_t TIMER_BAR_BG_COLOR      = 0;     // 0 = black = no track (literal off)
+bool     TIMER_SYNC_FOLLOW       = true;  // fresh clock is a follower; standalone is opt-out
 String   TIMER_SYNC_TARGETS      = "";
 
 namespace
@@ -87,7 +86,7 @@ namespace
         return false;
     }
 
-    // max_duration carrier-native HA-attribute formatter (PRD #66 / issue #68):
+    // max_duration carrier-native HA-attribute formatter:
     // renders the stored cap (raw seconds, a U32) as the trimmed H:MM:SS clock
     // string the Duration text entity's OWN state speaks, by reusing the exact
     // formatHMS the Duration state uses ("24:00:00", "1:00:00", "0:45"). This is
@@ -98,7 +97,7 @@ namespace
     void formatMaxDurationHMS(const TimerSettingDesc &d, JsonDocument &doc)
     {
         uint32_t v = *static_cast<uint32_t *>(d.storage);
-        doc[d.cmdKey] = timerFormatHMS(v);   // family-local pure formatter (#143)
+        doc[d.cmdKey] = timerFormatHMS(v);   // family-local pure formatter
     }
 
     // sync_targets: strict string type, then the comma-list rule above.
@@ -112,11 +111,11 @@ namespace
     }
 }
 
-// bar_color / bar_bg_color HA-attribute formatters (PRD #57 / issue #59, ADR-0020).
+// bar_color / bar_bg_color HA-attribute formatters.
 // External linkage (not file-local) so both the attribute-group table here and the
 // HTTP full-config dump in TimerSettingsApply.cpp render the stored 0xRRGGBB int the
-// same way (#143) -- they cannot disagree about the string form. bar_color's off
-// sentinel (0) is "default" (follow text color, ADR-0004); bar_bg_color's off is
+// same way -- they cannot disagree about the string form. bar_color's off
+// sentinel (0) is "default" (follow text color); bar_bg_color's off is
 // "none" (black = no track, literal off); any other value is uppercase "#RRGGBB".
 void timerFormatBarColor(const TimerSettingDesc &d, JsonDocument &doc)
 {
@@ -236,7 +235,7 @@ bool timerSettingStore(const TimerSettingDesc &d, const TcValue &v)
 }
 
 // timerSettingsLoadNvs / timerSettingsSaveNvs (Preferences round-trip) moved to the
-// impure TimerSettingsApply.cpp (#143): they touch Preferences, which this pure TU
+// impure TimerSettingsApply.cpp: they touch Preferences, which this pure TU
 // deliberately does not link.
 
 void timerSettingsLoadDevJson(JsonObjectConst obj)
@@ -306,7 +305,7 @@ const TimerSettingDesc *timerSettingByCmdKey(const char *cmdKey)
     return nullptr;
 }
 
-// Inline RTTTL classifier/validator (issue #102). Pure, no globals touched.
+// Inline RTTTL classifier/validator. Pure, no globals touched.
 namespace
 {
     // RTTTL tunes for a single timer alarm/tick are short; cap so a pathological
@@ -363,7 +362,7 @@ bool timerMelodyValidateInline(const String &s)
     return true;
 }
 
-// Relocated out of TimerManager (#142). Self-contained: inlines the
+// Relocated out of TimerManager. Self-contained: inlines the
 // h*3600+m*60+sec sum (timerHmsToSeconds below) rather than delegating, so the
 // parse stays one readable pass -- behaviour-identical to the former static.
 bool timerParseHMS(const String &in, uint32_t &outSeconds)
@@ -406,7 +405,7 @@ bool timerParseHMS(const String &in, uint32_t &outSeconds)
     return true;
 }
 
-// Relocated out of TimerManager (#142). Pure case-insensitive
+// Relocated out of TimerManager. Pure case-insensitive
 // membership check over the three action verbs -- behaviour-identical.
 bool timerIsValidAction(const String &s)
 {
@@ -414,9 +413,9 @@ bool timerIsValidAction(const String &s)
     return a == "start" || a == "pause" || a == "reset";
 }
 
-// Relocated out of TimerManager's statics (#143) so the command validator links the
+// Relocated out of TimerManager's statics so the command validator links the
 // table family, not the singleton. Behaviour-identical to the former statics, all
-// of which are gone (#204/#205 deleted the forwarders).
+// of which are gone (the thin forwarders were deleted).
 
 bool timerIsValidIconName(const String &name)
 {
@@ -478,7 +477,7 @@ String timerFormatHMS(uint32_t seconds)
     return timerClock(seconds, ClockStyle::Trimmed);
 }
 
-// Relocated out of TimerManager (#206), the singleton's last pure statics
+// Relocated out of TimerManager, the singleton's last pure statics
 // (secondsToHMS / hmsToSeconds) -- byte-identical.
 void timerSecondsToHMS(uint32_t sec, uint32_t &h, uint32_t &m, uint32_t &s)
 {
@@ -493,15 +492,15 @@ uint32_t timerHmsToSeconds(uint32_t h, uint32_t m, uint32_t s)
 }
 
 // ---------------------------------------------------------------------------
-// HA attribute-group projection (PRD #57 / issues #58, #59). The buzzer + finished
-// HASelects were lit up first (#58); #59 extended the JSON-attributes opt-in to
+// HA attribute-group projection. The buzzer + finished
+// HASelects were lit up first; the JSON-attributes opt-in then extended to
 // HASensor, lighting up the remaining + state sensors. realert_interval is listed
 // first on the finished carrier so the folded payload is a superset of the legacy
 // bespoke {"realert_interval":N}. remaining_publish_interval rides BOTH the
 // remaining sensor (its own cadence) and the state sensor (a complete config view)
 // -- one settings row, two carrier rows. bar_color carries the per-row formatter
 // so it renders as "default"/"#RRGGBB" rather than its raw-int snapshot form.
-// max_duration (PRD #66 / issue #68) is the first MULTI-CARRIER key whose
+// max_duration is the first MULTI-CARRIER key whose
 // representation differs PER CARRIER: it rides the Duration text entity in
 // carrier-native clock form (formatMaxDurationHMS -> "24:00:00") AND the state
 // sensor in raw seconds (no formatter -> 86400) -- one settings row, two carrier
@@ -542,7 +541,7 @@ void timerBuildAttributeGroup(TimerHaEntity carrier, JsonDocument &doc)
 }
 
 // ===========================================================================
-// Member-backed config half (B1) -- PURE validation projection (#143).
+// Member-backed config half (B1) -- PURE validation projection.
 // The validate predicates + the parallel {cmdKey, validate} table
 // (TIMER_MEMBER_VALIDATORS) that TimerCommand::classify uses live HERE, with no
 // singleton/MQTT dependency. The impure half -- the apply/emit/publish hooks, the

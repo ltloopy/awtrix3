@@ -1,10 +1,10 @@
 #include "TimerConfigEditor.h"
 
 #include "Globals.h"        // TIMER_MAX_DURATION (cap math)
-#include "TimerSettings.h"  // timerSecondsToHMS / timerHmsToSeconds (pure math free functions, #206)
+#include "TimerSettings.h"  // timerSecondsToHMS / timerHmsToSeconds (pure math free functions)
 
 namespace {
-    // Hold-to-repeat timing (was TimerManager.cpp's anon namespace before issue #23).
+    // Hold-to-repeat timing (was TimerManager.cpp's anon namespace).
     constexpr unsigned long kBtnLongPressMs = 500;   // hold this long before auto-repeat begins
     constexpr unsigned long kBtnRepeatMs    = 250;   // cadence between auto-repeat steps
 }
@@ -69,7 +69,7 @@ void TimerConfigEditor::tick(unsigned long nowMs, ButtonState buttons)
 
     // Hold-to-repeat: derive held time from nowMs vs a per-button press-start.
     // While held past the long-press threshold, step once immediately, then once
-    // per repeat-cadence window. The editor never auto-applies on idle (#88).
+    // per repeat-cadence window. The editor never auto-applies on idle.
     repeatHeld(buttons.leftPressed,  nowMs, leftPressStartMs_,  leftRepeatMs_,  -1);
     repeatHeld(buttons.rightPressed, nowMs, rightPressStartMs_, rightRepeatMs_, +1);
 }

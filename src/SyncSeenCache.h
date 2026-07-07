@@ -3,23 +3,23 @@
 
 #include <Arduino.h>
 
-// Timer-sync dedup set (PRD #28, extracted from TimerManager per ADR-0022 as a
-// deliberate sibling of PeerRegistry/ADR-0021).
+// Timer-sync dedup set (extracted from TimerManager as a deliberate
+// sibling of PeerRegistry).
 //
 // The set of *recently-applied sync commands*, keyed by (src, seq): the backing
 // store for "apply each of the 3x redundant sends exactly once". Pure RAM,
 // bounded, entries age out after the TTL — the same shape as PeerRegistry, but
-// deliberately NOT merged under a shared generic (the reasoning is recorded in
-// ADR-0022). It is simpler than PeerRegistry: there is no own-id (own echoes are
+// deliberately NOT merged under a shared generic (two 40-line classes are
+// cheaper than one generic). It is simpler than PeerRegistry: there is no own-id (own echoes are
 // dropped earlier in applySyncCommand), no sorted export, and no separate
 // consumer query — the one call site test-and-records in a single atomic op.
 //
 // This module is the *set* only — check + record + age. It deliberately knows
 // nothing about the UDP transport or the parseCommand re-entry; that I/O stays on
-// TimerManager (the cut-line mirrors ADR-0021: the algorithm leaves, the
+// TimerManager (the cut-line mirrors PeerRegistry's: the algorithm leaves, the
 // transport stays). The method takes an injected `nowMs`, so there is no global
-// read — the whole contract is host-testable in isolation, without standing up
-// the TimerManager singleton. See CONTEXT.md "Propagation surface".
+// read — the whole contract is testable in isolation, without standing up
+// the TimerManager singleton.
 class SyncSeenCache
 {
 public:

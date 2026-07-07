@@ -8,30 +8,30 @@
 #include "TimerHa.h"         // TimerHaEntity (the attr-carrier dirty set)
 
 // The Timer command plan -- the PURE atomic-reject validation decision lifted out of
-// the 244-line TimerManager::parseCommand (PRD #28, ADR-0001), mirroring the
-// SyncEnvelope sibling (ADR-0023). classify() runs the entire validation pass once,
+// the 244-line TimerManager::parseCommand, mirroring the
+// SyncEnvelope sibling. classify() runs the entire validation pass once,
 // mutating NOTHING, and returns a Plan that carries everything the impure shell needs
 // to apply the command without re-reading the packet.
 //
 // classify reads NO globals: its only non-packet input is a Context filled by the
 // shell from the globals it owns (the saved max_duration ceiling + the _remoteApply
 // flag). That discipline -- mirroring SyncEnvelope's {ownId, follow} -- is what lets
-// it link against the dependency-light descriptor-table family alone ([env:native_validate],
-// no singleton / no stubs) and be host-tested by constructing any ceiling / remote
-// scenario as a plain Context value.
+// it link against the dependency-light descriptor-table family alone (no
+// singleton), so any ceiling / remote scenario can be exercised as a plain
+// Context value.
 //
-// The one-shot override STORE stays in TimerManager (ADR-0024); classify computes only
+// The one-shot override STORE stays in TimerManager; classify computes only
 // the oneShot DECISION. apply ordering matters: the shell must write the table rows
 // (landing a raised max_duration) BEFORE calling setDuration(), which re-clamps against
-// the GLOBAL ceiling (ADR-0001 addendum) -- classify validates a duration against the
+// the GLOBAL ceiling -- classify validates a duration against the
 // staged ceiling, so a too-early setDuration would silently re-clamp it.
 namespace TimerCommand
 {
     // The only non-packet input classify reads -- filled by the shell from the globals
     // it owns. savedMaxDuration is the current ceiling (TIMER_MAX_DURATION); a command
     // that also raises max_duration re-bases the ceiling for its own duration check.
-    // remoteApply forces the command one-shot (a follower mirrors but never persists,
-    // ADR-0018).
+    // remoteApply forces the command one-shot (a follower mirrors but never
+    // persists).
     struct Context
     {
         uint32_t savedMaxDuration;
@@ -64,7 +64,7 @@ namespace TimerCommand
         bool     haveDuration = false;
         uint32_t durationSec  = 0;
 
-        // Inline RTTTL melodies (issue #102): validated tunes staged as RAM strings; the
+        // Inline RTTTL melodies: validated tunes staged as RAM strings; the
         // shell assigns them to endRtttl/tickRtttl after the bare-name resolve. Always
         // one-shot (no persistable file form), so either forces oneShot.
         bool   haveInlineEnd  = false;

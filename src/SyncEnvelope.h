@@ -4,9 +4,8 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
-// Timer-sync wire envelope + inbound receive gate (PRD #28, extracted from
-// TimerManager per ADR-0023 — the third cut in the #131 trajectory, after
-// PeerRegistry/ADR-0021 and SyncSeenCache/ADR-0022).
+// Timer-sync wire envelope + inbound receive gate (extracted from
+// TimerManager — the third such cut, after PeerRegistry and SyncSeenCache).
 //
 // Two halves, both stateless (free functions in a namespace — there is no set to
 // own, unlike the two class siblings):
@@ -18,7 +17,7 @@
 //     inline gate in applySyncCommand exactly. The DEDUP step deliberately stays
 //     OUT of classify: SyncSeenCache::seen() is test-and-record (stateful), so it
 //     cannot live in a pure function — TimerManager runs it as the single stateful
-//     guard before re-entry (see ADR-0023).
+//     guard before re-entry.
 //
 //   * build() — the send-side envelope constructor. The bare overload writes
 //     {src,seq} (the presence beacon); the targeted overload also parses the
@@ -27,7 +26,7 @@
 //
 // classify's context is {ownId, follow} ONLY — never this clock's own target
 // list. A follower obeys on the SENDER's tgt + its OWN follow consent (the
-// two-axis Sync-roles invariant in CONTEXT.md); the receiver's own send-target
+// two-axis sync-roles invariant); the receiver's own send-target
 // list has no role here. That list belongs to build() (the send axis).
 //
 // NOTE the wire-gate targetsMe() here is a DIFFERENT concept from TimerHa's

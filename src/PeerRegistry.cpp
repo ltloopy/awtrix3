@@ -1,8 +1,8 @@
 #include "PeerRegistry.h"
 
 // A bounded set of {uniqueID, lastSeen} learned from inbound presence beacons;
-// the backend the dynamic HA Targets select (#112) consumes. Own id is never
-// stored; entries age out past kPeerTtlMs. See ADR-0019 / ADR-0021.
+// the backend the dynamic HA Targets select consumes. Own id is never
+// stored; entries age out past kPeerTtlMs.
 
 void PeerRegistry::record(const String &src, unsigned long nowMs)
 {

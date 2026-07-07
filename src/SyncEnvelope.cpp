@@ -1,7 +1,7 @@
 #include "SyncEnvelope.h"
 
-// The Timer-sync wire envelope + pure inbound receive gate. See SyncEnvelope.h and
-// CONTEXT.md "Propagation surface". Extracted from TimerManager per ADR-0023.
+// The Timer-sync wire envelope + pure inbound receive gate. See SyncEnvelope.h.
+// Extracted from TimerManager.
 
 namespace SyncEnvelope
 {
@@ -36,7 +36,7 @@ namespace SyncEnvelope
         if (src.length() == 0 || src == ctx.ownId)
             return {Decision::Ignore, String(), 0};                  // malformed / own echo
 
-        // Presence beacon (#111 / ADR-0019): harvest the sender's uniqueID UNGATED —
+        // Presence beacon: harvest the sender's uniqueID UNGATED —
         // presence is informational, not a command, so it bypasses the follow/target
         // gate. It carries no action/duration/config; short-circuit here.
         if (packet["presence"].as<bool>())

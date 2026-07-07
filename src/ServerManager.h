@@ -17,7 +17,7 @@ public:
     void erase();
     void sendTCP(String message);
     // Broadcast a timer-sync packet on the LAN (propagation surface). Sent 3x for
-    // best-effort delivery; receivers dedup by (src,seq). See docs/adr/0006.
+    // best-effort delivery; receivers dedup by (src,seq).
     void sendTimerSync(const String &payload);
     bool isConnected;
     IPAddress myIP;

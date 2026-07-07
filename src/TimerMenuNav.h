@@ -3,13 +3,13 @@
 
 #include <Arduino.h>
 
-// Display-free navigation state machine for the TIMER global menu (PRD #83 /
-// issue #85). It owns the whole interaction model behind a small interface:
+// Display-free navigation state machine for the TIMER global menu.
+// It owns the whole interaction model behind a small interface:
 // list/leaf focus, the selected index, and the entry origin. Button inputs map
 // to OUTCOMES that the device layer (MenuManager) acts on; the device keeps only
 // drawing (the list indicator / the leaf value) and the single commit. Because
-// it depends on nothing but Arduino.h, the interaction model is host-testable
-// under test_timer without a device. See CONTEXT.md and docs/adr/0016.
+// it depends on nothing but Arduino.h, the interaction model is testable
+// without a device.
 //
 // The list is the TIMER menu's slot rows. Value rows (enum / number / bool) drill
 // into a leaf editor; the lone navigation row (MAIN) returns to the main menu.
@@ -22,7 +22,7 @@ enum class TimerNavOrigin : uint8_t { Menu, App };
 // The kind of leaf a value row drills into. Most rows are a plain Value leaf
 // (cycle/step/toggle). DURATION is a field editor (HH/MM/SS wheel) when the timer
 // is Idle, and read-only otherwise -- the device maps slot+timer-state to this via
-// timerMenuLeafKind() (host-tested), so the gating decision lives in testable code.
+// timerMenuLeafKind(), so the gating decision lives in display-free code.
 enum class TimerNavLeaf : uint8_t { Value, DurationEditable, DurationReadOnly };
 
 // Outcomes the device layer acts on. Anything not listed (plain list movement) is

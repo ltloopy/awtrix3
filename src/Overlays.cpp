@@ -24,11 +24,11 @@ void StatusOverlay(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, GifPl
 
 void MenuOverlay(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, GifPlayer *gifPlayer)
 {
-    // Marquee state for over-wide menu labels (PRD #96). The position resets to the
+    // Marquee state for over-wide menu labels. The position resets to the
     // left whenever the displayed string changes (navigating to another item, or a
     // leaf value ticking under the cursor) and on menu (re)entry, so the readable
     // hold always plays from the start and a label is never caught mid-scroll.
-    // This is frame-stateful device drawing, kept inline per PRD #83's boundary.
+    // This is frame-stateful device drawing, deliberately kept inline here.
     static String lastText;
     static float scrollPos = 0;    // x of the label's left edge while scrolling
     static int scrollDelay = 0;    // pre-roll hold counter (frames), as notifications

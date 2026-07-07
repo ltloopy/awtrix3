@@ -89,12 +89,12 @@ uint8_t appsCount = 5;
 #endif
 
 uint8_t timerConfigCount = TIMER_MENU_SLOT_COUNT;
-// The TIMER menu's drill-in navigation state machine (PRD #83 / issue #85). MAIN
+// The TIMER menu's drill-in navigation state machine. MAIN
 // is the last slot (a Navigation row); the device keeps only drawing + the commit.
 TimerMenuNav timerNav(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1);
 
-// The DURATION leaf reuses the existing display-free duration edit engine (#86),
-// a menu-owned instance. The editor has no auto-apply timeout (#88); the menu only
+// The DURATION leaf reuses the existing display-free duration edit engine,
+// a menu-owned instance. The editor has no auto-apply timeout; the menu only
 // drives its hold-to-repeat, and the edited duration commits via setDuration on
 // leaf back-out (run-state, not the list -> main config batch).
 TimerConfigEditor timerDurationEditor;
@@ -108,10 +108,9 @@ static bool timerNavOnDuration()
 // The one-shot TIMER-menu commit: a single PersistBatch window (enum edits
 // deferred during scroll in "timer" ns + table-row knob/toggle keys in "awtrix"
 // ns), then the HA attribute republish. Fires once on the list -> main-menu
-// transition (long-press out of the list, or selecting MAIN). A config edit no
-// longer propagates to peers (run-scoped config mirror, ADR-0018 superseding
-// ADR-0006): config travels only bundled with a `start`. See ADR-0008/0015 and
-// PRD #29/#45/#60.
+// transition (long-press out of the list, or selecting MAIN). A config edit
+// never propagates to peers on its own (run-scoped config mirror): config
+// travels only bundled with a `start`.
 static void commitTimerMenu()
 {
     {
@@ -259,21 +258,21 @@ String MenuManager_::menutext()
         }
     case TimerConfigMenu:
         // List focus: walk the named items (indicator over the list). Leaf focus:
-        // show the bare value only, no indicator (PRD #83).
+        // show the bare value only, no indicator.
         if (timerNav.focus() == TimerNavFocus::List)
         {
             DisplayManager.drawMenuIndicator(timerNav.index(), timerConfigCount, 0xFBC000);
             return timerMenuName(timerNav.index());
         }
         // DURATION leaf: HH:MM:SS wheel with the active-field underline when
-        // editable; the static value (no underline) when read-only (#86).
+        // editable; the static value (no underline) when read-only.
         if (timerNavOnDuration())
         {
             if (timerDurationEditor.isActive())
             {
                 // Drive the editor's hold-to-repeat from the raw button reads each
                 // frame. The menu is timeout-free and the editor no longer has an
-                // auto-apply timeout (#88), so there is nothing else to handle.
+                // auto-apply timeout, so there is nothing else to handle.
                 EasyButton *bL = PeripheryManager.buttonL;
                 EasyButton *bR = PeripheryManager.buttonR;
                 TimerConfigEditor::ButtonState buttons{bL && bL->isPressed(),
@@ -612,12 +611,12 @@ void MenuManager_::selectButtonLong()
             // commits the edited duration (run-state, separate from the config
             // batch) then returns to the list. Out of the list it is the single
             // commit seam: main menu (origin = menu) or back to the Timer app
-            // (origin = app, #87).
+            // (origin = app).
             TimerNavOutcome o = timerNav.back();
             if (o == TimerNavOutcome::CommitDuration)
             {
                 // The normal set-duration commit path. A bare duration edit
-                // propagates NOTHING (#126): duration rides only with a start, so an
+                // propagates NOTHING: duration rides only with a start, so an
                 // on-device length edit no longer moves a follower's displayed time.
                 TimerManager.setDuration(timerDurationEditor.exit());
                 return;                 // stay in the TIMER menu, list focus
@@ -648,7 +647,7 @@ void MenuManager_::selectButtonLong()
 void MenuManager_::openTimerMenuFromApp()
 {
     // Open the TIMER menu directly at the top of the list, origin = App so a
-    // long-press out of the list returns to the Timer app (issue #87).
+    // long-press out of the list returns to the Timer app.
     inMenu = true;
     currentState = TimerConfigMenu;
     timerNav.enter(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1, TimerNavOrigin::App);

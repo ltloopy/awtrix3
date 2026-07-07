@@ -3,7 +3,7 @@
 // A bounded (src,seq,atMs) ring learned from inbound sync commands; the backend
 // for "apply each of the 3x redundant sends exactly once". Entries age out past
 // kTtlMs (so a sender reboot — seq restart — self-clears), and the existing entry
-// is NOT refreshed on a hit (first-seen ages out; the dedup semantic). See ADR-0022.
+// is NOT refreshed on a hit (first-seen ages out; the dedup semantic).
 
 bool SyncSeenCache::seen(const String &src, uint32_t seq, unsigned long nowMs)
 {

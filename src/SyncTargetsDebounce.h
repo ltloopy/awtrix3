@@ -3,9 +3,9 @@
 
 #include <Arduino.h>
 
-// The Targets-select republish debounce decision (issue #199 / PRD #192), carved out
-// of TimerHaHost::refreshTargets as a stateful host-testable module — the
-// SyncSeenCache/ADR-0022 sibling shape: injected `nowMs`, no globals, no clock, no
+// The Targets-select republish debounce decision, carved out
+// of TimerHaHost::refreshTargets as a stateful, isolated module — the
+// SyncSeenCache sibling shape: injected `nowMs`, no globals, no clock, no
 // ArduinoHA. A peer-membership change must hold for the settle window before the
 // Targets select's options are republished, so a burst of beacon churn yields one
 // republish; this class is that decision ONLY. The effects (rebuild options, publish
@@ -13,8 +13,8 @@
 // connected) stay in TimerHaHost, BEFORE step() — so window state ages across
 // MQTT-down gaps and an expired window republishes on the first connected tick.
 //
-// Transition table (byte-for-byte the TimerHaHost debounce it was carved from; the
-// test list in test/test_synctargets mirrors it row for row). State: sig (last
+// Transition table (byte-for-byte the TimerHaHost debounce it was carved
+// from). State: sig (last
 // adopted options signature), dirty (settle window open), sinceMs (window start).
 // Input per step: cur (current options), now.
 //
@@ -34,8 +34,7 @@
 //  - seed() adopts and closes the window (no spurious first republish).
 //  - (now - sinceMs) is unsigned wrap arithmetic, safe across millis() rollover.
 //
-// Consumed by TimerHaHost: refreshTargets() steps it, createCarriers() seeds it
-// (issue #200, ADR-0027).
+// Consumed by TimerHaHost: refreshTargets() steps it, createCarriers() seeds it.
 class SyncTargetsDebounce
 {
 public:

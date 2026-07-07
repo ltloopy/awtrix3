@@ -124,11 +124,11 @@ void loop()
   ServerManager.tick();
   DisplayManager.tick();
   TimerManager.tick();
-  TimerManager.tickPresence(millis());   // peer presence beacon + registry aging (#111)
+  TimerManager.tickPresence(millis());   // peer presence beacon + registry aging
   PeripheryManager.tick();
   if (ServerManager.isConnected)
   {
     MQTTManager.tick();
-    TimerHaHost.refreshTargets(millis());   // dynamic HA Targets select republish (#112)
+    TimerHaHost.refreshTargets(millis());   // dynamic HA Targets select republish
   }
 }

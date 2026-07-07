@@ -19,7 +19,7 @@
 #include <MeanFilterLib.h>
 #include <Games/GameManager.h>
 #include "TimerManager.h"
-#include "TimerCommand.h"        // TimerCommand::Action for the runStateAction seam (#222)
+#include "TimerCommand.h"        // TimerCommand::Action for the runStateAction seam
 const int buzzerPin = 2;       // Buzzer an GPIO2
 const int baudRate = 50;       // Nachrichtenübertragungsrate
 const char *message = "HELLO"; // Die Nachricht, die gesendet werden soll
@@ -235,7 +235,7 @@ void select_button_pressed_long()
             if (CURRENT_APP == "Timer" && ts == TimerState::Idle)
             {
                 // Open the TIMER menu (origin = App) instead of the bare duration
-                // wheel; the wheel is now reachable only as the DURATION leaf (#87).
+                // wheel; the wheel is now reachable only as the DURATION leaf.
                 MenuManager.openTimerMenuFromApp();
                 return;
             }

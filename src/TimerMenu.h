@@ -11,10 +11,9 @@
 // TIMER_SETTINGS_DESCS and TIMER_HA_DESCRIPTORS). One row per list item; the
 // TimerMenuNav state machine walks it and MenuManager keeps only the drawing +
 // commit. This header is display-free (no DisplayManager) so the name/value/adjust
-// logic is host-testable. See CONTEXT.md ("TIMER menu slot table"), docs/adr/0008
-// and docs/adr/0016 (drill-in navigation).
+// logic is testable in isolation.
 //
-// Two slot families, mirroring the B1 boundary (ADR-0007):
+// Two slot families, mirroring the B1 boundary:
 //   * table-backed slots (SteppedRange / BoolToggle) reuse their TIMER_SETTINGS_DESCS
 //     row by cmdKey for storage + range -- they cannot drift from the settings table.
 //   * the two enum slots (buzzer / finished) are member-backed: they carry bespoke
@@ -24,7 +23,7 @@
 // Slot kinds. The value kinds (EnumCycle / SteppedRange / BoolToggle) drill into a
 // leaf editor; Duration drills into the HH:MM:SS wheel (delegating to the existing
 // TimerConfigEditor edit engine, no settings-storage row); Navigation is the lone
-// non-value row (MAIN) that walks the device back to the main menu (PRD #83).
+// non-value row (MAIN) that walks the device back to the main menu.
 enum class TimerMenuKind : uint8_t { Duration, EnumCycle, SteppedRange, BoolToggle, Navigation };
 
 struct TimerMenuSlot
@@ -55,9 +54,9 @@ String timerMenuValue(uint8_t slot);
 
 // How the leaf for `slot` behaves, given the timer's current state `st`. The
 // Duration row is an editable HH:MM:SS wheel only when the timer is Idle; while
-// Running/Paused it is read-only (PRD #83 user story 27). Every other row is a
+// Running/Paused it is read-only. Every other row is a
 // plain Value leaf. The device hands the result to TimerMenuNav, so the Idle-only
-// gating decision is host-testable.
+// gating decision lives in display-free code.
 TimerNavLeaf timerMenuLeafKind(uint8_t slot, TimerState st);
 
 // Adjust the slot by one step in the given direction (dir > 0 = right/increment,

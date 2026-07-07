@@ -3,7 +3,7 @@
 
 #include <Arduino.h>
 
-// Peer presence / peer registry (#111 / ADR-0019, extracted per ADR-0021).
+// Peer presence / peer registry (extracted).
 //
 // The set of *other clocks currently on the LAN*, keyed by the stable uniqueID
 // (the targeting key; the mutable hostname is unsuitable). Pure RAM/LAN-derived
@@ -15,9 +15,8 @@
 // nothing about beacon cadence, the UDP transport, or AP mode; that scheduling +
 // I/O stays on TimerManager (one place owns "when do I announce myself"). The
 // methods take an injected `nowMs` and the own-id is injected via setOwnId(), so
-// there is no global read — the whole contract is host-testable in isolation,
-// without standing up the TimerManager singleton. See CONTEXT.md
-// "Peer presence / peer registry".
+// there is no global read — the whole contract is testable in isolation,
+// without standing up the TimerManager singleton.
 class PeerRegistry
 {
 public:
