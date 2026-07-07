@@ -34,6 +34,13 @@ static constexpr size_t kTimerStateCount = 4;
 
 struct TimerMemberConfig
 {
+    // The explicit constructor keeps the two-value brace-init valid in C++11
+    // (a class with default member initializers is not a C++11 aggregate — the
+    // ButtonState pattern of ADR-0013, for the gnu++11 upstream contribution build).
+    TimerMemberConfig() = default;
+    TimerMemberConfig(BuzzerMode buzzer_, FinishedMode finished_)
+        : buzzer(buzzer_), finished(finished_) {}
+
     BuzzerMode   buzzer   = BuzzerMode::End;
     FinishedMode finished = FinishedMode::AutoClear;
     String       iconByState[kTimerStateCount];   // indexed by TimerState

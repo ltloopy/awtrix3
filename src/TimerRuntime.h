@@ -46,7 +46,14 @@ namespace TimerRuntime
     // trivially copyable and gnu++11-friendly for the device build.
     struct Effect
     {
-        EffectKind kind;
+        // The (non-explicit) kind constructor keeps the engine's one-value
+        // push_back({EffectKind::X}) brace-inits valid in C++11 (a class with
+        // default member initializers is not a C++11 aggregate — the ButtonState
+        // pattern of ADR-0013, for the gnu++11 upstream contribution build).
+        Effect() = default;
+        Effect(EffectKind kind_) : kind(kind_) {}
+
+        EffectKind kind       = EffectKind::PublishState;
         Tone       tone       = Tone::End;   // valid iff kind == PlayTone
         uint8_t    brightness = 0;           // valid iff kind == SetBrightness
     };
@@ -106,8 +113,18 @@ namespace TimerRuntime
 
     struct State
     {
-        TimerState    phase;
-        uint32_t      remainingSec;          // the previous remaining (before this tick)
+        // The explicit constructor keeps the adapter's five-value brace-init valid in
+        // C++11 (a class with default member initializers is not a C++11 aggregate —
+        // the ButtonState pattern of ADR-0013, applied here for the gnu++11 upstream
+        // contribution build).
+        State() = default;
+        State(TimerState phase_, uint32_t remainingSec_, unsigned long lastPublishMs_,
+              unsigned long enteredFinishedMs_, unsigned long lastRealertMs_)
+            : phase(phase_), remainingSec(remainingSec_), lastPublishMs(lastPublishMs_),
+              enteredFinishedMs(enteredFinishedMs_), lastRealertMs(lastRealertMs_) {}
+
+        TimerState    phase        = TimerState::Idle;
+        uint32_t      remainingSec = 0;      // the previous remaining (before this tick)
         unsigned long lastPublishMs     = 0; // Running publish throttle anchor
         unsigned long enteredFinishedMs = 0; // auto-clear hold anchor
         unsigned long lastRealertMs     = 0; // re-alert interval anchor
