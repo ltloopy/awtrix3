@@ -1,3 +1,4 @@
+#ifndef AWTRIX_DISABLE_TIMER
 #include "TimerSettings.h"
 
 #include <string.h>
@@ -176,3 +177,4 @@ void timerBuildFullConfig(JsonDocument &doc)
     // Member-backed half: buzzer/finished + the four icon_* live values.
     timerMemberConfigBuildSnapshot(doc);
 }
+#endif // AWTRIX_DISABLE_TIMER

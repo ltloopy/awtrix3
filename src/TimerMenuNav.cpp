@@ -1,3 +1,4 @@
+#ifndef AWTRIX_DISABLE_TIMER
 #include "TimerMenuNav.h"
 
 // Display-free TIMER-menu navigation state machine (PRD #83 / issues #85, #86).
@@ -98,3 +99,4 @@ TimerNavOutcome TimerMenuNav::back()
                ? TimerNavOutcome::ExitMenu
                : TimerNavOutcome::GoToMainMenu;
 }
+#endif // AWTRIX_DISABLE_TIMER

@@ -1,3 +1,4 @@
+#ifndef AWTRIX_DISABLE_TIMER
 #include "TimerRuntime.h"
 
 namespace TimerRuntime
@@ -179,3 +180,4 @@ namespace TimerRuntime
         return r;
     }
 }
+#endif // AWTRIX_DISABLE_TIMER

@@ -1,3 +1,4 @@
+#ifndef AWTRIX_DISABLE_TIMER
 #include "SyncSeenCache.h"
 
 // A bounded (src,seq,atMs) ring learned from inbound sync commands; the backend
@@ -35,3 +36,4 @@ void SyncSeenCache::clear()
     }
     _writeIdx = 0;
 }
+#endif // AWTRIX_DISABLE_TIMER
