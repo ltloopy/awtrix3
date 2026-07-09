@@ -1,3 +1,4 @@
+#ifndef AWTRIX_DISABLE_TIMER
 #include "TimerView.h"
 
 #include "TimerSettings.h"   // timerClock / ClockStyle
@@ -87,3 +88,4 @@ TimerView TimerViewModel::compute(const TimerSnapshot &s)
 
     return v;
 }
+#endif // AWTRIX_DISABLE_TIMER

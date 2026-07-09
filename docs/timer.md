@@ -164,3 +164,20 @@ boot ([reference](dev.md)). Per-state icons (`icon_idle` / `icon_running` /
 `icon_paused` / `icon_finished`) resolve against `/ICONS/<name>.{jpg,gif}`;
 the two melodies against `/MELODIES/<name>.txt`, with built-in default tunes
 when the files are absent.
+
+## Build-time opt-out
+
+The Timer feature is included by default. To build a firmware without it —
+reclaiming roughly 29 kB of flash and 3 kB of RAM on space-constrained
+devices — add `-DAWTRIX_DISABLE_TIMER` to `build_flags` in `platformio.ini`,
+or set `PLATFORMIO_BUILD_FLAGS=-DAWTRIX_DISABLE_TIMER` when invoking
+`pio run`. A disabled build has no Timer app, no `TIMER` on-device menu
+entry, no `/api/timer` HTTP endpoint, no `{prefix}/timer` MQTT topic, no
+Home Assistant timer entities, and no multi-device sync. The runtime
+`SHOW_TIMER` setting is only meaningful in default builds.
+
+Note when switching an already-provisioned device from a timer-enabled build
+to a disabled one: the disabled firmware also lacks the HA discovery cleanup
+code, so timer entities registered by the previous build linger as
+"unavailable" in Home Assistant until you remove them there (or clear the
+retained `homeassistant/…` discovery topics on the broker).

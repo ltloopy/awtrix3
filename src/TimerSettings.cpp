@@ -1,3 +1,4 @@
+#ifndef AWTRIX_DISABLE_TIMER
 #include "TimerSettings.h"
 
 #include <stdlib.h>
@@ -588,3 +589,4 @@ const size_t TIMER_MEMBER_VALIDATOR_COUNT =
 
 static_assert(sizeof(TIMER_MEMBER_VALIDATORS) / sizeof(TIMER_MEMBER_VALIDATORS[0]) == TIMER_MEMBER_CONFIG_DESC_CAP,
               "TIMER_MEMBER_CONFIG_DESC_CAP must equal the member-config row count");
+#endif // AWTRIX_DISABLE_TIMER

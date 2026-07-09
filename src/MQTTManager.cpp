@@ -9,9 +9,11 @@
 #include "PeripheryManager.h"
 #include "UpdateManager.h"
 #include "PowerManager.h"
+#ifndef AWTRIX_DISABLE_TIMER
 #include "TimerManager.h"
 #include "TimerHa.h"
 #include "TimerHaHost.h"
+#endif
 
 const uint16_t PORT = 1883;
 
@@ -104,6 +106,7 @@ void processMqttMessage(const String &strTopic, const String &payloadCopy)
         return;
     }
 
+    #ifndef AWTRIX_DISABLE_TIMER
     {
         size_t plen = MQTT_PREFIX.length();
         const char *t = strTopic.c_str();
@@ -115,6 +118,7 @@ void processMqttMessage(const String &strTopic, const String &payloadCopy)
             return;
         }
     }
+    #endif
 
     if (strTopic.equals(MQTT_PREFIX + "/sendscreen"))
     {
@@ -254,7 +258,9 @@ void processMqttMessage(const String &strTopic, const String &payloadCopy)
 
 void onButtonCommand(HAButton *sender)
 {
+    #ifndef AWTRIX_DISABLE_TIMER
     if (TimerHaHost.tryHandleButton(sender)) return;   // Timer carrier: routed by the host
+    #endif
     if (sender == dismiss)
     {
         DisplayManager.dismissNotify();
@@ -278,7 +284,9 @@ void onButtonCommand(HAButton *sender)
 
 void onSwitchCommand(bool state, HASwitch *sender)
 {
+    #ifndef AWTRIX_DISABLE_TIMER
     if (TimerHaHost.tryHandleSwitch(state, sender)) return;   // Timer carrier: routed by the host
+    #endif
     AUTO_TRANSITION = state;
     DisplayManager.setAutoTransition(state);
     saveSettings();
@@ -287,7 +295,9 @@ void onSwitchCommand(bool state, HASwitch *sender)
 
 void onSelectCommand(int8_t index, HASelect *sender)
 {
+    #ifndef AWTRIX_DISABLE_TIMER
     if (TimerHaHost.tryHandleSelect(sender, index)) return;   // Timer carrier: routed by the host
+    #endif
     if (sender == BriMode)
     {
         switch (index)
@@ -416,6 +426,7 @@ void onMqttConnected()
     if (DEBUG_MODE)
         DEBUG_PRINTLN(F("MQTT Connected"));
 
+    #ifndef AWTRIX_DISABLE_TIMER
     // Command topics must never carry a retained payload. A retained
     // {prefix}/timer command (e.g. {"action":"start"}) is re-delivered by the
     // broker on every (re)connect and would auto-start the timer on boot, which
@@ -423,6 +434,7 @@ void onMqttConnected()
     // PubSubClient doesn't surface the retain flag to the receive callback, so we
     // purge the retained command at the source: clear it before subscribing.
     mqtt.publish((MQTT_PREFIX + "/timer").c_str(), "", true);
+    #endif
 
     const char *topics[] PROGMEM = {
         "/brightness",
@@ -449,7 +461,10 @@ void onMqttConnected()
         "/rtttl",
         "/sendscreen",
         "/r2d2",
-        "/timer"};
+    #ifndef AWTRIX_DISABLE_TIMER
+        "/timer",
+    #endif
+    };
     for (const char *topic : topics)
     {
         if (DEBUG_MODE)
@@ -471,9 +486,11 @@ void onMqttConnected()
         myOwnID->setValue(MQTT_PREFIX.c_str());
         version->setValue(VERSION);
 
+        #ifndef AWTRIX_DISABLE_TIMER
         // onConnected() also flushes the pending discovery cleanup reconcile() latched
         // when SHOW_TIMER went off across a reboot.
         TimerHaHost.onConnected();   // Timer wire + attribute groups when SHOW_TIMER
+        #endif
     }
 
     MQTTManager.publish("stats/effects", DisplayManager.getEffectNames().c_str());
@@ -780,11 +797,13 @@ void MQTTManager_::setup()
         ipAddr->setName(HAipAddrName);
         ipAddr->setIcon(HAipAddrIcon);
 
+        #ifndef AWTRIX_DISABLE_TIMER
         // Resolve the Timer carrier ids and (when SHOW_TIMER) construct/register the
         // carriers — at the same sequence point as before (after the device's own
         // entities register), so the ArduinoHA registration/entity-cap drop order is
         // unchanged. The carrier lifecycle now lives in TimerHaHost.
         TimerHaHost.setup();
+        #endif
     }
     else
     {
@@ -809,6 +828,7 @@ void MQTTManager_::tick()
     }
 }
 
+#ifndef AWTRIX_DISABLE_TIMER
 // The Timer wire seam: publishes the exact (topic, payload) the
 // caller hands over — retained, like the HASensor::setValue path it replaces.
 // Gated on the Timer HA carriers existing (TimerHaHost.carriersReady() mirrors the
@@ -855,6 +875,7 @@ String MQTTManager_::timerIconsTopic()
 {
     return MQTT_PREFIX + "/timer/icons";
 }
+#endif // AWTRIX_DISABLE_TIMER
 
 void MQTTManager_::publish(const char *topic, const char *payload)
 {

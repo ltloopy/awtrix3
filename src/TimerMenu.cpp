@@ -1,3 +1,4 @@
+#ifndef AWTRIX_DISABLE_TIMER
 #include "TimerMenu.h"
 
 #include "TimerManager.h"
@@ -123,3 +124,4 @@ TimerNavLeaf timerMenuLeafKind(uint8_t slot, TimerState st)
                ? TimerNavLeaf::DurationEditable
                : TimerNavLeaf::DurationReadOnly;
 }
+#endif // AWTRIX_DISABLE_TIMER

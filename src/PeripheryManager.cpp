@@ -18,8 +18,10 @@
 #include <MedianFilterLib.h>
 #include <MeanFilterLib.h>
 #include <Games/GameManager.h>
+#ifndef AWTRIX_DISABLE_TIMER
 #include "TimerManager.h"
 #include "TimerCommand.h"        // TimerCommand::Action for the runStateAction seam
+#endif
 const int buzzerPin = 2;       // Buzzer an GPIO2
 const int baudRate = 50;       // Nachrichtenübertragungsrate
 const char *message = "HELLO"; // Die Nachricht, die gesendet werden soll
@@ -176,6 +178,7 @@ void select_button_pressed()
         if (DFPLAYER_ACTIVE)
             PeripheryManager.playFromFile(DFMINI_MP3_CLICK);
 
+#ifndef AWTRIX_DISABLE_TIMER
         if (!MenuManager.inMenu)
         {
             TimerState ts = TimerManager.getState();
@@ -191,6 +194,7 @@ void select_button_pressed()
                 return;
             }
         }
+#endif
 
         DisplayManager.selectButton();
         MenuManager.selectButton();
@@ -224,6 +228,7 @@ void select_button_pressed_long()
     }
     else if (!BLOCK_NAVIGATION)
     {
+#ifndef AWTRIX_DISABLE_TIMER
         if (!MenuManager.inMenu)
         {
             TimerState ts = TimerManager.getState();
@@ -245,6 +250,7 @@ void select_button_pressed_long()
                 return;
             }
         }
+#endif
         MenuManager.selectButtonLong();
         DisplayManager.selectButtonLong();
         if (DEBUG_MODE)

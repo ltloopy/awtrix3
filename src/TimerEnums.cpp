@@ -1,3 +1,4 @@
+#ifndef AWTRIX_DISABLE_TIMER
 #include "TimerEnums.h"
 
 // One row per enum value, in enum-value order so the array index IS the enum
@@ -56,3 +57,4 @@ bool timerEnumParse(const TimerEnumCodec *table, size_t count,
     }
     return false;
 }
+#endif // AWTRIX_DISABLE_TIMER

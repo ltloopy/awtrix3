@@ -1,3 +1,4 @@
+#ifndef AWTRIX_DISABLE_TIMER
 #include "PeerRegistry.h"
 
 // A bounded set of {uniqueID, lastSeen} learned from inbound presence beacons;
@@ -83,3 +84,4 @@ void PeerRegistry::clear()
     for (uint8_t i = 0; i < _count; ++i) _peers[i].uniqueID = String();
     _count = 0;
 }
+#endif // AWTRIX_DISABLE_TIMER

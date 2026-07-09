@@ -14,7 +14,9 @@
 #include <WiFiUdp.h>
 #include <HTTPClient.h>
 #include "Games/GameManager.h"
+#ifndef AWTRIX_DISABLE_TIMER
 #include "TimerManager.h"
+#endif
 #include <EEPROM.h>
 
 WiFiUDP udp;
@@ -25,9 +27,11 @@ char incomingPacket[255];
 // Propagation surface: dedicated UDP socket for device-to-device timer sync. A
 // separate port (and buffer) from discovery so a full config snapshot fits and the
 // FIND_AWTRIX traffic is never parsed as JSON.
+#ifndef AWTRIX_DISABLE_TIMER
 WiFiUDP syncUdp;
 const uint16_t kTimerSyncPort = 4212;
 char syncBuffer[1024];
+#endif
 
 // Pufferdefinition
 #define BUFFER_SIZE 64
@@ -124,6 +128,7 @@ void addHandler()
                        }else{
                         mws.webserver->send(500, F("text/plain"), F("ErrorParsingJson"));
                        } });
+#ifndef AWTRIX_DISABLE_TIMER
     mws.addHandler("/api/timer", HTTP_POST, []()
                    {
                        switch (TimerManager.parseCommand(mws.webserver->arg("plain").c_str()))
@@ -137,6 +142,7 @@ void addHandler()
     // Observation surface (read-only): always 200; `enabled` carries SHOW_TIMER.
     mws.addHandler("/api/timer", HTTP_GET, []()
                    { mws.webserver->send(200, F("application/json"), TimerManager.getStateJson().c_str()); });
+#endif
     mws.addHandler("/api/nextapp", HTTP_ANY, []()
                    { DisplayManager.nextApp(); mws.webserver->send(200,F("text/plain"),F("OK")); });
     mws.addHandler("/fullscreen", HTTP_GET, []()
@@ -272,7 +278,9 @@ void ServerManager_::setup()
         mws.addHandler("/save", HTTP_POST, saveHandler);
         addHandler();
         udp.begin(localUdpPort);
+#ifndef AWTRIX_DISABLE_TIMER
         syncUdp.begin(kTimerSyncPort);
+#endif
         if (DEBUG_MODE)
             DEBUG_PRINTLN(F("Webserver loaded"));
     }
@@ -332,6 +340,7 @@ void ServerManager_::tick()
             }
         }
 
+#ifndef AWTRIX_DISABLE_TIMER
         // Propagation surface: inbound timer-sync packets (echo/follow/target/dedup
         // gating happens inside applySyncCommand).
         int syncSize = syncUdp.parsePacket();
@@ -344,6 +353,7 @@ void ServerManager_::tick()
                 TimerManager.applySyncCommand(syncBuffer);
             }
         }
+#endif
     }
 
     if (!currentClient || !currentClient.connected()) {
@@ -384,6 +394,7 @@ void ServerManager_::sendTCP(String message)
     }
 }
 
+#ifndef AWTRIX_DISABLE_TIMER
 void ServerManager_::sendTimerSync(const String &payload)
 {
     if (AP_MODE) return;
@@ -399,6 +410,7 @@ void ServerManager_::sendTimerSync(const String &payload)
         if (i < 2) delay(15);
     }
 }
+#endif
 
 void ServerManager_::loadSettings()
 {

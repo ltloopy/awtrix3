@@ -5,12 +5,16 @@
 #include <DisplayManager.h>
 #include <PeripheryManager.h>
 #include "timer.h"
+#ifndef AWTRIX_DISABLE_TIMER
 #include "TimerManager.h"
 #include "TimerMenu.h"
 #include "TimerMenuNav.h"
 #include "TimerConfigEditor.h"
+#endif
 #include "MQTTManager.h"
+#ifndef AWTRIX_DISABLE_TIMER
 #include "TimerHaHost.h"
+#endif
 #include <icons.h>
 #include <UpdateManager.h>
 #include "Functions.h"   // getTextWidth (centering the duration leaf + its underline)
@@ -27,7 +31,9 @@ enum MenuState
     DateFormatMenu,
     WeekdayMenu,
     TempMenu,
+#ifndef AWTRIX_DISABLE_TIMER
     TimerConfigMenu,
+#endif
     Appmenu,
     SoundMenu,
     VolumeMenu,
@@ -45,7 +51,9 @@ const char *menuItems[] PROGMEM = {
     "DATE",
     "WEEKDAY",
     "TEMP",
+#ifndef AWTRIX_DISABLE_TIMER
     "TIMER",
+#endif
     "APPS",
     "SOUND",
     "VOLUME",
@@ -82,12 +90,21 @@ int8_t dateFormatIndex;
 uint8_t dateFormatCount = 9;
 
 int8_t appsIndex;
+#ifndef AWTRIX_DISABLE_TIMER
 #ifndef awtrix2_upgrade
 uint8_t appsCount = 6;
 #else
 uint8_t appsCount = 5;
 #endif
+#else
+#ifndef awtrix2_upgrade
+uint8_t appsCount = 5;
+#else
+uint8_t appsCount = 4;
+#endif
+#endif
 
+#ifndef AWTRIX_DISABLE_TIMER
 uint8_t timerConfigCount = TIMER_MENU_SLOT_COUNT;
 // The TIMER menu's drill-in navigation state machine. MAIN
 // is the last slot (a Navigation row); the device keeps only drawing + the commit.
@@ -119,6 +136,7 @@ static void commitTimerMenu()
     }
     TimerManager.publishAllAttributeGroups();
 }
+#endif
 
 MenuState currentState = MainMenu;
 
@@ -237,12 +255,16 @@ String MenuManager_::menutext()
         case 4:
             DisplayManager.drawBMP(0, 0, icon_1486, 8, 8);
             return SHOW_BAT ? "ON" : "OFF";
+#endif
+#ifndef AWTRIX_DISABLE_TIMER
+#ifndef awtrix2_upgrade
         case 5:
 #else
         case 4:
 #endif
             DisplayManager.drawBMP(0, 0, icon_timer, 8, 8);
             return SHOW_TIMER ? "ON" : "OFF";
+#endif
         default:
             break;
         }
@@ -256,6 +278,7 @@ String MenuManager_::menutext()
         {
             return String(SOUND_VOLUME);
         }
+#ifndef AWTRIX_DISABLE_TIMER
     case TimerConfigMenu:
         // List focus: walk the named items (indicator over the list). Leaf focus:
         // show the bare value only, no indicator.
@@ -293,6 +316,7 @@ String MenuManager_::menutext()
             return timerMenuValue(timerNav.index());   // read-only: current value
         }
         return timerMenuValue(timerNav.index());
+#endif
     default:
         break;
     }
@@ -354,6 +378,7 @@ void MenuManager_::rightButton()
         else
             SOUND_VOLUME++;
         break;
+#ifndef AWTRIX_DISABLE_TIMER
     case TimerConfigMenu:
     {
         // List focus walks the list; a value leaf steps its value live; the
@@ -365,6 +390,7 @@ void MenuManager_::rightButton()
             timerDurationEditor.adjust(+1);
         break;
     }
+#endif
     default:
         break;
     }
@@ -427,6 +453,7 @@ void MenuManager_::leftButton()
         else
             SOUND_VOLUME--;
         break;
+#ifndef AWTRIX_DISABLE_TIMER
     case TimerConfigMenu:
     {
         TimerNavOutcome o = timerNav.navigate(-1);
@@ -436,6 +463,7 @@ void MenuManager_::leftButton()
             timerDurationEditor.adjust(-1);
         break;
     }
+#endif
     default:
         break;
     }
@@ -470,11 +498,13 @@ void MenuManager_::selectButton()
                 UpdateManager.updateFirmware();
             }
             break;
+#ifndef AWTRIX_DISABLE_TIMER
         case TimerConfigMenu:
             // Open the TIMER menu at the top of the list (origin = main menu).
             timerNav.enter(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1,
                            TimerNavOrigin::Menu);
             break;
+#endif
         }
         break;
     case BrightnessMenu:
@@ -485,6 +515,7 @@ void MenuManager_::selectButton()
             DisplayManager.setBrightness(BRIGHTNESS);
         }
         break;
+#ifndef AWTRIX_DISABLE_TIMER
     case TimerConfigMenu:
         // Short press.
         if (timerNav.focus() == TimerNavFocus::List)
@@ -508,6 +539,7 @@ void MenuManager_::selectButton()
             timerDurationEditor.cycleField();
         }
         break;
+#endif
     case Appmenu:
         switch (appsIndex)
         {
@@ -527,6 +559,9 @@ void MenuManager_::selectButton()
         case 4:
             SHOW_BAT = !SHOW_BAT;
             break;
+#endif
+#ifndef AWTRIX_DISABLE_TIMER
+#ifndef awtrix2_upgrade
         case 5:
 #else
         case 4:
@@ -541,6 +576,7 @@ void MenuManager_::selectButton()
                 TimerHaHost.enable();
             break;
         }
+#endif
         default:
             break;
         }
@@ -604,6 +640,7 @@ void MenuManager_::selectButtonLong()
             PeripheryManager.setVolume(SOUND_VOLUME);
             saveSettings();
             break;
+#ifndef AWTRIX_DISABLE_TIMER
         case TimerConfigMenu:
         {
             // Long press: in a value/read-only leaf it just steps back up to the
@@ -633,6 +670,7 @@ void MenuManager_::selectButtonLong()
             }
             break;                      // GoToMainMenu: falls through to MainMenu
         }
+#endif
         default:
             break;
         }
@@ -644,6 +682,7 @@ void MenuManager_::selectButtonLong()
     }
 }
 
+#ifndef AWTRIX_DISABLE_TIMER
 void MenuManager_::openTimerMenuFromApp()
 {
     // Open the TIMER menu directly at the top of the list, origin = App so a
@@ -652,3 +691,4 @@ void MenuManager_::openTimerMenuFromApp()
     currentState = TimerConfigMenu;
     timerNav.enter(TIMER_MENU_SLOT_COUNT, TIMER_MENU_SLOT_COUNT - 1, TimerNavOrigin::App);
 }
+#endif

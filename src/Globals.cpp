@@ -1,6 +1,8 @@
 #include "Globals.h"
 #include "Preferences.h"
+#ifndef AWTRIX_DISABLE_TIMER
 #include "TimerSettings.h"
+#endif
 #include <WiFi.h>
 #include <ArduinoJson.h>
 #include <LittleFS.h>
@@ -212,10 +214,12 @@ void loadDevSettings()
             SHOW_TIMER = doc["show_timer"].as<bool>();
         }
 
+#ifndef AWTRIX_DISABLE_TIMER
         // Timer value-config keys: validated + applied per-key best-effort from the
         // single TIMER_SETTINGS_DESCS table (ranges live there, once). dev.json is a
         // boot override layer, so an invalid key is skipped, not atomic-rejected.
         timerSettingsLoadDevJson(doc.as<JsonObjectConst>());
+#endif
 
         // Timer state icons stay member-backed (B1); their dev.json shadows
         // seed the TimerManager members at setup().
@@ -304,7 +308,9 @@ void loadSettings()
     SHOW_TIMER = Settings.getBool("TIMER", true);
     SHOW_TIMER_HA_PREV = Settings.getBool("TIMERPREV", true);
     Settings.remove("TSTEP");   // removed timer_step feature; clean orphaned NVS key
+#ifndef AWTRIX_DISABLE_TIMER
     timerSettingsLoadNvs(Settings);   // value-config table keys (TFHOLD..TSYNT); defaults live in TIMER_SETTINGS_DESCS
+#endif
     MATRIX_LAYOUT = Settings.getUInt("MAT", 0);
     SCROLL_SPEED = Settings.getUInt("SSPEED", 100);
 #ifdef ULANZI
@@ -357,7 +363,9 @@ void saveSettings()
     Settings.putBool("HUM", SHOW_HUM);
     Settings.putBool("TIMER", SHOW_TIMER);
     Settings.putBool("TIMERPREV", SHOW_TIMER_HA_PREV);
+#ifndef AWTRIX_DISABLE_TIMER
     timerSettingsSaveNvs(Settings);   // value-config table keys (TFHOLD..TSYNT)
+#endif
     Settings.putUInt("SSPEED", SCROLL_SPEED);
 #ifdef ULANZI
     Settings.putBool("BAT", SHOW_BAT);

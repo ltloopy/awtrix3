@@ -1,3 +1,4 @@
+#ifndef AWTRIX_DISABLE_TIMER
 #include "TimerManager.h"
 #include "TimerSettings.h"
 #include "TimerCommand.h"   // the pure atomic-reject command plan (classify)
@@ -939,3 +940,4 @@ void TimerManager_::tickPresence(unsigned long nowMs)
         _presenceEverSent = true;
     }
 }
+#endif // AWTRIX_DISABLE_TIMER

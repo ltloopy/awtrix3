@@ -4,7 +4,9 @@
 #include <Arduino.h>
 #include <map>
 
+#ifndef AWTRIX_DISABLE_TIMER
 #include "TimerHa.h"
+#endif
 
 // HA entity registration cap. ArduinoHA's HAMqtt::addDeviceType has an off-by-one
 // (`_devicesTypesNb + 1 >= _maxDevicesTypesNb`), so the EFFECTIVE capacity is
@@ -40,6 +42,7 @@ public:
     bool isConnected();
     String getValueForTopic(const String &topic);
 
+    #ifndef AWTRIX_DISABLE_TIMER
     // The Timer wire seam: the single chokepoint through
     // which Timer MQTT output flows as (topic, payload) strings, published
     // retained (like the HA setValue path it replaces). timerWireTopic() sources
@@ -48,9 +51,12 @@ public:
     String timerWireTopic(TimerHaEntity slot);
     String timerWireAttrTopic(TimerHaEntity slot);
     String timerIconsTopic();
+    #endif
 };
 
+#ifndef AWTRIX_DISABLE_TIMER
 void reconcileTimerHAState();
+#endif
 
 extern MQTTManager_ &MQTTManager;
 

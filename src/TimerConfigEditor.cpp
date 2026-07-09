@@ -1,3 +1,4 @@
+#ifndef AWTRIX_DISABLE_TIMER
 #include "TimerConfigEditor.h"
 
 #include "Globals.h"        // TIMER_MAX_DURATION (cap math)
@@ -94,3 +95,4 @@ void TimerConfigEditor::repeatHeld(bool pressed, unsigned long nowMs,
         repeatMs = nowMs;
     }
 }
+#endif // AWTRIX_DISABLE_TIMER

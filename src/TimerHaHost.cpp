@@ -1,3 +1,4 @@
+#ifndef AWTRIX_DISABLE_TIMER
 #include "TimerHaHost.h"
 #include <ArduinoHA.h>
 #include <WiFi.h>
@@ -434,3 +435,4 @@ bool TimerHaHost_::carriersReady() const { return timerDuration != nullptr; }
 const char *TimerHaHost_::entityId(TimerHaEntity slot) const { return timerHaId(slot); }
 
 TimerHaHost_ TimerHaHost;
+#endif // AWTRIX_DISABLE_TIMER
