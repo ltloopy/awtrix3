@@ -1,3 +1,4 @@
+#ifndef AWTRIX_DISABLE_TIMER
 #include "TimerHa.h"
 
 #include <stdio.h>
@@ -159,3 +160,4 @@ bool haRegistrationAtCap(uint8_t registered, uint8_t maxEntities)
     // maxEntities of 255 from wrapping. See the contract in TimerHa.h.
     return (uint16_t)registered + 1 >= maxEntities;
 }
+#endif // AWTRIX_DISABLE_TIMER

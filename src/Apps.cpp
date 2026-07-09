@@ -11,8 +11,10 @@
 #include "MQTTManager.h"
 #include "Overlays.h"
 #include "timer.h"
+#ifndef AWTRIX_DISABLE_TIMER
 #include "TimerManager.h"
 #include "TimerView.h"
+#endif
 #include "Globals.h"
 #include "DisplayManager.h"
 
@@ -417,6 +419,7 @@ void BatApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x, i
 }
 #endif
 
+#ifndef AWTRIX_DISABLE_TIMER
 namespace {
     // Painter-side layout (font-/draw-dependent). The view-model owns the rest
     // of the timer geometry (text region, progress bar) — see src/TimerView.cpp.
@@ -547,6 +550,7 @@ void TimerApp(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, int16_t x,
         matrix->drawFastHLine(view.barStartX + x, (kTimerScreenH - 1) + y, view.barLen,
                               TIMER_BAR_COLOR ? TIMER_BAR_COLOR : TEXTCOLOR_888);
 }
+#endif // AWTRIX_DISABLE_TIMER
 
 String replacePlaceholders(String text)
 {

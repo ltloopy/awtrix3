@@ -1,3 +1,4 @@
+#ifndef AWTRIX_DISABLE_TIMER
 #include "TimerCommand.h"
 
 #include <string.h>   // strcmp
@@ -124,3 +125,4 @@ namespace TimerCommand
         return p;
     }
 }
+#endif // AWTRIX_DISABLE_TIMER

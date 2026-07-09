@@ -1,3 +1,4 @@
+#ifndef AWTRIX_DISABLE_TIMER
 #include "SyncTargetsDebounce.h"
 
 // The settle-window state machine for the dynamic Targets select's republish
@@ -40,3 +41,4 @@ void SyncTargetsDebounce::seed(const char *opts)
     _sig = opts;
     _dirty = false;
 }
+#endif // AWTRIX_DISABLE_TIMER

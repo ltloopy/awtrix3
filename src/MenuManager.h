@@ -18,10 +18,12 @@ public:
     void selectButton();
     void selectButtonLong();
 
+#ifndef AWTRIX_DISABLE_TIMER
     // Open the TIMER menu directly from the Timer app's idle long-press (PRD #83 /
     // issue #87): list focus, first item, origin = App so a long-press out of the
     // list returns to the Timer app rather than the main menu.
     void openTimerMenuFromApp();
+#endif
 };
 
 extern MenuManager_ &MenuManager;

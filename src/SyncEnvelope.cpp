@@ -1,3 +1,4 @@
+#ifndef AWTRIX_DISABLE_TIMER
 #include "SyncEnvelope.h"
 
 // The Timer-sync wire envelope + pure inbound receive gate. See SyncEnvelope.h and
@@ -77,3 +78,4 @@ namespace SyncEnvelope
         }
     }
 }
+#endif // AWTRIX_DISABLE_TIMER
