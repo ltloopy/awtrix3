@@ -4,7 +4,7 @@
 
 **Goal:** Add an opt-out compile-time flag `AWTRIX_DISABLE_TIMER` that removes the entire native Timer feature (app, on-device menu, MQTT/HTTP API, HA entities, multi-device sync) from the firmware, reclaiming flash and RAM. Default builds are unchanged.
 
-**Architecture:** Raw `#ifndef AWTRIX_DISABLE_TIMER … #endif` preprocessor guards, matching the codebase's existing `#ifndef awtrix2_upgrade` convention. 16 timer-owned `.cpp` files get whole-file guards; 7 shared files get call-site guards. No `platformio.ini` changes; the flag is passed via `build_flags` or the `PLATFORMIO_BUILD_FLAGS` env var.
+**Architecture:** Raw `#ifndef AWTRIX_DISABLE_TIMER … #endif` preprocessor guards, matching the codebase's existing `#ifndef awtrix2_upgrade` convention. 16 timer-owned `.cpp` files get whole-file guards; 8 shared files get call-site guards (Globals.cpp is the eighth). No `platformio.ini` changes; the flag is passed via `build_flags` or the `PLATFORMIO_BUILD_FLAGS` env var.
 
 **Tech Stack:** C++ (Arduino/ESP32), PlatformIO. Spec: `docs/superpowers/specs/2026-07-08-timer-build-gate-design.md`.
 

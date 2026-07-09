@@ -633,6 +633,12 @@ entry, no `/api/timer` HTTP endpoint, no `{prefix}/timer` MQTT topic, no
 Home Assistant timer entities, and no multi-device sync. The runtime
 `SHOW_TIMER` setting is only meaningful in default builds.
 
+Note when switching an already-provisioned device from a timer-enabled build
+to a disabled one: the disabled firmware also lacks the HA discovery cleanup
+code, so timer entities registered by the previous build linger as
+"unavailable" in Home Assistant until you remove them there (or clear the
+retained `homeassistant/…` discovery topics on the broker).
+
 ---
 
 ## Testing
