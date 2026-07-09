@@ -92,3 +92,8 @@ jobs:
 
       - name: Build awtrix2_upgrade firmware
         run: pio run -e awtrix2_upgrade
+
+      - name: Build ulanzi firmware (timer disabled)
+        run: pio run -e ulanzi
+        env:
+          PLATFORMIO_BUILD_FLAGS: -DAWTRIX_DISABLE_TIMER
