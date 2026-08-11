@@ -52,6 +52,14 @@ extern const char HAbtncID[];
 extern const char HAbtncIcon[];
 extern const char HAbtncName[];
 
+extern const char HAnotifyID[];
+extern const char HAnotifyIcon[];
+extern const char HAnotifyName[];
+
+extern const char HAdismissTextID[];
+extern const char HAdismissTextIcon[];
+extern const char HAdismissTextName[];
+
 extern const char HAappID[];
 extern const char HAappIcon[];
 extern const char HAappName[];
@@ -137,6 +145,8 @@ extern const char HAramUnit[];
 extern const char HAipAddrRID[];
 extern const char HAipAddrName[];
 extern const char HAipAddrIcon[];
+
+// Timer HA entity strings live in src/TimerHa.h/.cpp (Timer HA Presence table).
 
 #ifndef awtrix2_upgrade
 extern const char BatKey[];

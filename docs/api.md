@@ -20,6 +20,7 @@
     + [Dismiss Notification](#dismiss-notification)
     + [Switch Apps](#switch-apps)
     + [Switch to Specific App](#switch-to-specific-app)
+  * [Timer Control](#timer-control)
   * [Change Settings](#change-settings)
     + [JSON Properties](#json-properties-1)
   * [Update](#update)
@@ -208,6 +209,7 @@ Below are the properties you can utilize in the JSON object. **All keys are opti
 | `effectSettings` | json map | Changes color and speed of the [effect](https://blueforcer.github.io/awtrix3/#/effects). |  | X | X |
 | `save` | boolean | Saves your custom app into flash and reloads it after boot. Avoid this for custom apps with high update frequencies because the ESP's flash memory has limited write cycles. |  | X |  |
 | `overlay`| string  | Sets an effect overlay (cannot be used with global overlays). |  | X | X |
+| `channel` | string | Tag used to group and selectively dismiss notifications. Trimmed and lowercased on receipt; matching is case-insensitive. If empty or omitted, the notification falls into the configured `Default Channel` setting (factory default `"default"`). | `Default Channel` |  | X |
 
 **Color**: Accepts a hex string or an R,G,B array: `"#FFFFFF"` or `[255,255,0]`.
 
@@ -325,11 +327,46 @@ To remove a custom app, dispatch an empty payload/body to the associated topic o
 
 ### Dismiss Notification
 
-Easily dismiss a notification that was configured with `"hold": true`.
+Dismiss queued notifications. Pass an optional `channel` to target a specific channel; otherwise the configured `Default Channel` is used. Pass `{"all":true}` (or `{"channel":"*"}`) to clear every queued notification across all channels.
 
-| MQTT Topic                   | HTTP URL                           | Payload/Body       | HTTP Method |
-| ---------------------------- | ---------------------------------- | ------------------ | ----------- |
-| `[PREFIX]/notify/dismiss`    | `http://[IP]/api/notify/dismiss`   | Empty payload/body | POST        |
+| MQTT Topic                   | HTTP URL                           | Payload/Body                                  | HTTP Method |
+| ---------------------------- | ---------------------------------- | --------------------------------------------- | ----------- |
+| `[PREFIX]/notify/dismiss`    | `http://[IP]/api/notify/dismiss`   | Empty body, or JSON with `channel` / `all`    | POST        |
+
+> ⚠️ **Breaking change** — `notify/dismiss` used to dismiss only the currently-displayed notification when called with no body. It now dismisses **all** notifications whose channel equals the configured `Default Channel` (factory default `"default"`). Provide a `channel` in the body to target a specific channel, or `{"all":true}` to clear everything. The physical device buttons and the Home Assistant `Dismiss notification` button still dismiss only the current notification.
+
+**Examples**
+
+1. Empty body — clear all notifications on the default channel:
+
+   ```
+   POST /api/notify/dismiss
+   ```
+
+2. Clear a specific channel (case-insensitive):
+
+   ```
+   POST /api/notify/dismiss
+   {"channel":"alarms"}
+   ```
+
+3. Clear a channel across multiple devices via the `clients` fan-out:
+
+   ```
+   POST /api/notify/dismiss
+   {"channel":"alarms","clients":["awtrix-kitchen","awtrix-bedroom"]}
+   ```
+
+4. Clear **every** queued notification on this device:
+
+   ```
+   POST /api/notify/dismiss
+   {"all":true}
+   ```
+
+   The `clients` fan-out works here too: `{"all":true,"clients":["awtrix-kitchen","awtrix-bedroom"]}`.
+
+A `Dismiss Channel` text input is also exposed to Home Assistant when discovery is enabled — typing a channel name and submitting clears that channel; submitting empty clears the default channel; submitting `*` (or `all`) clears every queued notification.
 
 ### Switch Apps
 
@@ -354,8 +391,84 @@ Directly transition to a desired app using its name.
 - `Temperature`
 - `Humidity`
 - `Battery`
+- `Timer`
 
 For custom apps, employ the name you designated in the topic or HTTP parameter. In MQTT, if `[PREFIX]/custom/test` is your topic, then `test` would be the app's name.
+
+
+## Timer Control
+
+Control the built-in Timer app. See the [Timer app overview](https://blueforcer.github.io/awtrix3/#/apps?id=timer) for behaviour details.
+
+| MQTT Topic       | HTTP URL                  | Payload/Body | HTTP Method |
+| ---------------- | ------------------------- | ------------ | ----------- |
+| `[PREFIX]/timer` | `http://[IP]/api/timer`   | JSON (see below) | POST    |
+
+All JSON properties are optional. When multiple are sent together, property setters apply first and then `action` runs — so `{"duration":600,"action":"start"}` starts a fresh 10-minute timer in one request.
+
+#### JSON Properties
+
+| Key | Type | Values | Description |
+| --- | --- | --- | --- |
+| `action` | string | `start` / `pause` / `reset` | Performs the action. `start` from `idle` also force-switches the display to the Timer app (gated on no active game). `start` is a no-op while already running. `start` from `finished` restarts the countdown. |
+| `duration` | string or integer | A clock string `"HH:MM:SS"`/`"MM:SS"`, or a bare integer of seconds. Must be 1 .. `timer_max_duration`. | Sets the configured duration. Colon count decides units (`"3:00"` = 3 min, never 3 h); out-of-range fields carry (`"3:90"` = 270 s). A malformed string **or** an out-of-range value is **rejected** (HTTP `400`, see Responses), not clamped. Published back as a trimmed clock string (`300` → `5:00`). Persists across reboots. Mid-run writes buffer until next `start`/`reset`. |
+| `buzzer` | string | `off` / `end` / `countdown` | Sets buzzer mode. Persists. |
+| `finished` | string | `auto-clear` / `hold` / `re-alert` | Sets what happens at `00:00`. Persists. |
+| `icon_idle` | string | Bare icon name resolved against `/ICONS/<name>.{jpg,gif}`; empty clears the slot; capped at 32 chars | Icon shown in the **Idle** state and used as fallback for any other state whose slot is empty. Persists. |
+| `icon_running` | string | Same. Empty clears (then falls back to `icon_idle`). | Icon shown while counting down. Persists. |
+| `icon_paused` | string | Same. Empty clears (then falls back to `icon_idle`). | Icon shown while paused. Persists. |
+| `icon_finished` | string | Same. Empty clears (then falls back to `icon_idle`). | Icon shown beneath the blinking `0:00`. Persists. |
+
+`action` / `buzzer` / `finished` values are case-insensitive; `auto-clear`/`autoclear` and `re-alert`/`realert` are both accepted. Icon values are **case-sensitive** (they map to filenames on LittleFS) and **capped at 32 characters**. The loader checks `/ICONS/<name>.jpg` then `/ICONS/<name>.gif`, so a single bare name supports either format.
+
+#### Responses
+
+`POST /api/timer` validates the whole command **atomically** — if any field is invalid, **nothing is applied**:
+
+| Status | Body | When |
+| --- | --- | --- |
+| `200 OK` | `OK` | Command accepted and applied. |
+| `400 Bad Request` | `ErrorParsingJson` | Body isn't valid JSON (or exceeds the parse buffer). |
+| `400 Bad Request` | `InvalidValue` | A field has an unusable value: malformed/out-of-range `duration`, or an unknown `buzzer`/`finished`/`action`/icon. |
+| `409 Conflict` | `TimerDisabled` | The Timer feature is off (`SHOW_TIMER=false`); the command is understood but can't apply. |
+
+Out-of-range durations are **rejected**, not clamped (e.g. `"30:00:00"` when the max is 24 h → `400`). The `{prefix}/timer` MQTT topic applies the same validation but, being fire-and-forget, ignores invalid commands silently (no error is published); the retained `timer_dur` state reflects the unchanged value. See [ADR 0001](adr/0001-timer-command-validation-parity.md).
+
+#### Examples
+
+Start a 5-minute timer immediately (numeric seconds or the equivalent clock string):
+```json
+{"duration": 300, "action": "start"}
+```
+```json
+{"duration": "5:00", "action": "start"}
+```
+
+Change buzzer mode mid-run (takes effect immediately for the countdown ticks):
+```json
+{"buzzer": "countdown"}
+```
+
+Reset to idle (also dismisses the end notification if visible):
+```json
+{"action": "reset"}
+```
+
+Set per-state icons (idle stays as fallback; Running uses an animated GIF):
+```json
+{"icon_idle": "64936", "icon_running": "74706"}
+```
+
+Clear an override so the slot falls back to the Idle icon:
+```json
+{"icon_paused": ""}
+```
+
+#### State observation
+
+There is currently no native read endpoint for the timer's `state`/`remaining` values. When `HA_DISCOVERY` is enabled, Home Assistant receives live updates of all timer properties via MQTT discovery sensors — that is the supported path for observing the timer remotely.
+
+The current icon configuration is also published as a retained JSON message to `[PREFIX]/timer/icons` whenever it changes (and on MQTT connect). Subscribe to that topic to read back current icon slots without HA. Payload shape: `{"idle": "...", "running": "...", "paused": "...", "finished": "..."}`.
 
 
 ## Change Settings
@@ -400,11 +513,12 @@ You can adjust each property in the JSON object according to your preferences. I
 | `HUM_COL`     | string/array of ints      | Text color of the humidity app. Use 0 for global text color.                                        | RGB array or hex color                             | N/A     |
 | `BAT_COL`     | string/array of ints      | Text color of the battery app. Use 0 for global text color.                                         | RGB array or hex color                             | N/A     |
 | `SSPEED`      | integer                   | Scroll speed modification.                                                                          | Percentage of original scroll speed                | 100     |
-| `TIM`         | boolean                   | Enable or disable the native time app (requires reboot).                                            | `true`/`false`                                     | true    |
-| `DAT`         | boolean                   | Enable or disable the native date app (requires reboot).                                            | `true`/`false`                                     | true    |
-| `HUM`         | boolean                   | Enable or disable the native humidity app (requires reboot).                                        | `true`/`false`                                     | true    |
-| `TEMP`        | boolean                   | Enable or disable the native temperature app (requires reboot).                                     | `true`/`false`                                     | true    |
-| `BAT`         | boolean                   | Enable or disable the native battery app (requires reboot).                                         | `true`/`false`                                     | true    |
+| `TIM`         | boolean                   | Enable or disable the native time app. App rotation refreshes immediately.                          | `true`/`false`                                     | true    |
+| `DAT`         | boolean                   | Enable or disable the native date app. App rotation refreshes immediately.                          | `true`/`false`                                     | true    |
+| `HUM`         | boolean                   | Enable or disable the native humidity app. App rotation refreshes immediately.                      | `true`/`false`                                     | true    |
+| `TEMP`        | boolean                   | Enable or disable the native temperature app. App rotation refreshes immediately.                   | `true`/`false`                                     | true    |
+| `BAT`         | boolean                   | Enable or disable the native battery app. App rotation refreshes immediately.                       | `true`/`false`                                     | true    |
+| `TIMER`       | boolean                   | Master enable for the Timer app. When `false`: app hidden, HA entities suppressed, `/api/timer` and `{prefix}/timer` ignored, running timer reset. HA entity removal completes after next MQTT reconnect. | `true`/`false`                                     | true    |
 | `MATP`        | boolean                   | Enable or disable the matrix. Similar to `power` endpoint but without the animation.                | `true`/`false`                                     | true    |
 | `VOL`         | integer                   | Allows to set the volume of the buzzer and DFplayer.                                                 | 0–30                                               | true    |
 | `OVERLAY`     | string                    | Sets a global effect overlay (cannot be used with app specific overlays).                            | Varies (see below)                                 | N/A     |

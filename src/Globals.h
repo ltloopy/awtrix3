@@ -41,6 +41,7 @@ extern uint16_t MQTT_PORT;
 extern String MQTT_USER;
 extern String MQTT_PASS;
 extern String MQTT_PREFIX;
+extern String DEFAULT_CHANNEL;
 extern bool IO_BROKER;
 extern bool NET_STATIC;
 extern bool SHOW_TIME;
@@ -150,4 +151,21 @@ extern OverlayEffect GLOBAL_OVERLAY;
 extern String HOSTNAME;
 extern int WEB_PORT;
 extern bool BUZ_VOL;
+extern bool SHOW_TIMER;
+extern bool SHOW_TIMER_HA_PREV;
+extern uint32_t TIMER_MAX_DURATION;
+extern uint32_t TIMER_STEP;
+extern uint16_t TIMER_PUBLISH_INTERVAL;
+extern uint16_t TIMER_FINISHED_HOLD;
+extern uint16_t TIMER_REALERT_INTERVAL;
+extern uint16_t TIMER_COUNTDOWN_SECONDS;
+extern uint16_t TIMER_CONFIG_TIMEOUT;
+extern String TIMER_ICON_IDLE;
+extern String TIMER_ICON_RUNNING;
+extern String TIMER_ICON_PAUSED;
+extern String TIMER_ICON_FINISHED;
+
+extern const char kDefaultChannelName[];
+
+extern uint32_t g_littlefsMountEpoch;
 #endif // Globals_H

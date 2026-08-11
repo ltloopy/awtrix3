@@ -56,6 +56,14 @@ const char HAbtncID[] PROGMEM = {"%s_btnc"};
 const char HAbtncIcon[] PROGMEM = {"mdi:arrow-left-bold"};
 const char HAbtncName[] PROGMEM = {"Previous app"};
 
+const char HAnotifyID[] PROGMEM = {"%s_notify"};
+const char HAnotifyIcon[] PROGMEM = {"mdi:message-alert"};
+const char HAnotifyName[] PROGMEM = {"Notification"};
+
+const char HAdismissTextID[] PROGMEM = {"%s_dismiss_channel"};
+const char HAdismissTextIcon[] PROGMEM = {"mdi:bell-cancel"};
+const char HAdismissTextName[] PROGMEM = {"Dismiss Channel"};
+
 const char HAappID[] PROGMEM = {"%s_app"};
 const char HAappIcon[] PROGMEM = {"mdi:apps"};
 const char HAappName[] PROGMEM = {"Current app"};
@@ -140,6 +148,8 @@ const char HAramUnit[] PROGMEM = {"B"};
 const char HAipAddrRID[] PROGMEM = {"%s_ip_address"};
 const char HAipAddrName[] PROGMEM = {"IP Address"};
 const char HAipAddrIcon[] PROGMEM = {"mdi:wifi"};
+
+// Timer HA entity strings moved to src/TimerHa.cpp (Timer HA Presence table).
 
 
 

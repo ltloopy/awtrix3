@@ -26,6 +26,7 @@ public:
     void applyAllSettings();
     void rightButton();
     void dismissNotify();
+    void dismissNotify(uint8_t source, const char *json);
     void HSVtext(int16_t, int16_t, const char *, bool, byte textCase);
     void loadCustomApps();
     void loadNativeApps();
@@ -81,6 +82,7 @@ public:
     CRGB getPixelColor(int16_t x, int16_t y);
     CRGB *getLeds();
     void forceNextApp();
+    void publishCurrentApp();
     String getEffectNames();
     String getTransitionNames();
     void drawRect(int16_t x, int16_t y, int16_t w, int16_t h, uint32_t color);
@@ -100,6 +102,7 @@ public:
     void setTextColor(uint32_t color);
     void matrixPrint(double number, uint8_t digits);
     void setCustomAppColors(uint32_t color);
+    void drainDeferredNotifications();
 };
 
 extern DisplayManager_ &DisplayManager;

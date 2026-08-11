@@ -14,6 +14,7 @@
 #include <WiFiUdp.h>
 #include <HTTPClient.h>
 #include "Games/GameManager.h"
+#include "TimerManager.h"
 #include <EEPROM.h>
 
 WiFiUDP udp;
@@ -57,6 +58,7 @@ void ServerManager_::erase()
     memset(&conf, 0, sizeof(conf)); // Set all the bytes in the structure to 0
     esp_wifi_set_config(WIFI_IF_STA, &conf);
     LittleFS.format();
+    g_littlefsMountEpoch++;
     delay(200);
     formatSettings();
     delay(200);
@@ -115,6 +117,16 @@ void addHandler()
                        }else{
                         mws.webserver->send(500, F("text/plain"), F("ErrorParsingJson"));
                        } });
+    mws.addHandler("/api/timer", HTTP_POST, []()
+                   {
+                       switch (TimerManager.parseCommand(mws.webserver->arg("plain").c_str()))
+                       {
+                           case TimerCmdResult::Ok:       mws.webserver->send(200, F("text/plain"), F("OK")); break;
+                           case TimerCmdResult::Disabled: mws.webserver->send(409, F("text/plain"), F("TimerDisabled")); break;
+                           case TimerCmdResult::BadJson:  mws.webserver->send(400, F("text/plain"), F("ErrorParsingJson")); break;
+                           case TimerCmdResult::BadField: mws.webserver->send(400, F("text/plain"), F("InvalidValue")); break;
+                       }
+                   });
     mws.addHandler("/api/nextapp", HTTP_ANY, []()
                    { DisplayManager.nextApp(); mws.webserver->send(200,F("text/plain"),F("OK")); });
     mws.addHandler("/fullscreen", HTTP_GET, []()
@@ -134,7 +146,7 @@ void addHandler()
     mws.addHandler("/api/previousapp", HTTP_POST, []()
                    { DisplayManager.previousApp(); mws.webserver->send(200,F("text/plain"),F("OK")); });
     mws.addHandler("/api/notify/dismiss", HTTP_ANY, []()
-                   { DisplayManager.dismissNotify(); mws.webserver->send(200,F("text/plain"),F("OK")); });
+                   { DisplayManager.dismissNotify(1, mws.webserver->arg("plain").c_str()); mws.webserver->send(200,F("text/plain"),F("OK")); });
     mws.addHandler("/api/apps", HTTP_POST, []()
                    { DisplayManager.updateAppVector(mws.webserver->arg("plain").c_str()); mws.webserver->send(200,F("text/plain"),F("OK")); });
     mws.addHandler(
@@ -235,6 +247,7 @@ void ServerManager_::setup()
         mws.addOption("Username", MQTT_USER);
         mws.addOption("Password", MQTT_PASS);
         mws.addOption("Prefix", MQTT_PREFIX);
+        mws.addOption("Default Channel", DEFAULT_CHANNEL);
         mws.addOption("Homeassistant Discovery", HA_DISCOVERY);
         mws.addOptionBox("Time");
         mws.addOption("NTP Server", NTP_SERVER);
@@ -366,6 +379,10 @@ void ServerManager_::loadSettings()
         MQTT_PASS = doc["Password"].as<String>();
         MQTT_PREFIX = doc["Prefix"].as<String>();
         MQTT_PREFIX.trim();
+        DEFAULT_CHANNEL = doc["Default Channel"].as<String>();
+        DEFAULT_CHANNEL.trim();
+        DEFAULT_CHANNEL.toLowerCase();
+        if (DEFAULT_CHANNEL.isEmpty()) DEFAULT_CHANNEL = kDefaultChannelName;
         NET_STATIC = doc["Static IP"];
         HA_DISCOVERY = doc["Homeassistant Discovery"];
         NET_IP = doc["Local IP"].as<String>();

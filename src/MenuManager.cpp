@@ -5,6 +5,7 @@
 #include <DisplayManager.h>
 #include <PeripheryManager.h>
 #include "timer.h"
+#include "TimerManager.h"
 #include <icons.h>
 #include <UpdateManager.h>
 
@@ -73,7 +74,11 @@ int8_t dateFormatIndex;
 uint8_t dateFormatCount = 9;
 
 int8_t appsIndex;
+#ifndef awtrix2_upgrade
+uint8_t appsCount = 6;
+#else
 uint8_t appsCount = 5;
+#endif
 
 MenuState currentState = MainMenu;
 
@@ -192,7 +197,12 @@ String MenuManager_::menutext()
         case 4:
             DisplayManager.drawBMP(0, 0, icon_1486, 8, 8);
             return SHOW_BAT ? "ON" : "OFF";
+        case 5:
+#else
+        case 4:
 #endif
+            DisplayManager.drawBMP(0, 0, icon_timer, 8, 8);
+            return SHOW_TIMER ? "ON" : "OFF";
         default:
             break;
         }
@@ -391,7 +401,16 @@ void MenuManager_::selectButton()
         case 4:
             SHOW_BAT = !SHOW_BAT;
             break;
+        case 5:
+#else
+        case 4:
 #endif
+        {
+            bool prev = SHOW_TIMER;
+            SHOW_TIMER = !SHOW_TIMER;
+            TimerManager.onShowTimerChange(prev, SHOW_TIMER);
+            break;
+        }
         default:
             break;
         }

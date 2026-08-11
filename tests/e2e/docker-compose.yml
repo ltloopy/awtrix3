@@ -1,0 +1,13 @@
+# Local mosquitto broker for the timer e2e harness.
+# Usage: `docker compose up -d` then `pytest tests/e2e ...`
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: awtrix-test-mosquitto
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./.mosquitto-data:/mosquitto/data
+      - ./.mosquitto-log:/mosquitto/log
+    restart: unless-stopped

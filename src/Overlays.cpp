@@ -75,6 +75,8 @@ void NotifyOverlay(FastLED_NeoMatrix *matrix, MatrixDisplayUiState *state, GifPl
             notifyFlag = false;
             if (AUTO_TRANSITION)
                 DisplayManager.forceNextApp();
+            else
+                DisplayManager.publishCurrentApp();
         }
 
         return;
